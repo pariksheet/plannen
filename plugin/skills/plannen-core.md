@@ -96,7 +96,7 @@ Three trigger paths:
 
 ### Rule 1 — Explicit user request
 
-Phrases like *"save this as a source"*, *"bookmark it"*, *"bookmark this"*, *"save the link"*, *"add it to my sources"* → call `save_source` immediately with no confirmation prompt.
+Phrases like *"save this as a source"*, *"bookmark it"*, *"bookmark this"*, *"save the link"*, *"save that link"*, *"add it to my sources"* → call `save_source` immediately with no confirmation prompt.
 
 If page content isn't already in context, WebFetch the URL first, derive name/tags/source_type, then save.
 
@@ -104,7 +104,7 @@ Confirmation line after success: *"Saved <name> as a source."* for `action: "ins
 
 ### Rule 2 — Positive-intent toward a specific link
 
-When the user singles out **one** link from a previously presented shortlist with positive sentiment — *"X looks good"*, *"let's go with X"*, *"send X to whatsapp"*, *"share X with Nimisha"*, *"let's look at X"*, *"check X out"* — end the reply with exactly one line:
+When the user singles out **one** link from a previously presented shortlist with positive sentiment — *"X looks good"*, *"let's go with X"*, *"this one is nice"*, *"send X to whatsapp"*, *"share X with Nimisha"*, *"let's look at X"*, *"check X out"* — end the reply with exactly one line:
 
 > *"Want me to save <name> as a source so it shows up in future searches?"*
 
