@@ -51,16 +51,23 @@ Before calling `create_event`, check whether the user has actually committed.
 
 ## Profile building (passive extraction)
 
-After every user message, check whether it revealed a durable fact about the user, a family member, or the household. If yes, call `upsert_profile_fact` **silently** before responding. Extraction runs independently of any other tool call.
+**This is a required step, not an aspiration.** Before sending your reply on any turn where the user message mentions a person, place, school, club, employer, vehicle, schedule, preference, or activity — even in passing while asking for something else — run this check:
 
-Save every durable, high-confidence fact in the message — there is no per-turn cap. The confidence threshold (≥0.6) and the durability filter below act as the throttle.
+1. Read the user's message once and enumerate every durable claim it contains (see Durability filter below). Things stated as side context ("when we drop Niheet at Esdoorn..." → he attends Esdoorn) count.
+2. For each claim not already in `get_profile_context` results, call `upsert_profile_fact` silently. **One call per fact** — run them in parallel if there are several. There is no per-turn cap; the durability filter is the throttle.
+3. Use `source: "user_stated"` when the user said it outright, `source: "agent_inferred"` when you concluded it from context (e.g. they asked you to register Niheet at FC Zemst → `agent_inferred` that Niheet plays football). Agent-inferred is encouraged, not a fallback — it's how the graph grows beyond what the user volunteers.
+4. Never mention saving to the user. Never wait for permission.
 
 Use the family member's UUID (returned by `get_profile_context` in `family_members[].id`) as the `subject` when saving facts about a family member.
 
+**Predicate choice — important:** `upsert_profile_fact` treats `(subject, predicate)` as unique: a second insert with the same predicate but a different value is interpreted as a contradiction and decays the old fact. For multiple concurrent items of the same kind (Niheet does swimming AND dance AND hockey), use distinct predicates per item (`swimming_class`, `dance_class`, `hockey_club`) rather than reusing `enrolled_in` for all of them.
+
 **Durability filter:**
 
-- ✅ Save: stable attributes ("drives a Peugeot E-3008"), schedules ("Niheet's school day ends Wednesday 12:00"), preferences ("prefers apartments over hotels"), relationships ("Nimisha has a friend in Stuttgart"), characteristics ("Niheet wants to try tobogganing").
+- ✅ Save: stable attributes ("drives a Peugeot E-3008"), schedules ("Niheet's school day ends Wednesday 12:00"), preferences ("prefers apartments over hotels"), relationships ("Nimisha has a friend in Stuttgart"), characteristics ("Niheet wants to try tobogganing"), school/club/employer affiliations, recurring activities, career history.
 - ❌ Skip: trip-ephemeral intent ("we want to leave at 1pm next Wednesday"), in-flight planning decisions ("considering Stuttgart for night 1"), conversational filler ("yes that sounds good"). If the fact wouldn't still be useful in 30+ days, don't save it.
+
+**Calendar duplication is fine.** Recurring activities belong in *both* events and `profile_facts` — they let future suggestions reason about the kid's life ("Niheet plays football") without scanning the whole calendar. Don't skip a profile fact because "it's already in the calendar."
 
 **Corrections and queries:**
 

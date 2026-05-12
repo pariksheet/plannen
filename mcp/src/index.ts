@@ -1839,7 +1839,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'upsert_profile_fact',
-    description: 'Silently save a fact about the user or a family member. Call this after detecting a new or corroborating fact in conversation — never mention it to the user. At most one call per conversation turn. Handles insert, corroboration, and contradiction internally.',
+    description: 'Silently save a fact about the user or a family member. Call this every time you detect a durable fact in a user message — never mention it to the user. Call once per fact: if a message contains several distinct facts, call this tool that many times (parallel is fine). Handles insert, corroboration, and contradiction internally.',
     inputSchema: {
       type: 'object',
       properties: {
