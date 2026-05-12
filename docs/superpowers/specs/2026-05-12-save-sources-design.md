@@ -68,13 +68,12 @@ save_source({
 
 ### Internals
 
-Wrapped in a single Postgres transaction so the row is either fully analysed or absent — no half-tagged state can leak even if the UPDATE fails:
+The Supabase JS client doesn't expose multi-statement transactions, so the operation is two sequential PostgREST calls — same pattern as existing `update_source`. If the analysis UPDATE fails after a successful upsert, the row remains in whatever state it was before the call (newly inserted → `last_analysed_at` NULL; pre-existing → previous tags preserved). That's the same recovery surface today's `/plannen-sources` bulk command handles, so no special cleanup is needed.
 
-1. `BEGIN`.
-2. Call existing `upsertSource(url, user_id)` to insert or fetch the row by `(user_id, domain)`. Capture whether the row was newly inserted (`action = "inserted"`) or pre-existing (`action = "updated"`).
-3. `UPDATE event_sources SET name = $1, tags = $2, source_type = $3, last_analysed_at = now(), updated_at = now() WHERE id = $4`.
-4. `COMMIT`. On any failure, `ROLLBACK` and return the appropriate `error` code.
-5. Return `{ id, domain, action }`.
+1. Refactor existing `upsertSource(userId, eventId, url)` to make `eventId` nullable. When `null`, skip the `event_source_refs` insert.
+2. In the new `saveSource` handler: call `upsertSource(userId, null, url)` to insert or fetch the row by `(user_id, domain)`. Use the returned `last_analysed_at` to decide `action`: `null` (or row didn't exist before) → `"inserted"`; non-null → `"updated"`.
+3. `UPDATE event_sources SET name = $1, tags = $2, source_type = $3, last_analysed_at = now(), updated_at = now() WHERE id = $4 AND user_id = $5`.
+4. Return `{ id, domain, action }`.
 
 The `source_url` column is **not** overwritten on update. Rationale: the URL the user originally bookmarked is the canonical entry point; re-saving from a different deep link shouldn't move the pointer.
 
@@ -89,16 +88,15 @@ The `source_url` column is **not** overwritten on update. Rationale: the URL the
 
 ### Errors
 
-The tool **never throws**; it always returns either a success body or `{ error: "<code>" }`. Codes:
+Follows existing MCP convention: handler throws `new Error("<message>")`, the top-level request handler in `mcp/src/index.ts` catches and returns `{ content: [...], isError: true }`. Distinct messages so the agent (and tests) can branch:
 
-- `invalid_url` — URL didn't parse or wrong protocol
-- `name_required` — empty/whitespace name
-- `tags_required` — no usable tags after normalisation
-- `invalid_source_type` — enum mismatch
-- `db_unavailable` — Postgres unreachable
-- `unauthorized` — no `auth.uid()` in JWT
+- `"invalid url"` — `new URL()` parse failed or non-http(s) protocol
+- `"name required"` — empty/whitespace name
+- `"tags required"` — no usable tags after normalisation
+- `"invalid source_type"` — enum mismatch
+- Supabase errors propagate verbatim (DB unreachable, RLS denial, etc.)
 
-Plugin-side mapping of these codes to user-facing messages lives in `plannen-core` (same pattern as the BYOK error codes).
+Plugin-side mapping of these messages to user-facing wording lives in `plannen-core`.
 
 ### Conflict behaviour
 
@@ -196,13 +194,12 @@ Handling responses:
 
 ### Unit (MCP)
 
-- Happy path: `save_source` with valid args inserts row with `last_analysed_at` set, returns `action: "inserted"`.
+- Happy path: `saveSource` with valid args inserts row with `last_analysed_at` set, returns `action: "inserted"`.
 - Re-save same domain: returns `action: "updated"`, tags refresh, `source_url` preserved from first insert.
-- `invalid_url` returned for: non-URL strings, `ftp://`, missing protocol.
-- `name_required` returned for empty / whitespace-only name.
-- `tags_required` returned for `[]` or all-whitespace tag array.
-- `invalid_source_type` returned for enum mismatch.
-- Auth failure (`unauthorized`) short-circuits before any DB call.
+- Throws `"invalid url"` for: non-URL strings, `ftp://`, missing protocol.
+- Throws `"name required"` for empty / whitespace-only name.
+- Throws `"tags required"` for `[]` or all-whitespace tag array.
+- Throws `"invalid source_type"` for enum mismatch.
 
 ### Integration
 
