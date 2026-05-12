@@ -88,6 +88,62 @@ After calling `create_event` with an `enrollment_url`, the response includes a `
 
 For the manual "analyse my sources" path, see the `plannen-sources` skill.
 
+## Saving sources (bookmarks)
+
+Use the `save_source` MCP tool to bookmark an organiser, platform, or one-off page **without** creating an event. The tool requires `url`, `name`, `tags`, and `source_type` — same vocabulary as `update_source`. The agent must already have the page content (via WebFetch in this turn or earlier in the conversation) so it can derive name/tags/source_type before the call.
+
+Three trigger paths:
+
+### Rule 1 — Explicit user request
+
+Phrases like *"save this as a source"*, *"bookmark it"*, *"bookmark this"*, *"save the link"*, *"add it to my sources"* → call `save_source` immediately with no confirmation prompt.
+
+If page content isn't already in context, WebFetch the URL first, derive name/tags/source_type, then save.
+
+Confirmation line after success: *"Saved <name> as a source."* for `action: "inserted"`, or *"Refreshed tags on <name>."* for `action: "updated"`.
+
+### Rule 2 — Positive-intent toward a specific link
+
+When the user singles out **one** link from a previously presented shortlist with positive sentiment — *"X looks good"*, *"let's go with X"*, *"send X to whatsapp"*, *"share X with Nimisha"*, *"let's look at X"*, *"check X out"* — end the reply with exactly one line:
+
+> *"Want me to save <name> as a source so it shows up in future searches?"*
+
+On an affirmative reply, call `save_source`. Don't ask again in the same turn for other links.
+
+### Rule 3 — End-of-discovery batch ask
+
+After any discovery turn that presented **≥2 candidate links** and the user did **not** single one out (Rule 2 didn't fire), end the reply with exactly one line:
+
+> *"Want me to save any of these as sources for next time? (reply with names, or 'all', or skip)"*
+
+Responses:
+- Specific names → save those (one `save_source` call per name).
+- *"all"* / *"yes all"* → save the entire shortlist (one `save_source` call per item).
+- User ignores or changes topic → drop it; never re-ask.
+
+Each save is a separate tool call, so partial failure is natural: if one throws, skip it and continue the others; surface the failed names in one trailing line at the end (*"Couldn't save X — its page didn't fetch cleanly."*).
+
+### Suppression rules
+
+- **Already saved**: don't ask if `search_sources` returned a hit for the domain during this turn.
+- **No double-asking**: Rule 2 and Rule 3 are mutually exclusive in a single reply — if Rule 2 fired, suppress Rule 3.
+- **One prompt per turn**: at most one save-prompt line in any assistant response.
+- **Two-strike suppression**: if the user has declined a save-prompt twice consecutively in the same session, suppress for the rest of the session.
+
+### Wording principles
+
+- Always name the specific source(s) — never *"want me to save these?"* on its own.
+- One line, at the very end of the reply, after any intent-gate question that's already there.
+- Never apologise for asking; never explain the mechanism unless asked.
+
+### Error mapping
+
+The tool throws `Error` with these messages (top-level handler converts to `isError: true`):
+
+- `"invalid url"` → *"That URL doesn't look valid — can you paste the full link?"*
+- `"name required"`, `"tags required"`, `"invalid source_type"` → agent's own bug. Retry once after deriving missing fields; if it fails again, surface *"Couldn't tag this — try `/plannen-sources` later."*
+- Supabase error string → *"Couldn't reach the local DB — is Supabase running?"*
+
 ## Common parameter pitfalls
 
 - `list_events` parameters are `from_date` / `to_date` (NOT `from`/`to`). Wrong names are silently ignored.
