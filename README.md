@@ -140,6 +140,18 @@ Trade-offs:
 - **User scope (default):** slash commands like `/plannen-doctor` are always available, even in unrelated projects. Convenient if you only have one Plannen checkout, but the MCP server runs in every session whether you need it or not.
 - **Project scope:** plugin only activates inside this repo. Cleaner separation, no stale-path risk, but requires re-installing for each fresh clone.
 
+### Using Plannen from Claude Desktop
+
+Claude Desktop doesn't support plugins, but it can still talk to the MCP server. Register it once:
+
+```bash
+claude mcp add plannen -s user -- node "$(pwd)/mcp/dist/index.js"
+```
+
+This writes to `~/.claude.json`, which Claude Desktop reads on launch. Credentials come from `<repo-root>/.env` automatically (the MCP server loads it via dotenv), so no `-e` flags are needed. Restart Claude Desktop to pick up the registration.
+
+To remove later: `claude mcp remove plannen -s user`.
+
 ---
 
 ## Before running `supabase db reset`
