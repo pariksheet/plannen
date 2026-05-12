@@ -34,27 +34,27 @@ echo "Exporting local DB to $SQL_OUT ..."
     --data-only \
     --column-inserts \
     --table=auth.users \
-    --table=public.users \
-    --table=public.app_allowed_emails \
-    --table=public.events \
-    --table=public.event_rsvps \
-    --table=public.event_invites \
-    --table=public.event_memories \
-    --table=public.event_shared_with_users \
-    --table=public.event_shared_with_groups \
-    --table=public.event_sources \
-    --table=public.event_source_refs \
-    --table=public.relationships \
-    --table=public.friend_groups \
-    --table=public.friend_group_members \
-    --table=public.user_profiles \
-    --table=public.user_locations \
-    --table=public.user_oauth_tokens \
-    --table=public.family_members \
-    --table=public.agent_tasks \
-    --table=public.profile_facts \
-    --table=public.stories \
-    --table=public.story_events \
+    --table=plannen.users \
+    --table=plannen.app_allowed_emails \
+    --table=plannen.events \
+    --table=plannen.event_rsvps \
+    --table=plannen.event_invites \
+    --table=plannen.event_memories \
+    --table=plannen.event_shared_with_users \
+    --table=plannen.event_shared_with_groups \
+    --table=plannen.event_sources \
+    --table=plannen.event_source_refs \
+    --table=plannen.relationships \
+    --table=plannen.friend_groups \
+    --table=plannen.friend_group_members \
+    --table=plannen.user_profiles \
+    --table=plannen.user_locations \
+    --table=plannen.user_oauth_tokens \
+    --table=plannen.family_members \
+    --table=plannen.agent_tasks \
+    --table=plannen.profile_facts \
+    --table=plannen.stories \
+    --table=plannen.story_events \
     postgres \
     | grep -vE '^\\(restrict|unrestrict)([[:space:]]|$)'
   echo ""

@@ -53,6 +53,7 @@ function fatal(msg: string): never {
 
 const db = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { persistSession: false },
+  db: { schema: 'plannen' },
 })
 
 // ── User resolution ───────────────────────────────────────────────────────────

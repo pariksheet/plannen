@@ -100,6 +100,7 @@ Deno.serve(async (req: Request) => {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     global: { headers: { Authorization: `Bearer ${userJwt}` } },
+    db: { schema: "plannen" },
   });
   const { data: { user }, error: userError } = await supabase.auth.getUser(userJwt);
   if (userError || !user) return jsonResponse({ error: "Invalid or expired token" }, 401);

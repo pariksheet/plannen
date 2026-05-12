@@ -20,7 +20,8 @@ serve(async (req) => {
     // Cron/scheduled: no user context; service_role required to query events and send reminders.
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      { db: { schema: 'plannen' } }
     )
 
     // Get events with enrollment deadlines in the next 24 hours

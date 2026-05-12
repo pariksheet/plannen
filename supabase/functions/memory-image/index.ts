@@ -64,6 +64,7 @@ Deno.serve(async (req: Request) => {
 
   const supabaseUser = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     global: { headers: { Authorization: `Bearer ${token}` } },
+    db: { schema: "plannen" },
   });
   const { data: memory, error: memError } = await supabaseUser
     .from("event_memories")
@@ -90,7 +91,9 @@ Deno.serve(async (req: Request) => {
   if (!row.external_id) return new Response("Missing external_id", { status: 400 });
 
   // Service role required: we need the photo owner's OAuth tokens (row.user_id may differ from requestor for shared memories).
-  const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    db: { schema: "plannen" },
+  });
   const { data: tokenRow, error: tokenError } = await supabaseAdmin
     .from("user_oauth_tokens")
     .select("access_token, expires_at, refresh_token")

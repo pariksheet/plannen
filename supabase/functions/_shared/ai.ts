@@ -74,6 +74,7 @@ function buildScopedClient(req: Request): SupabaseClient {
   return createClient(supabaseUrl, supabaseAnonKey, {
     global: { headers: { Authorization: auth } },
     auth: { persistSession: false },
+    db: { schema: 'plannen' },
   })
 }
 

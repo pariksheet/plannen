@@ -9,4 +9,6 @@ if (!url || !anonKey) {
   throw new Error(msg)
 }
 
-export const supabase = createClient(url, anonKey)
+export const supabase = createClient(url, anonKey, {
+  db: { schema: 'plannen' },
+})
