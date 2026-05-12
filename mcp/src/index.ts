@@ -1252,14 +1252,15 @@ async function saveSource(args: {
 
   const userId = await uid()
 
-  // Detect whether the row pre-existed (for accurate action reporting).
-  const { data: pre } = await db
+  // Detect whether the row pre-existed so we can label the action.
+  const { data: existing, error: existingErr } = await db
     .from('event_sources')
     .select('id')
     .eq('user_id', userId)
     .eq('domain', domain)
     .maybeSingle()
-  const action: 'inserted' | 'updated' = pre ? 'updated' : 'inserted'
+  if (existingErr) throw new Error(existingErr.message)
+  const action: 'inserted' | 'updated' = existing ? 'updated' : 'inserted'
 
   const upserted = await upsertSource(userId, null, sourceUrl)
   if (!upserted) throw new Error('failed to upsert source')
