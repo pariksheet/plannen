@@ -3,8 +3,8 @@ project_id = "plannen"
 [api]
 enabled = true
 port = 54321
-schemas = ["public", "graphql_public"]
-extra_search_path = ["public", "extensions"]
+schemas = ["plannen", "public", "graphql_public"]
+extra_search_path = ["plannen", "public", "extensions"]
 max_rows = 1000
 
 [db]

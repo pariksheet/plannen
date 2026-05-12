@@ -39,7 +39,9 @@ Deno.serve(async (req: Request) => {
   }
 
   // No user JWT in OAuth callback (redirect from Google); must look up state and write tokens by user_id.
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    db: { schema: "plannen" },
+  });
   const { data: stateRow, error: stateError } = await supabase
     .from("oauth_state")
     .select("user_id")

@@ -163,3 +163,6 @@ supabase/seed-photos.tar.gz
 
 # Bootstrap-managed runtime state (PID files, logs)
 .plannen/
+
+# CodeGraph local index — built per-clone, never commit
+.codegraph/

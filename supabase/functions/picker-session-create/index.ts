@@ -34,6 +34,7 @@ Deno.serve(async (req: Request) => {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     global: { headers: { Authorization: `Bearer ${token}` } },
+    db: { schema: "plannen" },
   });
   const { data: row, error: tokenError } = await supabase
     .from("user_oauth_tokens")

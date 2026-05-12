@@ -58,6 +58,7 @@ Deno.serve(async (req: Request) => {
   // Use user's JWT so RLS applies: only their own token row is visible.
   const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     global: { headers: { Authorization: `Bearer ${token}` } },
+    db: { schema: "plannen" },
   });
   const { data: row, error: tokenError } = await supabase
     .from("user_oauth_tokens")
