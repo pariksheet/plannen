@@ -200,7 +200,7 @@ async function upsertSource(
     .select('id, last_analysed_at')
     .single()
   if (srcErr || !src) return null
-  if (eventId) {
+  if (eventId !== null) {
     await db.from('event_source_refs').upsert(
       { event_id: eventId, source_id: src.id, user_id: userId, ref_type: 'enrollment_url' },
       { onConflict: 'event_id,source_id' }
