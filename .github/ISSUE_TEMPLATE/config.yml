@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Q&A and discussion
+    url: https://github.com/pariksheet/plannen/discussions/categories/q-a
+    about: For questions, ideas you want to bounce around, and general chat.
+  - name: Report a security vulnerability
+    url: https://github.com/pariksheet/plannen/security/advisories/new
+    about: Please report vulnerabilities privately via GitHub Security Advisories — never in a public issue.

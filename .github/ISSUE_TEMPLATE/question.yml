@@ -1,0 +1,26 @@
+name: Question
+description: Ask a question about Plannen.
+title: "[question] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Most questions belong in [Discussions Q&A](https://github.com/pariksheet/plannen/discussions/categories/q-a)**, not in the issue tracker. The issue tracker is for confirmed bugs and concrete feature requests; questions there often get lost.
+
+        If you're sure this is the right place — for example, you suspect the answer will turn into a bug or doc fix — go ahead and use the form below.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: What have you tried or read?
+      description: Helps avoid pointing you to docs you've already read.
+    validations:
+      required: false

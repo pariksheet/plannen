@@ -1,0 +1,54 @@
+project_id = "plannen"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 17
+
+[studio]
+enabled = true
+port = 54323
+api_url = "http://host.docker.internal"
+
+[inbucket]
+enabled = true
+port = 54324
+smtp_port = 54325
+pop3_port = 54326
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[auth]
+enabled = true
+site_url = "http://localhost:4321"
+additional_redirect_urls = ["http://localhost:4321"]
+jwt_expiry = 3600
+enable_signup = true
+enable_anonymous_sign_ins = false
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = false
+
+[auth.email.template.magic_link]
+subject = "Your Plannen sign-in link"
+content_path = "./supabase/templates/magic_link.html"
+
+[analytics]
+enabled = false
+port = 54327
+backend = "postgres"
+
+# OAuth callback is hit by a browser redirect from Google with no JWT.
+[functions.google-oauth-callback]
+verify_jwt = false

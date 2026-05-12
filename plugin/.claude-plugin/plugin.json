@@ -1,0 +1,17 @@
+{
+  "name": "plannen",
+  "version": "0.1.0",
+  "description": "Family event planning, watches, stories, and photo organisation for the Plannen app.",
+  "author": {
+    "name": "Pari",
+    "url": "https://github.com/pariksheet/plannen"
+  },
+  "homepage": "https://github.com/pariksheet/plannen",
+  "license": "AGPL-3.0-only",
+  "mcpServers": {
+    "plannen": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/../mcp/dist/index.js"]
+    }
+  }
+}
