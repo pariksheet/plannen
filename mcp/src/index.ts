@@ -1819,6 +1819,20 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: 'save_source',
+    description: "Save a source (organiser, platform, or one-off page) as a standalone bookmark — without creating an event. Call this when the user explicitly asks to save/bookmark a link, says a specific link looks good (\"X looks good\", \"send X to whatsapp\"), or accepts the end-of-discovery batch ask. The agent must have the page content first (from WebFetch) so name/tags/source_type can be derived. Tags follow the same vocabulary as update_source — lead with the specific activity. Returns action: 'inserted' for a new bookmark, 'updated' when refreshing an existing one.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Full http(s) source URL' },
+        name: { type: 'string', description: 'Human-readable organiser/platform name' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Up to 10 descriptive tags (activity first, then audience, geography, cadence, format)' },
+        source_type: { type: 'string', enum: ['platform', 'organiser', 'one_off'], description: 'platform = publishes many events; organiser = single entity with recurring events; one_off = single event page' },
+      },
+      required: ['url', 'name', 'tags', 'source_type'],
+    },
+  },
+  {
     name: 'update_source',
     description: "Save analysis results for an event source. Call this after fetching the source's homepage and identifying what kinds of events it publishes. Assigns up to 10 tags from activity types (camp, workshop, sailing, climbing, music, sports, hiking, yoga, theatre), audience (kids, adults, family, teens), geography (country/city names), cadence (annual, seasonal, recurring), and format (residential, daytrip, online, weekend).",
     inputSchema: {
@@ -1942,6 +1956,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case 'get_watch_queue':      result = await getWatchQueue(); break
       case 'update_watch_task':    result = await updateWatchTask(args as Parameters<typeof updateWatchTask>[0]); break
       case 'create_watch_task':    result = await createWatchTask(args as Parameters<typeof createWatchTask>[0]); break
+      case 'save_source':            result = await saveSource(args as Parameters<typeof saveSource>[0]); break
       case 'update_source':          result = await updateSource(args as Parameters<typeof updateSource>[0]); break
       case 'get_unanalysed_sources': result = await getUnanalysedSources(); break
       case 'search_sources':         result = await searchSources(args as Parameters<typeof searchSources>[0]); break
