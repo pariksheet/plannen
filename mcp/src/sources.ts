@@ -5,7 +5,8 @@ export type SourceType = 'platform' | 'organiser' | 'one_off'
 
 const VALID_SOURCE_TYPES: readonly SourceType[] = ['platform', 'organiser', 'one_off']
 
-export function parseSourceUrl(input: string): { domain: string; sourceUrl: string } {
+export function parseSourceUrl(input: unknown): { domain: string; sourceUrl: string } {
+  if (typeof input !== 'string') throw new Error('invalid url')
   let url: URL
   try {
     url = new URL(input)
@@ -19,7 +20,7 @@ export function parseSourceUrl(input: string): { domain: string; sourceUrl: stri
   return { domain, sourceUrl: input }
 }
 
-export function normaliseTags(input: string[]): string[] {
+export function normaliseTags(input: unknown[]): string[] {
   const cleaned = input
     .map((t) => (typeof t === 'string' ? t.trim().toLowerCase() : ''))
     .filter((t) => t.length > 0)
@@ -28,14 +29,15 @@ export function normaliseTags(input: string[]): string[] {
   return deduped.slice(0, 10)
 }
 
-export function validateName(input: string): string {
+export function validateName(input: unknown): string {
   if (typeof input !== 'string') throw new Error('name required')
   const trimmed = input.trim()
   if (trimmed.length === 0) throw new Error('name required')
   return trimmed
 }
 
-export function validateSourceType(input: string): SourceType {
+export function validateSourceType(input: unknown): SourceType {
+  if (typeof input !== 'string') throw new Error('invalid source_type')
   if (!VALID_SOURCE_TYPES.includes(input as SourceType)) {
     throw new Error('invalid source_type')
   }

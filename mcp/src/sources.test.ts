@@ -28,6 +28,10 @@ describe('parseSourceUrl', () => {
   it('throws "invalid url" for empty string', () => {
     expect(() => parseSourceUrl('')).toThrow('invalid url')
   })
+  it('throws "invalid url" for non-string input', () => {
+    expect(() => parseSourceUrl(null as unknown as string)).toThrow('invalid url')
+    expect(() => parseSourceUrl(42 as unknown as string)).toThrow('invalid url')
+  })
 })
 
 describe('normaliseTags', () => {
@@ -47,6 +51,9 @@ describe('normaliseTags', () => {
   it('throws "tags required" when all entries are whitespace', () => {
     expect(() => normaliseTags(['  ', ''])).toThrow('tags required')
   })
+  it('drops non-string elements', () => {
+    expect(normaliseTags(['kids', 42, null, 'brunch'] as unknown[])).toEqual(['kids', 'brunch'])
+  })
 })
 
 describe('validateName', () => {
@@ -59,6 +66,10 @@ describe('validateName', () => {
   it('throws "name required" for whitespace-only', () => {
     expect(() => validateName('   ')).toThrow('name required')
   })
+  it('throws "name required" for non-string input', () => {
+    expect(() => validateName(null as unknown as string)).toThrow('name required')
+    expect(() => validateName(42 as unknown as string)).toThrow('name required')
+  })
 })
 
 describe('validateSourceType', () => {
@@ -70,5 +81,8 @@ describe('validateSourceType', () => {
   it('throws "invalid source_type" for other values', () => {
     expect(() => validateSourceType('venue')).toThrow('invalid source_type')
     expect(() => validateSourceType('')).toThrow('invalid source_type')
+  })
+  it('throws "invalid source_type" for non-string input', () => {
+    expect(() => validateSourceType(null as unknown as string)).toThrow('invalid source_type')
   })
 })
