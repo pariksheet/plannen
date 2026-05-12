@@ -20,6 +20,7 @@ import {
 } from './profileFacts.js'
 import { generateSessionDates, type RecurrenceRule } from './recurrence.js'
 import { whisperAvailable, transcribeAudioBytes, extFromContentType } from './transcribe.js'
+import { parseSourceUrl, normaliseTags, validateName, validateSourceType } from './sources.js'
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -186,7 +187,7 @@ type EventStatus = typeof VALID_EVENT_STATUSES[number]
 
 async function upsertSource(
   userId: string,
-  eventId: string,
+  eventId: string | null,
   enrollmentUrl: string
 ): Promise<{ id: string; last_analysed_at: string | null } | null> {
   const domain = extractDomain(enrollmentUrl)
@@ -200,10 +201,12 @@ async function upsertSource(
     .select('id, last_analysed_at')
     .single()
   if (srcErr || !src) return null
-  await db.from('event_source_refs').upsert(
-    { event_id: eventId, source_id: src.id, user_id: userId, ref_type: 'enrollment_url' },
-    { onConflict: 'event_id,source_id' }
-  )
+  if (eventId !== null) {
+    await db.from('event_source_refs').upsert(
+      { event_id: eventId, source_id: src.id, user_id: userId, ref_type: 'enrollment_url' },
+      { onConflict: 'event_id,source_id' }
+    )
+  }
   return { id: src.id, last_analysed_at: src.last_analysed_at }
 }
 
@@ -1236,6 +1239,48 @@ async function updateSource(args: {
   return { success: true }
 }
 
+async function saveSource(args: {
+  url: string
+  name: string
+  tags: string[]
+  source_type: string
+}) {
+  const { domain, sourceUrl } = parseSourceUrl(args.url)
+  const name = validateName(args.name)
+  const tags = normaliseTags(args.tags)
+  const source_type = validateSourceType(args.source_type)
+
+  const userId = await uid()
+
+  // Detect whether the row pre-existed so we can label the action.
+  const { data: existing, error: existingErr } = await db
+    .from('event_sources')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('domain', domain)
+    .maybeSingle()
+  if (existingErr) throw new Error(existingErr.message)
+  const action: 'inserted' | 'updated' = existing ? 'updated' : 'inserted'
+
+  const upserted = await upsertSource(userId, null, sourceUrl)
+  if (!upserted) throw new Error('failed to upsert source')
+
+  const { error } = await db
+    .from('event_sources')
+    .update({
+      name,
+      tags,
+      source_type,
+      last_analysed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', upserted.id)
+    .eq('user_id', userId)
+  if (error) throw new Error(error.message)
+
+  return { id: upserted.id, domain, action }
+}
+
 async function getUnanalysedSources() {
   const id = await uid()
   const { data, error } = await db
@@ -1774,6 +1819,20 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: 'save_source',
+    description: "Save a source (organiser, platform, or one-off page) as a standalone bookmark — without creating an event. Call this when the user explicitly asks to save/bookmark a link, says a specific link looks good (\"X looks good\", \"send X to whatsapp\"), or accepts the end-of-discovery batch ask. The agent must have the page content first (from WebFetch) so name/tags/source_type can be derived. Tags follow the same vocabulary as update_source — lead with the specific activity. Returns action: 'inserted' for a new bookmark, 'updated' when refreshing an existing one.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Full http(s) source URL' },
+        name: { type: 'string', description: 'Human-readable organiser/platform name' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Up to 10 descriptive tags (activity first, then audience, geography, cadence, format)' },
+        source_type: { type: 'string', enum: ['platform', 'organiser', 'one_off'], description: 'platform = publishes many events; organiser = single entity with recurring events; one_off = single event page' },
+      },
+      required: ['url', 'name', 'tags', 'source_type'],
+    },
+  },
+  {
     name: 'update_source',
     description: "Save analysis results for an event source. Call this after fetching the source's homepage and identifying what kinds of events it publishes. Assigns up to 10 tags from activity types (camp, workshop, sailing, climbing, music, sports, hiking, yoga, theatre), audience (kids, adults, family, teens), geography (country/city names), cadence (annual, seasonal, recurring), and format (residential, daytrip, online, weekend).",
     inputSchema: {
@@ -1897,6 +1956,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case 'get_watch_queue':      result = await getWatchQueue(); break
       case 'update_watch_task':    result = await updateWatchTask(args as Parameters<typeof updateWatchTask>[0]); break
       case 'create_watch_task':    result = await createWatchTask(args as Parameters<typeof createWatchTask>[0]); break
+      case 'save_source':            result = await saveSource(args as Parameters<typeof saveSource>[0]); break
       case 'update_source':          result = await updateSource(args as Parameters<typeof updateSource>[0]); break
       case 'get_unanalysed_sources': result = await getUnanalysedSources(); break
       case 'search_sources':         result = await searchSources(args as Parameters<typeof searchSources>[0]); break
