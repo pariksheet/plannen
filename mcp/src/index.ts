@@ -81,9 +81,37 @@ function extractDomain(url: string): string | null {
   return hostname.replace(/^www\./, '')
 }
 
+// Columns returned by default for event reads — excludes image_url, created_at,
+// updated_at, gcal_event_id, event_type, shared_with_*, enrollment_start_date,
+// which are rarely needed by callers and balloon token usage.
+const SLIM_EVENT_COLUMNS =
+  'id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, recurrence_rule, parent_event_id'
+
+function slimEvent<T extends Record<string, unknown>>(e: T) {
+  return {
+    id: e.id,
+    title: e.title,
+    description: e.description ?? null,
+    start_date: e.start_date,
+    end_date: e.end_date,
+    location: e.location,
+    event_kind: e.event_kind,
+    event_status: e.event_status,
+    hashtags: e.hashtags,
+    enrollment_url: e.enrollment_url,
+    enrollment_deadline: e.enrollment_deadline,
+  }
+}
+
+function truncateDescription(desc: unknown, maxLen = 200): string | null {
+  if (typeof desc !== 'string') return null
+  if (desc.length <= maxLen) return desc
+  return desc.slice(0, maxLen) + '…'
+}
+
 // ── Tool implementations ──────────────────────────────────────────────────────
 
-async function listEvents(args: { status?: string; limit?: number; from_date?: string; to_date?: string }) {
+async function listEvents(args: { status?: string; limit?: number; from_date?: string; to_date?: string; fields?: 'summary' | 'full' }) {
   const [id, tz] = await Promise.all([uid(), getUserTimezone()])
   let q = db
     .from('events')
@@ -96,22 +124,25 @@ async function listEvents(args: { status?: string; limit?: number; from_date?: s
   if (args.to_date) q = q.lt('start_date', args.to_date + 'T24:00:00')
   const { data, error } = await q
   if (error) throw new Error(error.message)
+  const full = args.fields === 'full'
   return (data ?? []).map(e => ({
     ...e,
+    description: full ? e.description : truncateDescription(e.description),
     start_date: e.start_date ? toLocalIso(e.start_date, tz) : e.start_date,
     end_date: e.end_date ? toLocalIso(e.end_date, tz) : e.end_date,
     user_timezone: tz,
   }))
 }
 
-async function getEvent(args: { id: string }) {
+async function getEvent(args: { id: string; fields?: 'summary' | 'full' }) {
   const [id, tz] = await Promise.all([uid(), getUserTimezone()])
+  const selectCols = args.fields === 'full' ? '*' : SLIM_EVENT_COLUMNS
   const { data, error } = await db
     .from('events')
-    .select('*')
+    .select(selectCols)
     .eq('id', args.id)
     .eq('created_by', id)
-    .single()
+    .single<Record<string, unknown>>()
   if (error) throw new Error(error.message)
 
   const localise = (e: { start_date?: string | null; end_date?: string | null }) => ({
@@ -244,7 +275,7 @@ async function createEvent(args: {
     ? await upsertSource(id, data.id, args.enrollment_url)
     : null
 
-  return { ...data, source }
+  return { ...slimEvent(data), source }
 }
 
 async function updateEvent(args: {
@@ -273,7 +304,7 @@ async function updateEvent(args: {
   const source = data?.enrollment_url
     ? await upsertSource(id, args.id, data.enrollment_url)
     : null
-  return { ...data, source }
+  return { ...slimEvent(data), source }
 }
 
 async function rsvpEvent(args: { event_id: string; status: string }) {
@@ -1367,7 +1398,7 @@ async function getHistoricalFacts(args: { subject?: string }) {
 const TOOLS: Tool[] = [
   {
     name: 'list_events',
-    description: 'List your events in Plannen',
+    description: 'List your events in Plannen. Returns a slim row by default; description is truncated to 200 chars + ellipsis. Pass fields:"full" if you need the untruncated description.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1379,15 +1410,19 @@ const TOOLS: Tool[] = [
         limit: { type: 'number', description: 'Max results (default 10)' },
         from_date: { type: 'string', description: 'ISO date to filter events starting on or after this date, e.g. 2026-05-07' },
         to_date: { type: 'string', description: 'ISO date to filter events starting on or before this date, e.g. 2026-05-07' },
+        fields: { type: 'string', enum: ['summary', 'full'], description: 'summary (default) truncates description to 200 chars; full returns the untruncated description.' },
       },
     },
   },
   {
     name: 'get_event',
-    description: 'Get full details of an event by ID. Response includes memories: [{id, external_id, source, caption}] for already-attached photos — use external_ids where source="google_photos" as the skip list when scanning Google Photos.',
+    description: 'Get details of an event by ID. Returns slim columns by default (drops image_url, created_at, updated_at, gcal_event_id, event_type, shared_with_*); pass fields:"full" for everything. Response includes memories: [{id, external_id, source, caption}] for already-attached photos — use external_ids where source="google_photos" as the skip list when scanning Google Photos.',
     inputSchema: {
       type: 'object',
-      properties: { id: { type: 'string', description: 'Event UUID' } },
+      properties: {
+        id: { type: 'string', description: 'Event UUID' },
+        fields: { type: 'string', enum: ['summary', 'full'], description: 'summary (default) returns slim columns; full returns every column including image_url, gcal_event_id, timestamps.' },
+      },
       required: ['id'],
     },
   },
