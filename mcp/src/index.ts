@@ -20,6 +20,7 @@ import {
 } from './profileFacts.js'
 import { generateSessionDates, type RecurrenceRule } from './recurrence.js'
 import { whisperAvailable, transcribeAudioBytes, extFromContentType } from './transcribe.js'
+import { parseSourceUrl, normaliseTags, validateName, validateSourceType } from './sources.js'
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -1236,6 +1237,47 @@ async function updateSource(args: {
     .eq('id', args.id)
   if (error) throw new Error(error.message)
   return { success: true }
+}
+
+async function saveSource(args: {
+  url: string
+  name: string
+  tags: string[]
+  source_type: string
+}) {
+  const { domain, sourceUrl } = parseSourceUrl(args.url)
+  const name = validateName(args.name)
+  const tags = normaliseTags(args.tags)
+  const source_type = validateSourceType(args.source_type)
+
+  const userId = await uid()
+
+  // Detect whether the row pre-existed (for accurate action reporting).
+  const { data: pre } = await db
+    .from('event_sources')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('domain', domain)
+    .maybeSingle()
+  const action: 'inserted' | 'updated' = pre ? 'updated' : 'inserted'
+
+  const upserted = await upsertSource(userId, null, sourceUrl)
+  if (!upserted) throw new Error('failed to upsert source')
+
+  const { error } = await db
+    .from('event_sources')
+    .update({
+      name,
+      tags,
+      source_type,
+      last_analysed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', upserted.id)
+    .eq('user_id', userId)
+  if (error) throw new Error(error.message)
+
+  return { id: upserted.id, domain, action }
 }
 
 async function getUnanalysedSources() {
