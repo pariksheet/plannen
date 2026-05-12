@@ -186,7 +186,7 @@ type EventStatus = typeof VALID_EVENT_STATUSES[number]
 
 async function upsertSource(
   userId: string,
-  eventId: string,
+  eventId: string | null,
   enrollmentUrl: string
 ): Promise<{ id: string; last_analysed_at: string | null } | null> {
   const domain = extractDomain(enrollmentUrl)
@@ -200,10 +200,12 @@ async function upsertSource(
     .select('id, last_analysed_at')
     .single()
   if (srcErr || !src) return null
-  await db.from('event_source_refs').upsert(
-    { event_id: eventId, source_id: src.id, user_id: userId, ref_type: 'enrollment_url' },
-    { onConflict: 'event_id,source_id' }
-  )
+  if (eventId) {
+    await db.from('event_source_refs').upsert(
+      { event_id: eventId, source_id: src.id, user_id: userId, ref_type: 'enrollment_url' },
+      { onConflict: 'event_id,source_id' }
+    )
+  }
   return { id: src.id, last_analysed_at: src.last_analysed_at }
 }
 
