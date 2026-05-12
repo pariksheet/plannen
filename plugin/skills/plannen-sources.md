@@ -7,6 +7,8 @@ description: Use when the user explicitly says "analyse my sources", "tag my sou
 
 The auto-trigger after `create_event` is in `plannen-core`. This skill is the **manual** variant — invoked when the user says "analyse my sources" or asks to bulk-process saved sources.
 
+> For single-link saves mid-conversation (explicit, positive-intent, or end-of-discovery batch), see the "Saving sources (bookmarks)" section in `plannen-core.md`. This skill is the *bulk-analyse* manual path.
+
 ## Workflow
 
 1. **Call `get_unanalysed_sources`** to fetch the queue of sources without `last_analysed_at`.
