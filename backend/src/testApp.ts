@@ -14,6 +14,7 @@ import { profile } from './routes/api/profile.js'
 import { relationships } from './routes/api/relationships.js'
 import { locations } from './routes/api/locations.js'
 import { sources } from './routes/api/sources.js'
+import { watch } from './routes/api/watch.js'
 import { eventPhotos } from './routes/storage/eventPhotos.js'
 import { agentTest } from './routes/functions/agentTest.js'
 import { agentDiscover } from './routes/functions/agentDiscover.js'
@@ -47,6 +48,7 @@ export function buildApp(user: { userId: string; userEmail: string }) {
   app.route('/api/relationships', relationships)
   app.route('/api/locations', locations)
   app.route('/api/sources', sources)
+  app.route('/api/watch', watch)
   app.route('/storage/v1/object', eventPhotos)
   app.route('/functions/v1/agent-test', agentTest)
   app.route('/functions/v1/agent-discover', agentDiscover)
