@@ -43,7 +43,7 @@ describe('GET /api/me', () => {
     const res = await app.request('/api/me')
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
-      data: { userId: testUserId, email: testEmail },
+      data: { userId: testUserId, email: testEmail, full_name: null, avatar_url: null },
     })
   })
 })
