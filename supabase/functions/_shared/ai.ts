@@ -1,6 +1,13 @@
-// BYOK AI wrapper. Single point in the edge-function layer that knows which
-// provider is configured for the calling user. Edge functions never import an
-// AI SDK directly — they call generate / generateStructured / generateFromImage.
+// BYOK AI wrapper. Drops supabase-js; takes a `db` client + userId from the
+// caller (Deno entry verifies JWT; Node entry resolves the user at boot).
+//
+// Public surface: getUserAI, generate, generateStructured, generateFromImage,
+// aiErrorResponse, AIError, AIProviderNotConfigured.
+//
+// This file still runs in Deno on Tier 1 — it keeps `npm:` specifiers for the
+// AI SDK and zod. The handlers extracted in later tasks import this module
+// from Deno entry points. The Node backend's `/functions/v1/*` routes copy
+// the source via the build step.
 //
 // V1 supports Anthropic only; the schema and switch are multi-provider so V1.1
 // can add Gemini / OpenAI / Ollama / OpenAI-compatible without breaking changes.
@@ -8,7 +15,7 @@
 import { generateText, generateObject, type LanguageModelV1 } from 'npm:ai@4'
 import { createAnthropic, anthropic } from 'npm:@ai-sdk/anthropic@1'
 import { z } from 'npm:zod@3'
-import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2'
+import type { HandlerCtx } from './handlers/types.ts'
 
 const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-6'
 
@@ -67,51 +74,47 @@ function statusForCode(code: AIErrorCode): number {
 
 // ── Auth + settings lookup ─────────────────────────────────────────────────────
 
-function buildScopedClient(req: Request): SupabaseClient {
-  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
-  const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
-  const auth = req.headers.get('Authorization') ?? ''
-  return createClient(supabaseUrl, supabaseAnonKey, {
-    global: { headers: { Authorization: auth } },
-    auth: { persistSession: false },
-    db: { schema: 'plannen' },
-  })
-}
-
-// Read the calling user's default provider settings via RLS.
+// Read the calling user's default provider settings via the supplied db client.
 // Throws AIProviderNotConfigured if no row exists.
-export async function getUserAI(req: Request): Promise<AISettings> {
-  const supabase = buildScopedClient(req)
-  const { data: userData, error: userErr } = await supabase.auth.getUser()
-  if (userErr || !userData?.user) {
-    throw new AIError('no_provider_configured', 'Not authenticated.', { status: 401 })
-  }
-  const { data, error } = await supabase
-    .from('user_settings')
-    .select('provider, api_key, default_model, base_url, user_id')
-    .eq('is_default', true)
-    .maybeSingle()
-  if (error) throw new AIError('unknown_error', error.message)
-  if (!data || !data.api_key) throw new AIProviderNotConfigured()
+export async function getUserAI(ctx: HandlerCtx): Promise<AISettings> {
+  const { rows } = await ctx.db.query(
+    `SELECT provider, api_key, default_model, base_url, user_id
+       FROM plannen.user_settings
+      WHERE user_id = $1 AND is_default = true
+      LIMIT 1`,
+    [ctx.userId],
+  )
+  if (rows.length === 0 || !rows[0].api_key) throw new AIProviderNotConfigured()
+  const r = rows[0]
   return {
-    provider: data.provider as Provider,
-    api_key: data.api_key,
-    default_model: data.default_model ?? null,
-    base_url: data.base_url ?? null,
-    user_id: data.user_id,
+    provider: r.provider as Provider,
+    api_key: r.api_key,
+    default_model: r.default_model ?? null,
+    base_url: r.base_url ?? null,
+    user_id: r.user_id,
   }
 }
 
-async function recordUsage(req: Request, userId: string, ok: boolean, code: AIErrorCode | null) {
-  const supabase = buildScopedClient(req)
-  const patch = ok
-    ? { last_used_at: new Date().toISOString(), last_error_at: null, last_error_code: null }
-    : { last_error_at: new Date().toISOString(), last_error_code: code }
-  await supabase
-    .from('user_settings')
-    .update(patch)
-    .eq('user_id', userId)
-    .eq('is_default', true)
+async function recordUsage(ctx: HandlerCtx, ok: boolean, code: AIErrorCode | null) {
+  const nowIso = new Date().toISOString()
+  if (ok) {
+    await ctx.db.query(
+      `UPDATE plannen.user_settings
+          SET last_used_at = $2,
+              last_error_at = NULL,
+              last_error_code = NULL
+        WHERE user_id = $1 AND is_default = true`,
+      [ctx.userId, nowIso],
+    )
+  } else {
+    await ctx.db.query(
+      `UPDATE plannen.user_settings
+          SET last_error_at = $2,
+              last_error_code = $3
+        WHERE user_id = $1 AND is_default = true`,
+      [ctx.userId, nowIso, code],
+    )
+  }
 }
 
 // ── Model + tool plumbing ──────────────────────────────────────────────────────
@@ -183,13 +186,13 @@ function normaliseError(err: unknown): AIError {
 }
 
 async function withRetryAndTracking<T>(
-  req: Request,
-  s: AISettings,
+  ctx: HandlerCtx,
+  _s: AISettings,
   fn: () => Promise<T>,
 ): Promise<T> {
   try {
     const result = await fn()
-    await recordUsage(req, s.user_id, true, null)
+    await recordUsage(ctx, true, null)
     return result
   } catch (err) {
     const normalised = normaliseError(err)
@@ -198,15 +201,15 @@ async function withRetryAndTracking<T>(
       await new Promise((r) => setTimeout(r, wait))
       try {
         const result = await fn()
-        await recordUsage(req, s.user_id, true, null)
+        await recordUsage(ctx, true, null)
         return result
       } catch (retryErr) {
         const finalErr = normaliseError(retryErr)
-        await recordUsage(req, s.user_id, false, finalErr.code)
+        await recordUsage(ctx, false, finalErr.code)
         throw finalErr
       }
     }
-    await recordUsage(req, s.user_id, false, normalised.code)
+    await recordUsage(ctx, false, normalised.code)
     throw normalised
   }
 }
@@ -214,11 +217,11 @@ async function withRetryAndTracking<T>(
 // ── Public call shapes ─────────────────────────────────────────────────────────
 
 export async function generate(
-  req: Request,
+  ctx: HandlerCtx,
   opts: { prompt: string; model?: string; tools?: ReadonlyArray<string>; maxTokens?: number },
 ): Promise<string> {
-  const s = await getUserAI(req)
-  return withRetryAndTracking(req, s, async () => {
+  const s = await getUserAI(ctx)
+  return withRetryAndTracking(ctx, s, async () => {
     const result = await generateText({
       model: buildModel(s, opts.model),
       prompt: opts.prompt,
@@ -231,7 +234,7 @@ export async function generate(
 }
 
 export async function generateStructured<T>(
-  req: Request,
+  ctx: HandlerCtx,
   opts: {
     prompt: string
     schema: z.ZodSchema<T>
@@ -240,13 +243,13 @@ export async function generateStructured<T>(
     maxTokens?: number
   },
 ): Promise<T> {
-  const s = await getUserAI(req)
+  const s = await getUserAI(ctx)
 
   // Anthropic web_search isn't compatible with generateObject's tool-call-based
   // structured output. When tools are requested, fall back to generateText with
   // a JSON instruction and parse against the schema.
   if (opts.tools?.length) {
-    return withRetryAndTracking(req, s, async () => {
+    return withRetryAndTracking(ctx, s, async () => {
       const jsonInstruction = '\n\nReturn ONLY a JSON value matching the requested schema. No markdown, no prose.'
       const result = await generateText({
         model: buildModel(s, opts.model),
@@ -259,7 +262,7 @@ export async function generateStructured<T>(
     })
   }
 
-  return withRetryAndTracking(req, s, async () => {
+  return withRetryAndTracking(ctx, s, async () => {
     const result = await generateObject({
       model: buildModel(s, opts.model),
       prompt: opts.prompt,
@@ -271,11 +274,11 @@ export async function generateStructured<T>(
 }
 
 export async function generateFromImage(
-  req: Request,
+  ctx: HandlerCtx,
   opts: { imageBytes: Uint8Array; mimeType: string; prompt: string; model?: string; maxTokens?: number },
 ): Promise<string> {
-  const s = await getUserAI(req)
-  return withRetryAndTracking(req, s, async () => {
+  const s = await getUserAI(ctx)
+  return withRetryAndTracking(ctx, s, async () => {
     const result = await generateText({
       model: buildModel(s, opts.model),
       messages: [
