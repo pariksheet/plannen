@@ -6,6 +6,10 @@
 
 import pg from 'pg'
 
+// Return DATE columns (OID 1082) as raw 'YYYY-MM-DD' strings, not JS Date.
+// Otherwise dob round-trips as an ISO timestamp and breaks <input type="date">.
+pg.types.setTypeParser(1082, (val) => val)
+
 const { Pool } = pg
 type PoolClient = pg.PoolClient
 

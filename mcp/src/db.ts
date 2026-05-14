@@ -8,6 +8,10 @@
 
 import pg from 'pg'
 
+// Return DATE columns (OID 1082) as raw 'YYYY-MM-DD' strings, not JS Date.
+// Keeps mcp tool outputs ISO-clean and matches the backend's behaviour.
+pg.types.setTypeParser(1082, (val) => val)
+
 const { Pool } = pg
 type PoolClient = pg.PoolClient
 
