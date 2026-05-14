@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase'
+import { dbClient } from '../lib/dbClient'
 
 export interface FriendUser {
   id: string
@@ -17,74 +17,56 @@ export interface RelationshipRequest {
 }
 
 export async function getAcceptedRelatedUserIds(types: ('friend' | 'family' | 'both')[]): Promise<{ data: string[]; error: Error | null }> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { data: [], error: new Error('Not authenticated') }
-  const { data, error } = await supabase
-    .from('relationships')
-    .select('user_id, related_user_id, relationship_type')
-    .or(`user_id.eq.${user.id},related_user_id.eq.${user.id}`)
-    .eq('status', 'accepted')
-    .in('relationship_type', types)
-  if (error) return { data: [], error: new Error(error.message) }
-  const ids = new Set<string>()
-  ;(data ?? []).forEach((r: { user_id: string; related_user_id: string }) => {
-    ids.add(r.user_id)
-    ids.add(r.related_user_id)
-  })
-  ids.delete(user.id)
-  return { data: Array.from(ids), error: null }
+  try {
+    const me = await dbClient.me.get()
+    const rows = await dbClient.relationships.listRelationships()
+    const accepted = rows.filter((r) =>
+      r.status === 'accepted' &&
+      types.includes((r.relationship_type as 'friend' | 'family' | 'both'))
+    )
+    const ids = new Set<string>()
+    accepted.forEach((r) => {
+      ids.add(r.user_id as string)
+      ids.add(r.related_user_id as string)
+    })
+    ids.delete(me.userId)
+    return { data: Array.from(ids), error: null }
+  } catch (e) {
+    return { data: [], error: e instanceof Error ? e : new Error('List relationships failed') }
+  }
 }
 
-/** Friends (and "both") with user details for share picker */
+/** Friends — in v0 REST there is no users-by-id endpoint, so we return only IDs (no email/full_name). */
 export async function getMyFriends(): Promise<{ data: FriendUser[]; error: Error | null }> {
-  const { data: ids, error: idsError } = await getAcceptedRelatedUserIds(['friend', 'both'])
-  if (idsError || !ids.length) return { data: [], error: idsError ?? null }
-  const { data, error } = await supabase
-    .from('users')
-    .select('id, email, full_name')
-    .in('id', ids)
-  if (error) return { data: [], error: new Error(error.message) }
-  return { data: (data ?? []) as FriendUser[], error: null }
+  const { data: ids, error } = await getAcceptedRelatedUserIds(['friend', 'both'])
+  if (error) return { data: [], error }
+  return { data: ids.map((id) => ({ id, email: null, full_name: null })), error: null }
 }
 
-/** Family members (and "both") with user details */
+/** Family members — same caveat as getMyFriends. */
 export async function getMyFamily(): Promise<{ data: FriendUser[]; error: Error | null }> {
-  const { data: ids, error: idsError } = await getAcceptedRelatedUserIds(['family', 'both'])
-  if (idsError || !ids.length) return { data: [], error: idsError ?? null }
-  const { data, error } = await supabase
-    .from('users')
-    .select('id, email, full_name')
-    .in('id', ids)
-  if (error) return { data: [], error: new Error(error.message) }
-  return { data: (data ?? []) as FriendUser[], error: null }
+  const { data: ids, error } = await getAcceptedRelatedUserIds(['family', 'both'])
+  if (error) return { data: [], error }
+  return { data: ids.map((id) => ({ id, email: null, full_name: null })), error: null }
 }
 
-/** Send a family or friend request by email. They must already have an account. */
+/** Send a request — backed by an RPC in Tier 1; not surfaced via v0 REST. */
 export async function sendRelationshipRequest(
-  email: string,
-  relationshipType: 'friend' | 'family' | 'both'
+  _email: string,
+  _relationshipType: 'friend' | 'family' | 'both'
 ): Promise<{ data: string | null; error: Error | null }> {
-  const { data, error } = await supabase.rpc('send_relationship_request', {
-    target_email: email.trim(),
-    rel_type: relationshipType,
-  })
-  if (error) return { data: null, error: new Error(error.message) }
-  return { data: data as string, error: null }
+  return { data: null, error: new Error('sendRelationshipRequest is not supported in this backend version') }
 }
 
-/** Pending requests (received and sent) with other user info */
+/** Pending requests — backed by an RPC in Tier 1; not surfaced via v0 REST. */
 export async function getRelationshipRequests(): Promise<{ data: RelationshipRequest[]; error: Error | null }> {
-  const { data, error } = await supabase.rpc('get_relationship_requests')
-  if (error) return { data: [], error: new Error(error.message) }
-  return { data: (data ?? []) as RelationshipRequest[], error: null }
+  return { data: [], error: null }
 }
 
-export async function acceptRelationshipRequest(relId: string): Promise<{ error: Error | null }> {
-  const { error } = await supabase.rpc('accept_relationship', { rel_id: relId })
-  return { error: error ? new Error(error.message) : null }
+export async function acceptRelationshipRequest(_relId: string): Promise<{ error: Error | null }> {
+  return { error: new Error('acceptRelationshipRequest is not supported in this backend version') }
 }
 
-export async function declineRelationshipRequest(relId: string): Promise<{ error: Error | null }> {
-  const { error } = await supabase.rpc('decline_relationship', { rel_id: relId })
-  return { error: error ? new Error(error.message) : null }
+export async function declineRelationshipRequest(_relId: string): Promise<{ error: Error | null }> {
+  return { error: new Error('declineRelationshipRequest is not supported in this backend version') }
 }
