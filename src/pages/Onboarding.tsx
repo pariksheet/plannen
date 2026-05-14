@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
+import { dbClient } from '../lib/dbClient'
+
+const TIER = (import.meta.env.VITE_PLANNEN_TIER ?? '1') as '0' | '1'
 
 const STICKERS = ['🌟', '🎉', '🎈', '🌈', '🍀', '💫', '🎵', '🏖️']
 
@@ -29,15 +32,26 @@ export function Onboarding() {
     }
     setError('')
     setSaving(true)
-    const { error: dbError } = await supabase
-      .from('users')
-      .update({ full_name: trimmedName, avatar_url: sticker })
-      .eq('id', user.id)
-    setSaving(false)
-    if (dbError) {
-      setError(dbError.message)
+    try {
+      if (TIER === '0') {
+        await dbClient.profile.update({ full_name: trimmedName, avatar_url: sticker })
+      } else {
+        const { error: dbError } = await supabase
+          .from('users')
+          .update({ full_name: trimmedName, avatar_url: sticker })
+          .eq('id', user.id)
+        if (dbError) {
+          setError(dbError.message)
+          setSaving(false)
+          return
+        }
+      }
+    } catch (e) {
+      setError((e as Error).message)
+      setSaving(false)
       return
     }
+    setSaving(false)
     await refreshProfile()
     navigate('/dashboard', { replace: true })
   }

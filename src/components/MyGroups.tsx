@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Event, EventFormData, EventViewMode } from '../types/event'
 import { supabase } from '../lib/supabase'
 import { getGroupsEvents } from '../services/viewService'
+
+const TIER = (import.meta.env.VITE_PLANNEN_TIER ?? '1') as '0' | '1'
 import { getPreferredVisitDates } from '../services/rsvpService'
 import { buildFutureTimeline } from '../utils/timeline'
 import { Timeline } from './Timeline'
@@ -75,6 +77,13 @@ export function MyGroups() {
 
   const loadEventGroupsContext = useCallback(async (eventIds: string[]) => {
     if (eventIds.length === 0) {
+      setGroupNamesById({})
+      setEventGroupIdsByEventId({})
+      return
+    }
+    if (TIER === '0') {
+      // Tier 0 single-user: group-membership + cross-user event-sharing tables
+      // aren't exposed by the v0 backend. Leave the context empty.
       setGroupNamesById({})
       setEventGroupIdsByEventId({})
       return

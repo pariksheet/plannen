@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { getMemoryImageProxyUrl } from '../services/memoryService'
 import type { EventMemory, MemorySource } from '../services/memoryService'
 
+const TIER = (import.meta.env.VITE_PLANNEN_TIER ?? '1') as '0' | '1'
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? ''
 
 interface MemoryImageProps {
@@ -21,22 +22,27 @@ export function MemoryImage({ memory, className, alt = '', lightbox = false }: M
   const isProxy = source === 'google_drive' || source === 'google_photos'
 
   useEffect(() => {
-    if (!isProxy || !supabaseUrl) return
+    if (!isProxy) return
     let cancelled = false
     let objectUrl: string | null = null
     ;(async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.access_token || cancelled) return
-      const url = getMemoryImageProxyUrl(memory.id, supabaseUrl)
+      // Tier 0: same-origin via Vite proxy, no auth header needed.
+      // Tier 1: needs supabase auth bearer token.
+      let url: string
+      let headers: HeadersInit = {}
+      if (TIER === '0') {
+        url = `/functions/v1/memory-image?id=${encodeURIComponent(memory.id)}`
+      } else {
+        if (!supabaseUrl) return
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session?.access_token || cancelled) return
+        url = getMemoryImageProxyUrl(memory.id, supabaseUrl)
+        headers = { Authorization: `Bearer ${session.access_token}` }
+      }
       try {
-        const res = await fetch(url, {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        })
+        const res = await fetch(url, { headers })
         if (cancelled) return
-        if (!res.ok) {
-          setError(true)
-          return
-        }
+        if (!res.ok) { setError(true); return }
         const blob = await res.blob()
         if (cancelled) return
         objectUrl = URL.createObjectURL(blob)

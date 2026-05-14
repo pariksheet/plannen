@@ -1,5 +1,5 @@
 import { useState, useImperativeHandle, forwardRef } from 'react'
-import { supabase } from '../lib/supabase'
+import { dbClient } from '../lib/dbClient'
 import { useAgent } from '../hooks/useAgent'
 import { useSettings } from '../context/SettingsContext'
 import { DiscoveryResult, ScrapeResponse } from '../types/agent'
@@ -47,11 +47,14 @@ export const AgentChat = forwardRef<AgentChatHandle, AgentChatProps>(function Ag
     setError('')
     setResults([])
     try {
-      const { data, error: funcError } = await supabase.functions.invoke('agent-discover', {
-        body: { query: query.trim() },
-      })
-      if (funcError) {
-        setError(funcError.message || 'Failed to call discovery function')
+      let data: { results?: unknown; error?: string; message?: string } | null = null
+      try {
+        data = await dbClient.functions.invoke<{ results?: unknown; error?: string; message?: string }>(
+          'agent-discover',
+          { query: query.trim() },
+        )
+      } catch (e) {
+        setError((e as Error).message || 'Failed to call discovery function')
         return
       }
       if (!data) {

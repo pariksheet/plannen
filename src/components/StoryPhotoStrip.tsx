@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { dbClient } from '../lib/dbClient'
+
+const TIER = (import.meta.env.VITE_PLANNEN_TIER ?? '1') as '0' | '1'
 
 interface MemoryRow {
   id: string
@@ -29,6 +32,27 @@ export function StoryPhotoStrip({ eventIds, coverUrl, selectedUrl, onSelect }: P
   useEffect(() => {
     if (eventIds.length === 0) { setMemories([]); setLoading(false); return }
     void (async () => {
+      if (TIER === '0') {
+        try {
+          const lists = await Promise.all(
+            eventIds.map((id) =>
+              dbClient.memories.list({ event_id: id }) as Promise<MemoryRow[]>,
+            ),
+          )
+          const rows = (lists.flat() as MemoryRow[])
+            .filter((m) => m.media_url && m.media_type === 'image')
+            .sort((a, b) => {
+              const at = (a.taken_at ?? '') || a.created_at
+              const bt = (b.taken_at ?? '') || b.created_at
+              return at.localeCompare(bt)
+            })
+          setMemories(rows)
+        } catch {
+          setMemories([])
+        }
+        setLoading(false)
+        return
+      }
       const { data, error } = await supabase
         .from('event_memories')
         .select('id, media_url, media_type, caption, taken_at, created_at')
