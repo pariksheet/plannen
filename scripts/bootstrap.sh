@@ -6,11 +6,13 @@
 # everything that's already done.
 #
 # Usage:
-#   bash scripts/bootstrap.sh                    # interactive
+#   bash scripts/bootstrap.sh                    # interactive, Tier 0 (default)
 #   bash scripts/bootstrap.sh --non-interactive  # CI / scripted
+#     [--tier 0|1]                               # 0 = embedded Postgres (default), 1 = local Supabase
 #     [--email you@example.com]                  # required if PLANNEN_USER_EMAIL not in .env
 #     [--install-plugin]                         # only installs the plugin in --non-interactive when set
 #     [--start-dev]                              # only starts npm run dev in --non-interactive when set
+#                                                # (Tier 0 web app is wired in Phase 2 — flag is a no-op there)
 #     [--configure-desktop]                      # only writes Claude Desktop MCP config in --non-interactive when set
 #     [--install-skills]                         # only installs skills under ~/.claude/skills in --non-interactive when set
 #
@@ -33,9 +35,12 @@ START_DEV=0
 CONFIGURE_DESKTOP=0
 INSTALL_SKILLS=0
 ARG_EMAIL=""
+TIER=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --non-interactive) NON_INTERACTIVE=1; shift ;;
+    --tier) TIER=$2; shift 2 ;;
+    --tier=*) TIER=${1#--tier=}; shift ;;
     --email) ARG_EMAIL=$2; shift 2 ;;
     --email=*) ARG_EMAIL=${1#--email=}; shift ;;
     --install-plugin) INSTALL_PLUGIN=1; shift ;;
@@ -43,7 +48,7 @@ while [ $# -gt 0 ]; do
     --configure-desktop) CONFIGURE_DESKTOP=1; shift ;;
     --install-skills) INSTALL_SKILLS=1; shift ;;
     -h|--help)
-      sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -53,17 +58,26 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+case "$TIER" in
+  0|1) ;;
+  *) err "unsupported --tier: $TIER (use 0 or 1)"; exit 1 ;;
+esac
+
 # ── 1. Pre-flight ─────────────────────────────────────────────────────────────
 
-step "1. Pre-flight checks"
+step "1. Pre-flight checks (Tier $TIER)"
 
 FAIL=0
-require_docker_running || FAIL=1
 require_version node 20.0 "node --version" \
   "Install Node.js >= 20 LTS — https://nodejs.org or via nvm/asdf/volta" || FAIL=1
-require_version supabase 2.0 "supabase --version" \
-  "macOS:  brew install supabase/tap/supabase
+if [ "$TIER" = "1" ]; then
+  require_docker_running || FAIL=1
+  require_version supabase 2.0 "supabase --version" \
+    "macOS:  brew install supabase/tap/supabase
 Linux:  https://supabase.com/docs/guides/cli/getting-started" || FAIL=1
+else
+  dim "Tier 0 — skipping Docker and Supabase CLI checks (embedded Postgres only)"
+fi
 # bash version comes from $BASH_VERSION
 BASH_V=${BASH_VERSION%%(*}
 if version_ge "$BASH_V" "3.2"; then
@@ -131,47 +145,65 @@ ok "root npm install"
 )
 ok "mcp/ install + build"
 
-# ── 4. Local Supabase ─────────────────────────────────────────────────────────
+# ── 4. Database + migrations + user row ───────────────────────────────────────
 
-step "4. Starting local Supabase"
+DATABASE_URL_TIER0="postgres://plannen:plannen@127.0.0.1:54322/plannen"
 
-# local-start.sh is idempotent — `supabase start` no-ops if running and the
-# Kong patch is overwrite-replace, so we always delegate.
-bash scripts/local-start.sh
+if [ "$TIER" = "0" ]; then
+  step "4. Starting embedded Postgres (Tier 0)"
+  bash scripts/pg-start.sh
+  # pg-start.sh runs node lib/plannen-pg.mjs start which fails if there's no
+  # data dir; init is idempotent (no-op when PG_VERSION already exists).
+  if [ ! -f "$HOME/.plannen/pgdata/PG_VERSION" ]; then
+    node scripts/lib/plannen-pg.mjs init >> "$HOME/.plannen/pg.log" 2>&1 &
+    sleep 4
+  fi
+  ok "embedded Postgres on 54322"
 
-# ── 5. Migrations ─────────────────────────────────────────────────────────────
+  step "5. Applying migrations (Tier 0 overlay + main)"
+  DATABASE_URL="$DATABASE_URL_TIER0" PLANNEN_TIER=0 node scripts/lib/migrate.mjs
+  ok "migrations applied"
 
-step "5. Applying migrations"
+  step "6. Inserting Plannen user row for $EMAIL"
+  USER_UUID=$(DATABASE_URL="$DATABASE_URL_TIER0" EMAIL="$EMAIL" node -e '
+    const pg = require("pg")
+    const c = new pg.Client({ connectionString: process.env.DATABASE_URL })
+    const email = process.env.EMAIL
+    c.connect()
+      .then(() => c.query("INSERT INTO auth.users (id, email) VALUES (gen_random_uuid(), $1) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING id", [email]))
+      .then(r => { process.stdout.write(r.rows[0].id); return c.end() })
+      .catch(e => { process.stderr.write(e.message + "\n"); process.exit(1) })
+  ')
+  [ -n "$USER_UUID" ] || { err "failed to insert user row"; exit 1; }
+  ok "plannen user: $USER_UUID"
+else
+  step "4. Starting local Supabase"
+  bash scripts/local-start.sh
 
-supabase migration up
-ok "migrations applied"
+  step "5. Applying migrations"
+  supabase migration up
+  ok "migrations applied"
 
-# ── 6. Auth user ──────────────────────────────────────────────────────────────
+  step "6. Resolving auth.users row for $EMAIL"
+  SUPABASE_URL_FOR_NODE=$(env_get "$EXAMPLE_FILE" SUPABASE_URL)
+  SERVICE_ROLE_FOR_NODE=$(env_get "$EXAMPLE_FILE" SUPABASE_SERVICE_ROLE_KEY)
+  EXISTING_URL=$(env_get "$ENV_FILE" SUPABASE_URL)
+  EXISTING_KEY=$(env_get "$ENV_FILE" SUPABASE_SERVICE_ROLE_KEY)
+  [ -n "$EXISTING_URL" ] && SUPABASE_URL_FOR_NODE=$EXISTING_URL
+  [ -n "$EXISTING_KEY" ] && SERVICE_ROLE_FOR_NODE=$EXISTING_KEY
 
-step "6. Resolving auth.users row for $EMAIL"
-
-# Pull the Supabase URL + service role key from .env.example for use here
-# (these are demo keys when running against local; the user can override via
-# .env after first install).
-SUPABASE_URL_FOR_NODE=$(env_get "$EXAMPLE_FILE" SUPABASE_URL)
-SERVICE_ROLE_FOR_NODE=$(env_get "$EXAMPLE_FILE" SUPABASE_SERVICE_ROLE_KEY)
-# Allow .env to override if it has them
-EXISTING_URL=$(env_get "$ENV_FILE" SUPABASE_URL)
-EXISTING_KEY=$(env_get "$ENV_FILE" SUPABASE_SERVICE_ROLE_KEY)
-[ -n "$EXISTING_URL" ] && SUPABASE_URL_FOR_NODE=$EXISTING_URL
-[ -n "$EXISTING_KEY" ] && SERVICE_ROLE_FOR_NODE=$EXISTING_KEY
-
-set +e
-USER_UUID=$(SUPABASE_URL=$SUPABASE_URL_FOR_NODE \
-            SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_FOR_NODE \
-            node scripts/lib/auth-user.mjs "$EMAIL")
-RC=$?
-set -e
-if [ $RC -eq 2 ]; then
-  exit 2  # auth-user.mjs already printed the abort message
+  set +e
+  USER_UUID=$(SUPABASE_URL=$SUPABASE_URL_FOR_NODE \
+              SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_FOR_NODE \
+              node scripts/lib/auth-user.mjs "$EMAIL")
+  RC=$?
+  set -e
+  if [ $RC -eq 2 ]; then
+    exit 2
+  fi
+  [ $RC -eq 0 ] || { err "auth-user step failed"; exit 1; }
+  ok "auth user: $USER_UUID"
 fi
-[ $RC -eq 0 ] || { err "auth-user step failed"; exit 1; }
-ok "auth user: $USER_UUID"
 
 # ── 7. Write .env ─────────────────────────────────────────────────────────────
 
@@ -179,6 +211,10 @@ step "7. Writing .env"
 
 merge_env "$EXAMPLE_FILE" "$ENV_FILE"
 env_set "$ENV_FILE" PLANNEN_USER_EMAIL "$EMAIL"
+env_set "$ENV_FILE" PLANNEN_TIER "$TIER"
+if [ "$TIER" = "0" ]; then
+  env_set "$ENV_FILE" DATABASE_URL "$DATABASE_URL_TIER0"
+fi
 ok "$ENV_FILE updated (existing values preserved)"
 
 # Mirror the supabase/functions/.env scaffolding (functions-start.sh does
@@ -190,33 +226,40 @@ if [ ! -f "$FUNCTIONS_ENV" ] && [ -f "${FUNCTIONS_ENV}.example" ]; then
   ok "$FUNCTIONS_ENV created from template (Google OAuth blank — add via /plannen-setup)"
 fi
 
-# ── 8. Functions serve (background) ───────────────────────────────────────────
+# ── 8. Functions serve (Tier 1 only) ──────────────────────────────────────────
 
-step "8. Starting supabase functions serve in background"
+if [ "$TIER" = "1" ]; then
+  step "8. Starting supabase functions serve in background"
+  bash scripts/functions-start.sh
+else
+  dim "Tier 0 — edge functions live in Phase 2 backend; functions-serve skipped"
+fi
 
-bash scripts/functions-start.sh
+# ── 8b. Web app dev server (Tier 1 only for now; Tier 0 wired in Phase 2) ─────
 
-# ── 8b. Web app dev server (background) ───────────────────────────────────────
+if [ "$TIER" = "1" ]; then
+  step "8b. Web app dev server (npm run dev)"
 
-step "8b. Web app dev server (npm run dev)"
-
-DO_DEV=0
-if [ "$NON_INTERACTIVE" -eq 1 ]; then
-  if [ "$START_DEV" -eq 1 ]; then
-    DO_DEV=1
+  DO_DEV=0
+  if [ "$NON_INTERACTIVE" -eq 1 ]; then
+    if [ "$START_DEV" -eq 1 ]; then
+      DO_DEV=1
+    else
+      dim "skipping dev server (--non-interactive without --start-dev)"
+    fi
   else
-    dim "skipping dev server (--non-interactive without --start-dev)"
+    printf "  Start npm run dev in the background now? [Y/n]: "
+    read -r answer
+    case "$(lower "$answer")" in
+      ""|y|yes) DO_DEV=1 ;;
+      *) dim "skipped — start later with: bash scripts/dev-start.sh" ;;
+    esac
+  fi
+  if [ "$DO_DEV" -eq 1 ]; then
+    bash scripts/dev-start.sh
   fi
 else
-  printf "  Start npm run dev in the background now? [Y/n]: "
-  read -r answer
-  case "$(lower "$answer")" in
-    ""|y|yes) DO_DEV=1 ;;
-    *) dim "skipped — start later with: bash scripts/dev-start.sh" ;;
-  esac
-fi
-if [ "$DO_DEV" -eq 1 ]; then
-  bash scripts/dev-start.sh
+  dim "Tier 0 — web app wired in Phase 2; skip until then"
 fi
 
 # ── 9. Plugin install (Claude Code) ───────────────────────────────────────────
@@ -295,17 +338,29 @@ if [ -n "$DESKTOP_DIR" ] && [ -d "$DESKTOP_DIR" ]; then
   if [ "$DO_DESKTOP" -eq 1 ]; then
     if [ ! -f "$ABS_MCP_PATH" ]; then
       err "MCP build artifact missing at $ABS_MCP_PATH — run 'cd mcp && npm run build'"
-    elif [ -z "$SERVICE_ROLE_FOR_NODE" ]; then
+    elif [ "$TIER" = "1" ] && [ -z "$SERVICE_ROLE_FOR_NODE" ]; then
       err "no SUPABASE_SERVICE_ROLE_KEY available to write into Claude Desktop config"
     else
-      CONFIG_PATH="$DESKTOP_CONFIG" \
-      MCP_SERVER_PATH="$ABS_MCP_PATH" \
-      SUPABASE_URL="$SUPABASE_URL_FOR_NODE" \
-      SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_FOR_NODE" \
-      PLANNEN_USER_EMAIL="$EMAIL" \
-      node "$SCRIPT_DIR/lib/claude-desktop-config.mjs" \
-        && ok "Claude Desktop config updated — restart Claude Desktop to pick it up" \
-        || warn "Claude Desktop config update failed — see message above"
+      if [ "$TIER" = "0" ]; then
+        CONFIG_PATH="$DESKTOP_CONFIG" \
+        MCP_SERVER_PATH="$ABS_MCP_PATH" \
+        DATABASE_URL="$DATABASE_URL_TIER0" \
+        PLANNEN_TIER=0 \
+        PLANNEN_USER_EMAIL="$EMAIL" \
+        node "$SCRIPT_DIR/lib/claude-desktop-config.mjs" \
+          && ok "Claude Desktop config updated — restart Claude Desktop to pick it up" \
+          || warn "Claude Desktop config update failed — see message above"
+      else
+        CONFIG_PATH="$DESKTOP_CONFIG" \
+        MCP_SERVER_PATH="$ABS_MCP_PATH" \
+        SUPABASE_URL="$SUPABASE_URL_FOR_NODE" \
+        SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_FOR_NODE" \
+        PLANNEN_TIER=1 \
+        PLANNEN_USER_EMAIL="$EMAIL" \
+        node "$SCRIPT_DIR/lib/claude-desktop-config.mjs" \
+          && ok "Claude Desktop config updated — restart Claude Desktop to pick it up" \
+          || warn "Claude Desktop config update failed — see message above"
+      fi
     fi
   fi
 else
@@ -434,9 +489,26 @@ fi
 
 step "Done"
 
+if [ "$TIER" = "0" ]; then
 cat <<EOF
 
-  ${C_GREEN}✓${C_RESET} Plannen is configured for ${C_CYAN}$EMAIL${C_RESET}.
+  ${C_GREEN}✓${C_RESET} Plannen (Tier 0) is configured for ${C_CYAN}$EMAIL${C_RESET}.
+
+  Storage:    embedded Postgres at $DATABASE_URL_TIER0
+              Data dir:  ~/.plannen/pgdata
+              Stop:      bash scripts/pg-stop.sh
+
+  MCP path:   Claude Code / Claude Desktop talk to your local data via the
+              plannen MCP server in mcp/dist/index.js.
+
+  Web app:    wired in Phase 2 (backend + dbClient refactor). Until then,
+              the web UI only works against Tier 1.
+
+EOF
+else
+cat <<EOF
+
+  ${C_GREEN}✓${C_RESET} Plannen (Tier 1) is configured for ${C_CYAN}$EMAIL${C_RESET}.
 
   Next steps:
     → Web app:    $(if [ -f .plannen/dev.pid ] && kill -0 "$(cat .plannen/dev.pid 2>/dev/null)" 2>/dev/null; then printf "running in background (PID %s) → http://localhost:4321\n                  Logs:  .plannen/dev.log\n                  Stop:  bash scripts/dev-stop.sh" "$(cat .plannen/dev.pid)"; else printf "npm run dev   →  http://localhost:4321"; fi)
@@ -451,3 +523,4 @@ cat <<EOF
                   Stop:  bash scripts/functions-stop.sh
 
 EOF
+fi
