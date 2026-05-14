@@ -67,6 +67,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // from PLANNEN_USER_EMAIL and exposes them via GET /api/me. No login UI;
       // no auth-state subscription. Synthesise a User-shaped object so existing
       // consumers (which type-check against @supabase/supabase-js's User) work.
+      // Skip loadProfile entirely — it calls supabase.from('users') against the
+      // non-existent 54321; the profile fields we'd fetch are populated below
+      // from /api/me directly.
       ;(async () => {
         try {
           const me = await dbClient.me.get()
@@ -80,7 +83,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             created_at: new Date(0).toISOString(),
           } as User
           setUser(u)
-          await loadProfile(u)
+          setProfile({
+            id: me.userId,
+            email: me.email,
+            full_name: null,
+            avatar_sticker: null,
+          })
         } catch {
           if (isMounted) setUser(null)
         } finally {
