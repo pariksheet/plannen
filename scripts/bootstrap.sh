@@ -228,6 +228,16 @@ env_set "$ENV_FILE" PLANNEN_USER_EMAIL "$EMAIL"
 env_set "$ENV_FILE" PLANNEN_TIER "$TIER"
 if [ "$TIER" = "0" ]; then
   env_set "$ENV_FILE" DATABASE_URL "$DATABASE_URL_TIER0"
+  env_set "$ENV_FILE" PLANNEN_BACKEND_PORT "54323"
+  env_set "$ENV_FILE" BACKEND_URL "http://127.0.0.1:54323"
+  env_set "$ENV_FILE" VITE_PLANNEN_TIER "0"
+  env_set "$ENV_FILE" VITE_PLANNEN_BACKEND_MODE "plannen-api"
+else
+  # Tier 1's MCP server also speaks pg directly now. Point DATABASE_URL at the
+  # Supabase-bundled Postgres so withUserContext works identically across tiers.
+  env_set "$ENV_FILE" DATABASE_URL "postgres://postgres:postgres@127.0.0.1:54322/postgres"
+  env_set "$ENV_FILE" VITE_PLANNEN_TIER "1"
+  env_set "$ENV_FILE" VITE_PLANNEN_BACKEND_MODE "supabase"
 fi
 ok "$ENV_FILE updated (existing values preserved)"
 
@@ -246,12 +256,15 @@ if [ "$TIER" = "1" ]; then
   step "8. Starting supabase functions serve in background"
   bash scripts/functions-start.sh
 else
-  dim "Tier 0 — edge functions live in Phase 2 backend; functions-serve skipped"
+  step "8. Building + starting Plannen backend (Tier 0)"
+  (cd backend && npm install --silent && npm run build --silent)
+  ok "backend built"
+  bash scripts/backend-start.sh
 fi
 
-# ── 8b. Web app dev server (Tier 1 only for now; Tier 0 wired in Phase 2) ─────
+# ── 8b. Web app dev server (background, both tiers) ───────────────────────────
 
-if [ "$TIER" = "1" ]; then
+if true; then
   step "8b. Web app dev server (npm run dev)"
 
   DO_DEV=0
@@ -272,8 +285,6 @@ if [ "$TIER" = "1" ]; then
   if [ "$DO_DEV" -eq 1 ]; then
     bash scripts/dev-start.sh
   fi
-else
-  dim "Tier 0 — web app wired in Phase 2; skip until then"
 fi
 
 # ── 9. Plugin install (Claude Code) ───────────────────────────────────────────
@@ -512,11 +523,14 @@ cat <<EOF
               Data dir:  ~/.plannen/pgdata
               Stop:      bash scripts/pg-stop.sh
 
+  Backend:    running on http://127.0.0.1:54323
+              Logs:      ~/.plannen/backend.log
+              Stop:      bash scripts/backend-stop.sh
+
+  Web app:    $(if [ -f .plannen/dev.pid ] && kill -0 "$(cat .plannen/dev.pid 2>/dev/null)" 2>/dev/null; then printf "running (PID %s) → http://localhost:4321\n              Logs:      .plannen/dev.log\n              Stop:      bash scripts/dev-stop.sh" "$(cat .plannen/dev.pid)"; else printf "npm run dev   →  http://localhost:4321"; fi)
+
   MCP path:   Claude Code / Claude Desktop talk to your local data via the
               plannen MCP server in mcp/dist/index.js.
-
-  Web app:    wired in Phase 2 (backend + dbClient refactor). Until then,
-              the web UI only works against Tier 1.
 
 EOF
 else
