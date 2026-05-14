@@ -178,6 +178,29 @@ if [ "$TIER" = "0" ]; then
   DATABASE_URL="$DATABASE_URL_TIER0" PLANNEN_TIER=0 node scripts/lib/migrate.mjs
   ok "migrations applied"
 
+  # Auto-restore seed (and photos) on a fresh DB. Mirrors how Tier 1's
+  # `supabase db reset` auto-loads supabase/seed.sql.
+  SEED_SQL="$PROJECT_DIR/supabase/seed.sql"
+  SEED_PHOTOS="$PROJECT_DIR/supabase/seed-photos.tar.gz"
+  if [ -f "$SEED_SQL" ]; then
+    USER_COUNT=$(DATABASE_URL="$DATABASE_URL_TIER0" node -e '
+      const pg=require("pg");
+      (async()=>{const c=new pg.Client({connectionString:process.env.DATABASE_URL});await c.connect();const r=await c.query("SELECT count(*) FROM plannen.users");process.stdout.write(r.rows[0].count);await c.end();})();
+    ' 2>/dev/null || echo 0)
+    if [ "${USER_COUNT:-0}" = "0" ]; then
+      step "5b. Restoring supabase/seed.sql into empty DB"
+      DATABASE_URL="$DATABASE_URL_TIER0" node scripts/lib/restore-seed.mjs "$SEED_SQL"
+      ok "seed restored"
+      if [ -f "$SEED_PHOTOS" ]; then
+        step "5c. Restoring photos from supabase/seed-photos.tar.gz"
+        node scripts/lib/restore-photos.mjs "$SEED_PHOTOS"
+        ok "photos restored"
+      fi
+    else
+      dim "DB already has $USER_COUNT plannen.users row(s) — skipping seed restore"
+    fi
+  fi
+
   step "6. Inserting Plannen user row for $EMAIL"
   USER_UUID=$(DATABASE_URL="$DATABASE_URL_TIER0" EMAIL="$EMAIL" node -e '
     const pg = require("pg")
