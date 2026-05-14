@@ -144,7 +144,7 @@ export function Settings() {
     <div className="max-w-xl mx-auto py-8 px-4">
       <h2 className="text-xl font-semibold text-gray-900 mb-1">AI Settings</h2>
       <p className="text-sm text-gray-500 mb-6">
-        Plannen uses an AI model for discovery, story generation, and event extraction. Bring your own key — it's stored in your local Plannen database (Tier 1) and never leaves your machine.
+        Plannen uses an AI model for discovery, story generation, and event extraction. Pick the Claude Code CLI to use your subscription, or paste an Anthropic API key — either way the choice stays on your machine.
       </p>
 
       <div className="bg-white rounded-lg border border-gray-200 p-5">

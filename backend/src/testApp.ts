@@ -32,7 +32,6 @@ import { getGoogleAccessToken } from './routes/functions/getGoogleAccessToken.js
 import { getGoogleAuthUrl } from './routes/functions/getGoogleAuthUrl.js'
 import { googleOauthCallback } from './routes/functions/googleOauthCallback.js'
 import { sendInviteEmail } from './routes/functions/sendInviteEmail.js'
-import { sendReminder } from './routes/functions/sendReminder.js'
 import type { AppVariables } from './types.js'
 
 export function buildApp(user: { userId: string; userEmail: string }) {
@@ -71,6 +70,5 @@ export function buildApp(user: { userId: string; userEmail: string }) {
   app.route('/functions/v1/get-google-auth-url', getGoogleAuthUrl)
   app.route('/functions/v1/google-oauth-callback', googleOauthCallback)
   app.route('/functions/v1/send-invite-email', sendInviteEmail)
-  app.route('/functions/v1/send-reminder', sendReminder)
   return app
 }
