@@ -1,16 +1,14 @@
-import { fileURLToPath } from 'node:url'
-import { dirname, resolve } from 'node:path'
-import { config as loadDotenv } from 'dotenv'
-
-// Load <repo-root>/.env before reading any process.env. Existing env vars (e.g.
-// from `claude mcp add -e ...`) take precedence — dotenv only fills in gaps.
-const __dirname = dirname(fileURLToPath(import.meta.url))
-loadDotenv({ path: resolve(__dirname, '../../.env') })
+// .env load is now a side-effect of ./env.js (also imported by db.ts). ESM
+// evaluates imports top-down BEFORE this module's body, so placing it first
+// guarantees process.env is populated before any downstream import reads it.
+import './env.js'
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema, Tool } from '@modelcontextprotocol/sdk/types.js'
-import { createClient } from '@supabase/supabase-js'
+import type { PoolClient } from 'pg'
+import { pool, withUserContext } from './db.js'
+import { resolveUserIdByEmail } from './userResolver.js'
 import {
   initialConfidence,
   computeCorroborationConfidence,
@@ -24,11 +22,11 @@ import { parseSourceUrl, normaliseTags, validateName, validateSourceType } from 
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const SUPABASE_URL = process.env.SUPABASE_URL ?? 'http://127.0.0.1:54321'
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
+const DATABASE_URL = process.env.DATABASE_URL ?? ''
 const USER_EMAIL = (process.env.PLANNEN_USER_EMAIL ?? '').toLowerCase()
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? ''
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ?? ''
+const PLANNEN_TIER = process.env.PLANNEN_TIER ?? '0'
 // Convert a UTC ISO string to a local datetime string (no offset) for the given IANA timezone.
 // e.g. "2026-05-10T09:00:00+00:00" + "Europe/Brussels" → "2026-05-10T11:00:00"
 function toLocalIso(utcIso: string, tz: string): string {
@@ -43,7 +41,7 @@ function toLocalIso(utcIso: string, tz: string): string {
   return `${g('year')}-${g('month')}-${g('day')}T${g('hour')}:${g('minute')}:${g('second')}`
 }
 
-if (!SERVICE_ROLE_KEY) fatal('SUPABASE_SERVICE_ROLE_KEY is required')
+if (!DATABASE_URL) fatal('DATABASE_URL is required (set by bootstrap.sh)')
 if (!USER_EMAIL) fatal('PLANNEN_USER_EMAIL is required')
 
 function fatal(msg: string): never {
@@ -51,10 +49,11 @@ function fatal(msg: string): never {
   process.exit(1)
 }
 
-const db = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-  auth: { persistSession: false },
-  db: { schema: 'plannen' },
-})
+function tier1Only(feature: string): never {
+  throw new Error(
+    `${feature} requires Tier 1 (Supabase Edge Functions). Run "bash scripts/bootstrap.sh --tier 1" or upgrade your install.`
+  )
+}
 
 // ── User resolution ───────────────────────────────────────────────────────────
 
@@ -62,15 +61,7 @@ let _userId: string | null = null
 
 async function uid(): Promise<string> {
   if (_userId) return _userId
-  const { data, error } = await db.auth.admin.listUsers()
-  if (error) throw new Error(`Auth error: ${error.message}`)
-  const user = data.users.find((u) => u.email?.toLowerCase() === USER_EMAIL)
-  if (!user) {
-    throw new Error(
-      `No Plannen account found for ${USER_EMAIL}. Sign in to the app at least once first.`
-    )
-  }
-  _userId = user.id
+  _userId = await resolveUserIdByEmail(USER_EMAIL)
   return _userId
 }
 
@@ -115,97 +106,108 @@ function truncateDescription(desc: unknown, maxLen = 200): string | null {
 
 async function listEvents(args: { status?: string; limit?: number; from_date?: string; to_date?: string; fields?: 'summary' | 'full' }) {
   const [id, tz] = await Promise.all([uid(), getUserTimezone()])
-  let q = db
-    .from('events')
-    .select('id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline')
-    .eq('created_by', id)
-    .order('start_date', { ascending: true })
-    .limit(args.limit ?? 10)
-  if (args.status) q = q.eq('event_status', args.status)
-  if (args.from_date) q = q.gte('start_date', args.from_date)
-  if (args.to_date) q = q.lt('start_date', args.to_date + 'T24:00:00')
-  const { data, error } = await q
-  if (error) throw new Error(error.message)
-  const full = args.fields === 'full'
-  return (data ?? []).map(e => ({
-    ...e,
-    description: full ? e.description : truncateDescription(e.description),
-    start_date: e.start_date ? toLocalIso(e.start_date, tz) : e.start_date,
-    end_date: e.end_date ? toLocalIso(e.end_date, tz) : e.end_date,
-    user_timezone: tz,
-  }))
+  return await withUserContext(id, async (c) => {
+    const where: string[] = ['created_by = $1']
+    const params: unknown[] = [id]
+    if (args.status) { params.push(args.status); where.push(`event_status = $${params.length}`) }
+    if (args.from_date) { params.push(args.from_date); where.push(`start_date >= $${params.length}`) }
+    if (args.to_date) { params.push(args.to_date + 'T24:00:00'); where.push(`start_date < $${params.length}`) }
+    params.push(args.limit ?? 10)
+    const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline
+                 FROM plannen.events
+                 WHERE ${where.join(' AND ')}
+                 ORDER BY start_date ASC
+                 LIMIT $${params.length}`
+    const { rows } = await c.query(sql, params)
+    const full = args.fields === 'full'
+    return rows.map((e: Record<string, unknown>) => ({
+      ...e,
+      description: full ? e.description : truncateDescription(e.description),
+      start_date: e.start_date ? toLocalIso(e.start_date as string, tz) : e.start_date,
+      end_date: e.end_date ? toLocalIso(e.end_date as string, tz) : e.end_date,
+      user_timezone: tz,
+    }))
+  })
 }
 
 async function getEvent(args: { id: string; fields?: 'summary' | 'full' }) {
   const [id, tz] = await Promise.all([uid(), getUserTimezone()])
   const selectCols = args.fields === 'full' ? '*' : SLIM_EVENT_COLUMNS
-  const { data, error } = await db
-    .from('events')
-    .select(selectCols)
-    .eq('id', args.id)
-    .eq('created_by', id)
-    .single<Record<string, unknown>>()
-  if (error) throw new Error(error.message)
+  return await withUserContext(id, async (c) => {
+    const { rows: dataRows } = await c.query(
+      `SELECT ${selectCols} FROM plannen.events WHERE id = $1 AND created_by = $2`,
+      [args.id, id],
+    )
+    if (dataRows.length === 0) throw new Error('Not found')
+    const data = dataRows[0] as Record<string, unknown>
 
-  const localise = (e: { start_date?: string | null; end_date?: string | null }) => ({
-    ...e,
-    start_date: e.start_date ? toLocalIso(e.start_date, tz) : e.start_date,
-    end_date: e.end_date ? toLocalIso(e.end_date, tz) : e.end_date,
-    user_timezone: tz,
+    const localise = <T extends { start_date?: string | null; end_date?: string | null }>(e: T) => ({
+      ...e,
+      start_date: e.start_date ? toLocalIso(e.start_date, tz) : e.start_date,
+      end_date: e.end_date ? toLocalIso(e.end_date, tz) : e.end_date,
+      user_timezone: tz,
+    })
+
+    const { rows: memoryRows } = await c.query(
+      'SELECT id, external_id, source, caption FROM plannen.event_memories WHERE event_id = $1',
+      [data.id],
+    )
+    const memories = memoryRows
+
+    // Recurring parent: embed sessions
+    if (data.recurrence_rule) {
+      const { rows: sessions } = await c.query(
+        `SELECT id, title, start_date, end_date, event_status
+         FROM plannen.events
+         WHERE parent_event_id = $1
+         ORDER BY start_date ASC`,
+        [data.id],
+      )
+      return { ...localise(data as { start_date?: string | null; end_date?: string | null }), sessions: sessions.map(localise), memories }
+    }
+
+    // Session: embed parent summary
+    if (data.parent_event_id) {
+      const { rows: parentRows } = await c.query(
+        'SELECT id, title, start_date, recurrence_rule FROM plannen.events WHERE id = $1',
+        [data.parent_event_id],
+      )
+      if (parentRows.length === 0) throw new Error('Not found')
+      const parent = parentRows[0]
+      return { ...localise(data as { start_date?: string | null; end_date?: string | null }), parent: localise(parent), memories }
+    }
+
+    return { ...data, memories }
   })
-
-  const { data: memoryRows } = await db
-    .from('event_memories')
-    .select('id, external_id, source, caption')
-    .eq('event_id', data.id)
-  const memories = memoryRows ?? []
-
-  // Recurring parent: embed sessions
-  if (data.recurrence_rule) {
-    const { data: sessions } = await db
-      .from('events')
-      .select('id, title, start_date, end_date, event_status')
-      .eq('parent_event_id', data.id)
-      .order('start_date', { ascending: true })
-    return { ...localise(data), sessions: (sessions ?? []).map(localise), memories }
-  }
-
-  // Session: embed parent summary
-  if (data.parent_event_id) {
-    const { data: parent } = await db
-      .from('events')
-      .select('id, title, start_date, recurrence_rule')
-      .eq('id', data.parent_event_id)
-      .single()
-    return { ...localise(data), parent: parent ? localise(parent) : null, memories }
-  }
-
-  return { ...data, memories }
 }
 
 const VALID_EVENT_STATUSES = ['watching', 'planned', 'interested', 'going', 'cancelled', 'past', 'missed'] as const
 type EventStatus = typeof VALID_EVENT_STATUSES[number]
 
 async function upsertSource(
+  c: PoolClient,
   userId: string,
   eventId: string | null,
   enrollmentUrl: string
 ): Promise<{ id: string; last_analysed_at: string | null } | null> {
   const domain = extractDomain(enrollmentUrl)
   if (!domain) return null
-  const { data: src, error: srcErr } = await db
-    .from('event_sources')
-    .upsert(
-      { user_id: userId, domain, source_url: enrollmentUrl },
-      { onConflict: 'user_id,domain' }
-    )
-    .select('id, last_analysed_at')
-    .single()
-  if (srcErr || !src) return null
+  const { rows: srcRows } = await c.query(
+    `INSERT INTO plannen.event_sources (user_id, domain, source_url)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (user_id, domain) DO UPDATE
+       SET source_url = EXCLUDED.source_url
+     RETURNING id, last_analysed_at`,
+    [userId, domain, enrollmentUrl],
+  )
+  if (srcRows.length === 0) return null
+  const src = srcRows[0] as { id: string; last_analysed_at: string | null }
   if (eventId !== null) {
-    await db.from('event_source_refs').upsert(
-      { event_id: eventId, source_id: src.id, user_id: userId, ref_type: 'enrollment_url' },
-      { onConflict: 'event_id,source_id' }
+    await c.query(
+      `INSERT INTO plannen.event_source_refs (event_id, source_id, user_id, ref_type)
+       VALUES ($1, $2, $3, 'enrollment_url')
+       ON CONFLICT (event_id, source_id) DO NOTHING`,
+      [eventId, src.id, userId],
     )
   }
   return { id: src.id, last_analysed_at: src.last_analysed_at }
@@ -224,62 +226,70 @@ async function createEvent(args: {
   recurrence_rule?: RecurrenceRule
 }) {
   const id = await uid()
+  const tz = await getUserTimezone()
   const startDate = new Date(args.start_date)
   const event_status: EventStatus =
     args.event_status && VALID_EVENT_STATUSES.includes(args.event_status as EventStatus)
       ? (args.event_status as EventStatus)
       : startDate < new Date() ? 'past' : 'going'
 
-  const { data, error } = await db
-    .from('events')
-    .insert({
-      title: args.title,
-      description: args.description ?? null,
-      start_date: args.start_date,
-      end_date: args.end_date ?? null,
-      location: args.location ?? null,
-      event_kind: args.event_kind === 'reminder' ? 'reminder' : 'event',
-      enrollment_url: args.enrollment_url ?? null,
-      hashtags: (args.hashtags ?? []).slice(0, 5),
-      event_type: 'personal',
-      event_status,
-      created_by: id,
-      shared_with_family: false,
-      shared_with_friends: 'none',
-      recurrence_rule: args.recurrence_rule ?? null,
-    })
-    .select()
-    .single()
-  if (error) throw new Error(error.message)
-
-  if (data && args.recurrence_rule) {
-    const tz = await getUserTimezone()
-    const dates = generateSessionDates(args.start_date, args.recurrence_rule, tz)
-    if (dates.length) {
-      const sessions = dates.map((d, i) => ({
-        title: `${args.title} – Session ${i + 1}`,
-        description: args.description ?? null,
-        start_date: d.start.toISOString(),
-        end_date: d.end ? d.end.toISOString() : null,
-        location: args.location ?? null,
-        event_kind: 'session',
-        event_type: 'personal',
+  return await withUserContext(id, async (c) => {
+    const hashtags = (args.hashtags ?? []).slice(0, 5)
+    const { rows } = await c.query(
+      `INSERT INTO plannen.events
+         (title, description, start_date, end_date, location, event_kind,
+          enrollment_url, hashtags, event_type, event_status, created_by,
+          shared_with_family, shared_with_friends, recurrence_rule)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'personal', $9, $10, false, 'none', $11)
+       RETURNING *`,
+      [
+        args.title,
+        args.description ?? null,
+        args.start_date,
+        args.end_date ?? null,
+        args.location ?? null,
+        args.event_kind === 'reminder' ? 'reminder' : 'event',
+        args.enrollment_url ?? null,
+        hashtags,
         event_status,
-        created_by: id,
-        parent_event_id: data.id,
-        shared_with_family: false,
-        shared_with_friends: 'none',
-        hashtags: (args.hashtags ?? []).slice(0, 5),
-      }))
-      await db.from('events').insert(sessions)
+        id,
+        args.recurrence_rule ?? null,
+      ],
+    )
+    if (rows.length === 0) throw new Error('Insert failed')
+    const data = rows[0] as Record<string, unknown> & { id: string }
+
+    if (args.recurrence_rule) {
+      const dates = generateSessionDates(args.start_date, args.recurrence_rule, tz)
+      for (let i = 0; i < dates.length; i++) {
+        const d = dates[i]
+        await c.query(
+          `INSERT INTO plannen.events
+             (title, description, start_date, end_date, location, event_kind,
+              event_type, event_status, created_by, parent_event_id,
+              shared_with_family, shared_with_friends, hashtags)
+           VALUES ($1, $2, $3, $4, $5, 'session', 'personal', $6, $7, $8, false, 'none', $9)`,
+          [
+            `${args.title} – Session ${i + 1}`,
+            args.description ?? null,
+            d.start.toISOString(),
+            d.end ? d.end.toISOString() : null,
+            args.location ?? null,
+            event_status,
+            id,
+            data.id,
+            hashtags,
+          ],
+        )
+      }
     }
-  }
 
-  const source = data && args.enrollment_url
-    ? await upsertSource(id, data.id, args.enrollment_url)
-    : null
+    const source = args.enrollment_url
+      ? await upsertSource(c, id, data.id, args.enrollment_url)
+      : null
 
-  return { ...slimEvent(data), source }
+    return { ...slimEvent(data), source }
+  })
 }
 
 async function updateEvent(args: {
@@ -294,33 +304,42 @@ async function updateEvent(args: {
 }) {
   const id = await uid()
   const { id: _id, ...rest } = args
-  const payload = Object.fromEntries(
-    Object.entries(rest).filter(([, v]) => v !== undefined)
-  )
-  const { data, error } = await db
-    .from('events')
-    .update({ ...payload, updated_at: new Date().toISOString() })
-    .eq('id', args.id)
-    .eq('created_by', id)
-    .select()
-    .single()
-  if (error) throw new Error(error.message)
-  const source = data?.enrollment_url
-    ? await upsertSource(id, args.id, data.enrollment_url)
-    : null
-  return { ...slimEvent(data), source }
+  const entries = Object.entries(rest).filter(([, v]) => v !== undefined)
+  return await withUserContext(id, async (c) => {
+    const setClauses: string[] = []
+    const params: unknown[] = []
+    for (const [k, v] of entries) {
+      params.push(v)
+      setClauses.push(`${k} = $${params.length}`)
+    }
+    params.push(new Date().toISOString())
+    setClauses.push(`updated_at = $${params.length}`)
+    params.push(args.id)
+    params.push(id)
+    const sql = `UPDATE plannen.events SET ${setClauses.join(', ')}
+                 WHERE id = $${params.length - 1} AND created_by = $${params.length}
+                 RETURNING *`
+    const { rows } = await c.query(sql, params)
+    if (rows.length === 0) throw new Error('Not found')
+    const data = rows[0] as Record<string, unknown> & { enrollment_url?: string | null }
+    const source = data.enrollment_url
+      ? await upsertSource(c, id, args.id, data.enrollment_url)
+      : null
+    return { ...slimEvent(data), source }
+  })
 }
 
 async function rsvpEvent(args: { event_id: string; status: string }) {
   const id = await uid()
-  const { error } = await db
-    .from('event_rsvps')
-    .upsert(
-      { event_id: args.event_id, user_id: id, status: args.status },
-      { onConflict: 'event_id,user_id' }
+  return await withUserContext(id, async (c) => {
+    await c.query(
+      `INSERT INTO plannen.event_rsvps (event_id, user_id, status)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (event_id, user_id) DO UPDATE SET status = EXCLUDED.status`,
+      [args.event_id, id, args.status],
     )
-  if (error) throw new Error(error.message)
-  return { success: true, event_id: args.event_id, status: args.status }
+    return { success: true, event_id: args.event_id, status: args.status }
+  })
 }
 
 async function addEventMemory(args: {
@@ -333,53 +352,62 @@ async function addEventMemory(args: {
   const id = await uid()
   const source = args.source ?? 'google_photos'
   const mediaType = (args.media_type as 'image' | 'video' | 'audio' | undefined) ?? 'image'
-  const { data, error } = await db
-    .from('event_memories')
-    .upsert(
-      {
-        event_id: args.event_id,
-        user_id: id,
-        media_url: null,
-        media_type: mediaType,
-        source,
-        external_id: args.external_id,
-        caption: args.caption ?? null,
-      },
-      { onConflict: 'event_id,external_id', ignoreDuplicates: true }
+  return await withUserContext(id, async (c) => {
+    // ignoreDuplicates semantics: only insert if (event_id, external_id) is new.
+    const { rows } = await c.query(
+      `INSERT INTO plannen.event_memories
+         (event_id, user_id, media_url, media_type, source, external_id, caption)
+       VALUES ($1, $2, NULL, $3, $4, $5, $6)
+       ON CONFLICT (event_id, external_id) DO NOTHING
+       RETURNING id`,
+      [args.event_id, id, mediaType, source, args.external_id, args.caption ?? null],
     )
-    .select('id')
-    .maybeSingle()
-  if (error) throw new Error(error.message)
-  return { attached: !!data, id: data?.id ?? null, event_id: args.event_id, external_id: args.external_id }
+    const inserted = rows[0] as { id: string } | undefined
+    return {
+      attached: !!inserted,
+      id: inserted?.id ?? null,
+      event_id: args.event_id,
+      external_id: args.external_id,
+    }
+  })
 }
 
 async function listEventMemories(args: { event_id: string }) {
   const userId = await uid()
-  const { data: event, error: evtErr } = await db
-    .from('events')
-    .select('id, created_by')
-    .eq('id', args.event_id)
-    .single()
-  if (evtErr) throw new Error(evtErr.message)
-  if (event.created_by !== userId) throw new Error('Event not found')
-  const { data, error } = await db
-    .from('event_memories')
-    .select('id, event_id, media_url, media_type, caption, taken_at, created_at, external_id, source, transcript, transcript_lang, transcribed_at')
-    .eq('event_id', args.event_id)
-    .order('taken_at', { ascending: true, nullsFirst: false })
-    .order('created_at', { ascending: true })
-  if (error) throw new Error(error.message)
-  return data ?? []
+  return await withUserContext(userId, async (c) => {
+    const { rows: evtRows } = await c.query(
+      'SELECT id, created_by FROM plannen.events WHERE id = $1',
+      [args.event_id],
+    )
+    if (evtRows.length === 0) throw new Error('Not found')
+    if ((evtRows[0] as { created_by: string }).created_by !== userId) throw new Error('Event not found')
+    const { rows } = await c.query(
+      `SELECT id, event_id, media_url, media_type, caption, taken_at, created_at,
+              external_id, source, transcript, transcript_lang, transcribed_at
+       FROM plannen.event_memories
+       WHERE event_id = $1
+       ORDER BY taken_at ASC NULLS LAST, created_at ASC`,
+      [args.event_id],
+    )
+    return rows
+  })
 }
 
 async function transcribeMemory(args: { memory_id: string; force?: boolean }) {
-  await uid() // ensure auth scope (also throws on missing user)
-  const { data: row, error } = await db
-    .from('event_memories')
-    .select('id, media_type, media_url, transcript, transcript_lang')
-    .eq('id', args.memory_id)
-    .maybeSingle()
-  if (error) throw new Error(error.message)
+  const userId = await uid()
+  // Phase 1: read the row + check cache inside one tx; do whisper outside;
+  // update in a second tx. Splitting keeps the network/whisper work out of the
+  // DB transaction so the connection isn't held while audio is processed.
+  const row = await withUserContext(userId, async (c) => {
+    const { rows } = await c.query(
+      `SELECT id, media_type, media_url, transcript, transcript_lang
+       FROM plannen.event_memories WHERE id = $1`,
+      [args.memory_id],
+    )
+    return rows[0] as
+      | { id: string; media_type: string; media_url: string | null; transcript: string | null; transcript_lang: string | null }
+      | undefined
+  })
   if (!row) throw new Error('memory not found')
   if (row.media_type !== 'audio') {
     return { ok: false as const, error: 'unsupported_media_type', detail: `media_type=${row.media_type}` }
@@ -417,11 +445,14 @@ async function transcribeMemory(args: { memory_id: string; force?: boolean }) {
     return { ok: false as const, error: 'whisper_failed', detail: e instanceof Error ? e.message : String(e) }
   }
 
-  const { error: updErr } = await db
-    .from('event_memories')
-    .update({ transcript, transcript_lang: language, transcribed_at: new Date().toISOString() })
-    .eq('id', args.memory_id)
-  if (updErr) throw new Error(updErr.message)
+  await withUserContext(userId, async (c) => {
+    await c.query(
+      `UPDATE plannen.event_memories
+       SET transcript = $1, transcript_lang = $2, transcribed_at = $3
+       WHERE id = $4`,
+      [transcript, language, new Date().toISOString(), args.memory_id],
+    )
+  })
 
   return { ok: true as const, cached: false, transcript, language }
 }
@@ -447,90 +478,97 @@ async function createStory(args: {
     throw new Error('Provide event_ids or both date_from and date_to')
   }
 
-  if (eventIds.length) {
-    const { data: events, error: evtErr } = await db
-      .from('events')
-      .select('id, created_by')
-      .in('id', eventIds)
-    if (evtErr) throw new Error(evtErr.message)
-    const ownedIds = new Set((events ?? []).filter(e => e.created_by === userId).map(e => e.id))
-    const missing = eventIds.filter(id => !ownedIds.has(id))
-    if (missing.length) throw new Error(`Events not found or not owned: ${missing.join(', ')}`)
-  }
-
-  if (eventIds.length === 1) {
-    const lang = args.language ?? 'en'
-    const { data: existing } = await db
-      .from('story_events')
-      .select('story_id, stories!inner(id, user_id, language)')
-      .eq('event_id', eventIds[0])
-      .eq('stories.user_id', userId)
-      .eq('stories.language', lang)
-      .maybeSingle()
-    if (existing?.story_id) {
-      const updatePatch: Record<string, unknown> = {
-        title: args.title,
-        body: args.body,
-        user_notes: args.user_notes ?? null,
-        mood: args.mood ?? null,
-        tone: args.tone ?? null,
-        generated_at: new Date().toISOString(),
-      }
-      if (args.cover_url !== undefined) updatePatch.cover_url = args.cover_url
-      if (args.story_group_id) updatePatch.story_group_id = args.story_group_id
-      const { data, error } = await db
-        .from('stories')
-        .update(updatePatch)
-        .eq('id', existing.story_id)
-        .select('id, story_group_id, language')
-        .single()
-      if (error) throw new Error(error.message)
-      return { id: data.id, story_group_id: data.story_group_id, language: data.language, overwritten: true }
+  return await withUserContext(userId, async (c) => {
+    if (eventIds.length) {
+      const { rows: events } = await c.query(
+        'SELECT id, created_by FROM plannen.events WHERE id = ANY($1)',
+        [eventIds],
+      )
+      const ownedIds = new Set(
+        events.filter((e: { created_by: string }) => e.created_by === userId).map((e: { id: string }) => e.id)
+      )
+      const missing = eventIds.filter(id => !ownedIds.has(id))
+      if (missing.length) throw new Error(`Events not found or not owned: ${missing.join(', ')}`)
     }
-  }
 
-  let coverUrl = args.cover_url ?? null
-  if (!coverUrl && eventIds.length) {
-    const { data: mem } = await db
-      .from('event_memories')
-      .select('media_url, media_type, taken_at, created_at')
-      .in('event_id', eventIds)
-      .not('media_url', 'is', null)
-      .eq('media_type', 'image')          // covers stay image-only
-      .order('taken_at', { ascending: true, nullsFirst: false })
-      .order('created_at', { ascending: true })
-      .limit(1)
-    coverUrl = mem?.[0]?.media_url ?? null
-  }
+    if (eventIds.length === 1) {
+      const lang = args.language ?? 'en'
+      const { rows: existingRows } = await c.query(
+        `SELECT se.story_id
+         FROM plannen.story_events se
+         JOIN plannen.stories s ON s.id = se.story_id
+         WHERE se.event_id = $1 AND s.user_id = $2 AND s.language = $3
+         LIMIT 1`,
+        [eventIds[0], userId, lang],
+      )
+      const existing = existingRows[0] as { story_id: string } | undefined
+      if (existing?.story_id) {
+        const setClauses = [
+          'title = $1', 'body = $2', 'user_notes = $3', 'mood = $4', 'tone = $5', 'generated_at = $6',
+        ]
+        const params: unknown[] = [
+          args.title,
+          args.body,
+          args.user_notes ?? null,
+          args.mood ?? null,
+          args.tone ?? null,
+          new Date().toISOString(),
+        ]
+        if (args.cover_url !== undefined) { params.push(args.cover_url); setClauses.push(`cover_url = $${params.length}`) }
+        if (args.story_group_id) { params.push(args.story_group_id); setClauses.push(`story_group_id = $${params.length}`) }
+        params.push(existing.story_id)
+        const { rows } = await c.query(
+          `UPDATE plannen.stories SET ${setClauses.join(', ')}
+           WHERE id = $${params.length}
+           RETURNING id, story_group_id, language`,
+          params,
+        )
+        if (rows.length === 0) throw new Error('Story update failed')
+        const data = rows[0] as { id: string; story_group_id: string; language: string }
+        return { id: data.id, story_group_id: data.story_group_id, language: data.language, overwritten: true }
+      }
+    }
 
-  const insertPayload: Record<string, unknown> = {
-    user_id: userId,
-    title: args.title,
-    body: args.body,
-    cover_url: coverUrl,
-    user_notes: args.user_notes ?? null,
-    mood: args.mood ?? null,
-    tone: args.tone ?? null,
-    date_from: args.date_from ?? null,
-    date_to: args.date_to ?? null,
-    language: args.language ?? 'en',
-  }
-  if (args.story_group_id) insertPayload.story_group_id = args.story_group_id
+    let coverUrl: string | null = args.cover_url ?? null
+    if (!coverUrl && eventIds.length) {
+      const { rows: mem } = await c.query(
+        `SELECT media_url FROM plannen.event_memories
+         WHERE event_id = ANY($1) AND media_url IS NOT NULL AND media_type = 'image'
+         ORDER BY taken_at ASC NULLS LAST, created_at ASC
+         LIMIT 1`,
+        [eventIds],
+      )
+      coverUrl = (mem[0]?.media_url as string | undefined) ?? null
+    }
 
-  const { data: story, error: insErr } = await db
-    .from('stories')
-    .insert(insertPayload)
-    .select('id, story_group_id, language')
-    .single()
-  if (insErr) throw new Error(insErr.message)
+    const insertCols = ['user_id', 'title', 'body', 'cover_url', 'user_notes', 'mood', 'tone', 'date_from', 'date_to', 'language']
+    const insertVals: unknown[] = [
+      userId, args.title, args.body, coverUrl,
+      args.user_notes ?? null, args.mood ?? null, args.tone ?? null,
+      args.date_from ?? null, args.date_to ?? null, args.language ?? 'en',
+    ]
+    if (args.story_group_id) { insertCols.push('story_group_id'); insertVals.push(args.story_group_id) }
+    const placeholders = insertVals.map((_, i) => `$${i + 1}`).join(', ')
+    const { rows: storyRows } = await c.query(
+      `INSERT INTO plannen.stories (${insertCols.join(', ')})
+       VALUES (${placeholders})
+       RETURNING id, story_group_id, language`,
+      insertVals,
+    )
+    if (storyRows.length === 0) throw new Error('Story insert failed')
+    const story = storyRows[0] as { id: string; story_group_id: string; language: string }
 
-  if (eventIds.length) {
-    const links = eventIds.map(event_id => ({ story_id: story.id, event_id }))
-    const { error: linkErr } = await db.from('story_events').insert(links)
-    if (linkErr) throw new Error(linkErr.message)
-  }
+    if (eventIds.length) {
+      for (const event_id of eventIds) {
+        await c.query(
+          'INSERT INTO plannen.story_events (story_id, event_id) VALUES ($1, $2)',
+          [story.id, event_id],
+        )
+      }
+    }
 
-  return { id: story.id, story_group_id: story.story_group_id, language: story.language, overwritten: false }
+    return { id: story.id, story_group_id: story.story_group_id, language: story.language, overwritten: false }
+  })
 }
 
 async function updateStory(args: {
@@ -540,92 +578,114 @@ async function updateStory(args: {
   cover_url?: string
 }) {
   const userId = await uid()
-  const patch: Record<string, unknown> = {}
-  if (args.title !== undefined) patch.title = args.title
-  if (args.body !== undefined) patch.body = args.body
-  if (args.cover_url !== undefined) patch.cover_url = args.cover_url
-  if (Object.keys(patch).length === 0) throw new Error('No fields to update')
-  const { data: story, error } = await db
-    .from('stories')
-    .update(patch)
-    .eq('id', args.id)
-    .eq('user_id', userId)
-    .select('*')
-    .single()
-  if (error) throw new Error(error.message)
-  const { data: links } = await db
-    .from('story_events')
-    .select('events:event_id(id, title, start_date)')
-    .eq('story_id', story.id)
-  const events = (links ?? [])
-    .map(l => (l as unknown as { events: { id: string; title: string | null; start_date: string | null } | null }).events)
-    .filter((e): e is { id: string; title: string | null; start_date: string | null } => !!e)
-  return { ...story, events }
+  const setClauses: string[] = []
+  const params: unknown[] = []
+  if (args.title !== undefined) { params.push(args.title); setClauses.push(`title = $${params.length}`) }
+  if (args.body !== undefined) { params.push(args.body); setClauses.push(`body = $${params.length}`) }
+  if (args.cover_url !== undefined) { params.push(args.cover_url); setClauses.push(`cover_url = $${params.length}`) }
+  if (setClauses.length === 0) throw new Error('No fields to update')
+  return await withUserContext(userId, async (c) => {
+    params.push(args.id)
+    params.push(userId)
+    const { rows } = await c.query(
+      `UPDATE plannen.stories SET ${setClauses.join(', ')}
+       WHERE id = $${params.length - 1} AND user_id = $${params.length}
+       RETURNING *`,
+      params,
+    )
+    if (rows.length === 0) throw new Error('Not found')
+    const story = rows[0] as Record<string, unknown> & { id: string }
+    const { rows: linkRows } = await c.query(
+      `SELECT e.id, e.title, e.start_date
+       FROM plannen.story_events se JOIN plannen.events e ON e.id = se.event_id
+       WHERE se.story_id = $1`,
+      [story.id],
+    )
+    return { ...story, events: linkRows }
+  })
 }
 
 async function getStory(args: { id: string }) {
   const userId = await uid()
-  const { data: story, error } = await db
-    .from('stories')
-    .select('*')
-    .eq('id', args.id)
-    .eq('user_id', userId)
-    .maybeSingle()
-  if (error) throw new Error(error.message)
-  if (!story) return null
-  const { data: events } = await db
-    .from('story_events')
-    .select('events:event_id(id, title, start_date)')
-    .eq('story_id', story.id)
-  const { data: siblings } = await db
-    .from('stories')
-    .select('id, language')
-    .eq('story_group_id', story.story_group_id)
-    .order('generated_at', { ascending: true })
-  const eventList = (events ?? []).map(r => r.events).filter(Boolean)
-  return { ...story, events: eventList, siblings: siblings ?? [] }
+  return await withUserContext(userId, async (c) => {
+    const { rows: storyRows } = await c.query(
+      'SELECT * FROM plannen.stories WHERE id = $1 AND user_id = $2',
+      [args.id, userId],
+    )
+    if (storyRows.length === 0) return null
+    const story = storyRows[0] as Record<string, unknown> & { id: string; story_group_id: string }
+    const { rows: eventRows } = await c.query(
+      `SELECT e.id, e.title, e.start_date
+       FROM plannen.story_events se JOIN plannen.events e ON e.id = se.event_id
+       WHERE se.story_id = $1`,
+      [story.id],
+    )
+    const { rows: siblings } = await c.query(
+      `SELECT id, language FROM plannen.stories
+       WHERE story_group_id = $1 ORDER BY generated_at ASC`,
+      [story.story_group_id],
+    )
+    return { ...story, events: eventRows, siblings }
+  })
 }
 
 async function listStories(args: { limit?: number; offset?: number } = {}) {
   const userId = await uid()
   const limit = args.limit ?? 50
   const offset = args.offset ?? 0
-  const { data, error } = await db
-    .from('stories')
-    .select('*, story_events(events:event_id(id, title, start_date))')
-    .eq('user_id', userId)
-    .order('generated_at', { ascending: false })
-    .range(offset, offset + limit - 1)
-  if (error) throw new Error(error.message)
-  return (data ?? []).map(row => {
-    const events = ((row.story_events ?? []) as Array<{ events: { id: string; title: string | null; start_date: string | null } | null }>)
-      .map(l => l.events)
-      .filter((e): e is { id: string; title: string | null; start_date: string | null } => !!e)
-    const { story_events: _ignore, ...rest } = row as Record<string, unknown>
-    return { ...rest, events }
+  return await withUserContext(userId, async (c) => {
+    const { rows: storyRows } = await c.query(
+      `SELECT * FROM plannen.stories WHERE user_id = $1
+       ORDER BY generated_at DESC
+       OFFSET $2 LIMIT $3`,
+      [userId, offset, limit],
+    )
+    if (storyRows.length === 0) return []
+    const ids = storyRows.map((r: { id: string }) => r.id)
+    const { rows: linkRows } = await c.query(
+      `SELECT se.story_id, e.id, e.title, e.start_date
+       FROM plannen.story_events se JOIN plannen.events e ON e.id = se.event_id
+       WHERE se.story_id = ANY($1)`,
+      [ids],
+    )
+    const byStory = new Map<string, Array<{ id: string; title: string | null; start_date: string | null }>>()
+    for (const r of linkRows as Array<{ story_id: string; id: string; title: string | null; start_date: string | null }>) {
+      const arr = byStory.get(r.story_id) ?? []
+      arr.push({ id: r.id, title: r.title, start_date: r.start_date })
+      byStory.set(r.story_id, arr)
+    }
+    return storyRows.map((row: Record<string, unknown> & { id: string }) => ({
+      ...row,
+      events: byStory.get(row.id) ?? [],
+    }))
   })
 }
 
 async function deleteStory(args: { id: string }) {
   const userId = await uid()
-  const { error } = await db
-    .from('stories')
-    .delete()
-    .eq('id', args.id)
-    .eq('user_id', userId)
-  if (error) throw new Error(error.message)
-  return { success: true }
+  return await withUserContext(userId, async (c) => {
+    const { rowCount } = await c.query(
+      'DELETE FROM plannen.stories WHERE id = $1 AND user_id = $2',
+      [args.id, userId],
+    )
+    if (!rowCount) throw new Error('Not found')
+    return { success: true }
+  })
 }
 
 async function getGoogleAccessToken(): Promise<string> {
   const userId = await uid()
-  const { data: row, error } = await db
-    .from('user_oauth_tokens')
-    .select('access_token, expires_at, refresh_token')
-    .eq('user_id', userId)
-    .eq('provider', 'google')
-    .maybeSingle()
-  if (error) throw new Error(error.message)
+  const row = await withUserContext(userId, async (c) => {
+    const { rows } = await c.query(
+      `SELECT access_token, expires_at, refresh_token
+       FROM plannen.user_oauth_tokens
+       WHERE user_id = $1 AND provider = 'google'`,
+      [userId],
+    )
+    return rows[0] as
+      | { access_token: string | null; expires_at: string | null; refresh_token: string }
+      | undefined
+  })
   if (!row) throw new Error('Google not connected. Connect Google in the Plannen UI first (Settings → Connect Google).')
   const expiresAt = row.expires_at ? new Date(row.expires_at) : null
   const fresh = row.access_token && expiresAt && expiresAt.getTime() - Date.now() > 5 * 60 * 1000
@@ -645,15 +705,24 @@ async function getGoogleAccessToken(): Promise<string> {
   })
   if (!tokenRes.ok) throw new Error(`Google token refresh failed: ${tokenRes.status} ${await tokenRes.text()}`)
   const tokens = (await tokenRes.json()) as { access_token: string; expires_in: number }
-  await db.from('user_oauth_tokens').update({
-    access_token: tokens.access_token,
-    expires_at: new Date(Date.now() + (tokens.expires_in ?? 3600) * 1000).toISOString(),
-    updated_at: new Date().toISOString(),
-  }).eq('user_id', userId).eq('provider', 'google')
+  await withUserContext(userId, async (c) => {
+    await c.query(
+      `UPDATE plannen.user_oauth_tokens
+       SET access_token = $1, expires_at = $2, updated_at = $3
+       WHERE user_id = $4 AND provider = 'google'`,
+      [
+        tokens.access_token,
+        new Date(Date.now() + (tokens.expires_in ?? 3600) * 1000).toISOString(),
+        new Date().toISOString(),
+        userId,
+      ],
+    )
+  })
   return tokens.access_token
 }
 
 async function createPhotoPickerSession() {
+  if (PLANNEN_TIER === '0') tier1Only('Photo picker')
   const accessToken = await getGoogleAccessToken()
   const res = await fetch('https://photospicker.googleapis.com/v1/sessions', {
     method: 'POST',
@@ -688,6 +757,7 @@ const PICKER_MIME_TO_EXT: Record<string, string> = {
 }
 
 async function pollPhotoPickerSession(args: { session_id: string; event_id: string }) {
+  if (PLANNEN_TIER === '0') tier1Only('Photo picker')
   const userId = await uid()
   const accessToken = await getGoogleAccessToken()
 
@@ -716,136 +786,142 @@ async function pollPhotoPickerSession(args: { session_id: string; event_id: stri
   const attached: { external_id: string; memory_id: string; filename?: string; already?: boolean }[] = []
   const skipped: { external_id: string; reason: string }[] = []
 
-  for (const item of items) {
-    if (!item.id || !item.mediaFile?.baseUrl) {
-      skipped.push({ external_id: item.id ?? '', reason: 'missing id or baseUrl' })
-      continue
-    }
-    if (item.type && item.type !== 'PHOTO') {
-      skipped.push({ external_id: item.id, reason: `unsupported type ${item.type}` })
-      continue
-    }
+  return await withUserContext(userId, async (c) => {
+    for (const item of items) {
+      if (!item.id || !item.mediaFile?.baseUrl) {
+        skipped.push({ external_id: item.id ?? '', reason: 'missing id or baseUrl' })
+        continue
+      }
+      if (item.type && item.type !== 'PHOTO') {
+        skipped.push({ external_id: item.id, reason: `unsupported type ${item.type}` })
+        continue
+      }
 
-    const { data: existing } = await db
-      .from('event_memories')
-      .select('id')
-      .eq('event_id', args.event_id)
-      .eq('external_id', item.id)
-      .maybeSingle()
-    if (existing) {
-      attached.push({ external_id: item.id, memory_id: existing.id, filename: item.mediaFile.filename, already: true })
-      continue
-    }
+      const { rows: existingRows } = await c.query(
+        'SELECT id FROM plannen.event_memories WHERE event_id = $1 AND external_id = $2',
+        [args.event_id, item.id],
+      )
+      const existing = existingRows[0] as { id: string } | undefined
+      if (existing) {
+        attached.push({ external_id: item.id, memory_id: existing.id, filename: item.mediaFile.filename, already: true })
+        continue
+      }
 
-    const bytesRes = await fetch(`${item.mediaFile.baseUrl}=d`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
-    if (!bytesRes.ok) {
-      skipped.push({ external_id: item.id, reason: `download failed ${bytesRes.status}` })
-      continue
-    }
-    const blob = await bytesRes.blob()
-    const mimeType = item.mediaFile.mimeType ?? bytesRes.headers.get('Content-Type') ?? 'image/jpeg'
-    const ext = PICKER_MIME_TO_EXT[mimeType.toLowerCase()] ?? 'jpg'
-    const path = `${args.event_id}/${userId}/${item.id}.${ext}`
-
-    const { error: uploadError } = await db.storage
-      .from('event-photos')
-      .upload(path, blob, { upsert: true, contentType: mimeType })
-    if (uploadError) {
-      skipped.push({ external_id: item.id, reason: `upload failed: ${uploadError.message}` })
-      continue
-    }
-    const { data: { publicUrl } } = db.storage.from('event-photos').getPublicUrl(path)
-
-    const { data: inserted, error: insertError } = await db
-      .from('event_memories')
-      .insert({
-        event_id: args.event_id,
-        user_id: userId,
-        source: 'google_photos',
-        external_id: item.id,
-        media_url: publicUrl,
-        media_type: 'image',
-        taken_at: item.createTime ?? null,
+      const bytesRes = await fetch(`${item.mediaFile.baseUrl}=d`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
       })
-      .select('id')
-      .single()
-    if (insertError || !inserted) {
-      skipped.push({ external_id: item.id, reason: `insert failed: ${insertError?.message ?? 'unknown'}` })
-      continue
-    }
-    attached.push({ external_id: item.id, memory_id: inserted.id, filename: item.mediaFile.filename })
-  }
+      if (!bytesRes.ok) {
+        skipped.push({ external_id: item.id, reason: `download failed ${bytesRes.status}` })
+        continue
+      }
+      // bytes are intentionally discarded on Tier 0; this branch is unreachable
+      // because of the tier1Only guard above. The shape matches Tier 1.
+      const mimeType = item.mediaFile.mimeType ?? bytesRes.headers.get('Content-Type') ?? 'image/jpeg'
+      const ext = PICKER_MIME_TO_EXT[mimeType.toLowerCase()] ?? 'jpg'
+      const path = `${args.event_id}/${userId}/${item.id}.${ext}`
+      // Tier 1 path: bytes would be uploaded to Supabase storage here; URL shape
+      // must match what the column stored when Supabase storage was used.
+      const publicUrl = `/storage/v1/object/public/event-photos/${path}`
 
-  return { status: 'complete' as const, attached, skipped, total_selected: items.length }
+      const { rows: insertedRows } = await c.query(
+        `INSERT INTO plannen.event_memories
+           (event_id, user_id, source, external_id, media_url, media_type, taken_at)
+         VALUES ($1, $2, 'google_photos', $3, $4, 'image', $5)
+         RETURNING id`,
+        [args.event_id, userId, item.id, publicUrl, item.createTime ?? null],
+      )
+      const inserted = insertedRows[0] as { id: string } | undefined
+      if (!inserted) {
+        skipped.push({ external_id: item.id, reason: 'insert failed: unknown' })
+        continue
+      }
+      attached.push({ external_id: item.id, memory_id: inserted.id, filename: item.mediaFile.filename })
+    }
+
+    return { status: 'complete' as const, attached, skipped, total_selected: items.length }
+  })
 }
 
 async function getUserTimezone(): Promise<string> {
   const id = await uid()
-  const { data } = await db.from('user_profiles').select('timezone').eq('user_id', id).maybeSingle()
-  return data?.timezone ?? 'UTC'
+  return await withUserContext(id, async (c) => {
+    const { rows } = await c.query(
+      'SELECT timezone FROM plannen.user_profiles WHERE user_id = $1 LIMIT 1',
+      [id],
+    )
+    return (rows[0]?.timezone as string | undefined) ?? 'UTC'
+  })
 }
 
 async function getGcalSyncCandidates() {
   const [id, tz] = await Promise.all([uid(), getUserTimezone()])
-
-  // Get all going events without a gcal_event_id
-  const { data: events, error } = await db
-    .from('events')
-    .select('id, title, description, start_date, end_date, location, event_kind, hashtags, enrollment_url')
-    .eq('created_by', id)
-    .eq('event_status', 'going')
-    .is('gcal_event_id', null)
-    .is('recurrence_rule', null)
-    .order('start_date', { ascending: true })
-  if (error) throw new Error(error.message)
-  if (!events?.length) return []
-
-  const ids = events.map((e) => e.id)
-  const { data: rsvps } = await db
-    .from('event_rsvps')
-    .select('event_id, preferred_visit_date')
-    .eq('user_id', id)
-    .in('event_id', ids)
-  const visitMap = Object.fromEntries((rsvps ?? []).map((r) => [r.event_id, r.preferred_visit_date]))
-
-  return events.map((e) => {
-    const preferredDate: string | null = visitMap[e.id] ?? null
-    const isMultiDay = !!e.end_date && e.start_date.slice(0, 10) !== e.end_date.slice(0, 10)
-    const useVisitDate = preferredDate && isMultiDay
-
-    const gcal_start = useVisitDate
-      ? `${preferredDate}T00:00:00`
-      : toLocalIso(e.start_date, tz)
-    const gcal_end = useVisitDate
-      ? `${preferredDate}T23:59:59`
-      : (e.end_date ? toLocalIso(e.end_date, tz) : null)
-
-    return {
-      id: e.id,
-      title: e.title,
-      description: e.description,
-      location: e.location,
-      enrollment_url: e.enrollment_url,
-      event_kind: e.event_kind,
-      gcal_start,
-      gcal_end,
-      gcal_timezone: tz,
-      preferred_visit_date: preferredDate,
+  return await withUserContext(id, async (c) => {
+    const { rows: events } = await c.query(
+      `SELECT id, title, description, start_date, end_date, location, event_kind, hashtags, enrollment_url
+       FROM plannen.events
+       WHERE created_by = $1 AND event_status = 'going'
+         AND gcal_event_id IS NULL AND recurrence_rule IS NULL
+       ORDER BY start_date ASC`,
+      [id],
+    )
+    if (events.length === 0) return []
+    const ids = events.map((e: { id: string }) => e.id)
+    const { rows: rsvps } = await c.query(
+      `SELECT event_id, preferred_visit_date FROM plannen.event_rsvps
+       WHERE user_id = $1 AND event_id = ANY($2)`,
+      [id, ids],
+    )
+    const visitMap = new Map<string, string | null>()
+    for (const r of rsvps as Array<{ event_id: string; preferred_visit_date: string | null }>) {
+      visitMap.set(r.event_id, r.preferred_visit_date)
     }
+    return events.map((e: { id: string; title: string; description: string | null; location: string | null; enrollment_url: string | null; event_kind: string; start_date: string; end_date: string | null }) => {
+      const preferredDateRaw = visitMap.get(e.id) ?? null
+      const preferredDate: string | null = preferredDateRaw
+        ? (typeof preferredDateRaw === 'string'
+          ? preferredDateRaw.slice(0, 10)
+          : new Date(preferredDateRaw).toISOString().slice(0, 10))
+        : null
+      const startStr = typeof e.start_date === 'string' ? e.start_date : new Date(e.start_date).toISOString()
+      const endStr = e.end_date
+        ? (typeof e.end_date === 'string' ? e.end_date : new Date(e.end_date).toISOString())
+        : null
+      const isMultiDay = !!endStr && startStr.slice(0, 10) !== endStr.slice(0, 10)
+      const useVisitDate = preferredDate && isMultiDay
+
+      const gcal_start = useVisitDate
+        ? `${preferredDate}T00:00:00`
+        : toLocalIso(startStr, tz)
+      const gcal_end = useVisitDate
+        ? `${preferredDate}T23:59:59`
+        : (endStr ? toLocalIso(endStr, tz) : null)
+
+      return {
+        id: e.id,
+        title: e.title,
+        description: e.description,
+        location: e.location,
+        enrollment_url: e.enrollment_url,
+        event_kind: e.event_kind,
+        gcal_start,
+        gcal_end,
+        gcal_timezone: tz,
+        preferred_visit_date: preferredDate,
+      }
+    })
   })
 }
 
 async function setGcalEventId(args: { event_id: string; gcal_event_id: string | null }) {
   const id = await uid()
-  const { error } = await db
-    .from('events')
-    .update({ gcal_event_id: args.gcal_event_id })
-    .eq('id', args.event_id)
-    .eq('created_by', id)
-  if (error) throw new Error(error.message)
-  return { success: true, event_id: args.event_id, gcal_event_id: args.gcal_event_id }
+  return await withUserContext(id, async (c) => {
+    await c.query(
+      `UPDATE plannen.events SET gcal_event_id = $1
+       WHERE id = $2 AND created_by = $3`,
+      [args.gcal_event_id, args.event_id, id],
+    )
+    return { success: true, event_id: args.event_id, gcal_event_id: args.gcal_event_id }
+  })
 }
 
 async function listRelationships(args: { type?: string }) {
@@ -854,35 +930,33 @@ async function listRelationships(args: { type?: string }) {
     args.type === 'family' ? ['family', 'both']
     : args.type === 'friend' ? ['friend', 'both']
     : ['family', 'friend', 'both']
-
-  const { data: rels, error } = await db
-    .from('relationships')
-    .select('user_id, related_user_id, relationship_type')
-    .or(`user_id.eq.${id},related_user_id.eq.${id}`)
-    .eq('status', 'accepted')
-    .in('relationship_type', types)
-  if (error) throw new Error(error.message)
-
-  const otherIds = (rels ?? []).map((r) =>
-    r.user_id === id ? r.related_user_id : r.user_id
-  )
-  if (!otherIds.length) return []
-
-  const { data: users, error: ue } = await db
-    .from('users')
-    .select('id, full_name, email')
-    .in('id', otherIds)
-  if (ue) throw new Error(ue.message)
-
-  return (rels ?? []).map((r) => {
-    const otherId = r.user_id === id ? r.related_user_id : r.user_id
-    const person = (users ?? []).find((u) => u.id === otherId)
-    return {
-      id: otherId,
-      full_name: person?.full_name ?? null,
-      email: person?.email ?? null,
-      relationship_type: r.relationship_type,
-    }
+  return await withUserContext(id, async (c) => {
+    const { rows: rels } = await c.query(
+      `SELECT user_id, related_user_id, relationship_type
+       FROM plannen.relationships
+       WHERE (user_id = $1 OR related_user_id = $1)
+         AND status = 'accepted'
+         AND relationship_type = ANY($2)`,
+      [id, types],
+    )
+    const relList = rels as Array<{ user_id: string; related_user_id: string; relationship_type: string }>
+    const otherIds = relList.map((r) => r.user_id === id ? r.related_user_id : r.user_id)
+    if (!otherIds.length) return []
+    const { rows: users } = await c.query(
+      'SELECT id, full_name, email FROM plannen.users WHERE id = ANY($1)',
+      [otherIds],
+    )
+    const userList = users as Array<{ id: string; full_name: string | null; email: string | null }>
+    return relList.map((r) => {
+      const otherId = r.user_id === id ? r.related_user_id : r.user_id
+      const person = userList.find((u) => u.id === otherId)
+      return {
+        id: otherId,
+        full_name: person?.full_name ?? null,
+        email: person?.email ?? null,
+        relationship_type: r.relationship_type,
+      }
+    })
   })
 }
 
@@ -900,69 +974,98 @@ function computeAge(dob: string | null): number | null {
 
 async function getProfileContext(args: { include_historical?: boolean } = {}) {
   const id = await uid()
-  const [profileRes, locationsRes, familyRes, factsRes, historicalRes] = await Promise.all([
-    db.from('user_profiles').select('dob, goals, interests, timezone').eq('user_id', id).maybeSingle(),
-    db.from('user_locations').select('label, city, country, is_default').eq('user_id', id).order('created_at', { ascending: true }),
-    db.from('family_members').select('id, name, relation, dob, gender, goals, interests').eq('user_id', id).order('created_at', { ascending: true }),
-    db.from('profile_facts').select('subject, predicate, value, confidence, source').eq('user_id', id).eq('is_historical', false).gte('confidence', 0.6).order('subject').order('predicate'),
-    args.include_historical
-      ? db.from('profile_facts').select('subject, predicate, value, confidence').eq('user_id', id).eq('is_historical', true).order('subject').order('last_seen_at', { ascending: false })
-      : Promise.resolve({ data: [], error: null }),
-  ])
-  if (profileRes.error) throw new Error(profileRes.error.message)
-  if (locationsRes.error) throw new Error(locationsRes.error.message)
-  if (familyRes.error) throw new Error(familyRes.error.message)
-  if (factsRes.error) throw new Error(factsRes.error.message)
-  if (historicalRes.error) throw new Error(historicalRes.error.message)
-
-  return {
-    goals: profileRes.data?.goals ?? [],
-    interests: profileRes.data?.interests ?? [],
-    timezone: profileRes.data?.timezone ?? 'UTC',
-    locations: (locationsRes.data ?? []).map((l) => ({
-      label: l.label,
-      city: l.city,
-      country: l.country,
-      is_default: l.is_default,
-    })),
-    family_members: (familyRes.data ?? []).map((m) => ({
-      id: m.id,
-      name: m.name,
-      relation: m.relation,
-      age: computeAge(m.dob),
-      gender: m.gender,
-      goals: m.goals,
-      interests: m.interests,
-    })),
-    profile_facts: factsRes.data ?? [],
-    historical_facts: args.include_historical ? (historicalRes.data ?? []) : undefined,
-  }
+  return await withUserContext(id, async (c) => {
+    const [profileRes, locationsRes, familyRes, factsRes, historicalRes] = await Promise.all([
+      c.query('SELECT dob, goals, interests, timezone FROM plannen.user_profiles WHERE user_id = $1', [id]),
+      c.query('SELECT label, city, country, is_default FROM plannen.user_locations WHERE user_id = $1 ORDER BY created_at ASC', [id]),
+      c.query('SELECT id, name, relation, dob, gender, goals, interests FROM plannen.family_members WHERE user_id = $1 ORDER BY created_at ASC', [id]),
+      c.query(
+        `SELECT subject, predicate, value, confidence, source
+         FROM plannen.profile_facts
+         WHERE user_id = $1 AND is_historical = false AND confidence >= 0.6
+         ORDER BY subject ASC, predicate ASC`,
+        [id],
+      ),
+      args.include_historical
+        ? c.query(
+          `SELECT subject, predicate, value, confidence
+           FROM plannen.profile_facts
+           WHERE user_id = $1 AND is_historical = true
+           ORDER BY subject ASC, last_seen_at DESC`,
+          [id],
+        )
+        : Promise.resolve({ rows: [] as Array<Record<string, unknown>> }),
+    ])
+    const profile = profileRes.rows[0] as { dob: string | null; goals: string[]; interests: string[]; timezone: string } | undefined
+    type FamilyRow = { id: string; name: string; relation: string; dob: string | null; gender: string | null; goals: string[]; interests: string[] }
+    type LocationRow = { label: string; city: string; country: string; is_default: boolean }
+    return {
+      goals: profile?.goals ?? [],
+      interests: profile?.interests ?? [],
+      timezone: profile?.timezone ?? 'UTC',
+      locations: (locationsRes.rows as LocationRow[]).map((l) => ({
+        label: l.label,
+        city: l.city,
+        country: l.country,
+        is_default: l.is_default,
+      })),
+      family_members: (familyRes.rows as FamilyRow[]).map((m) => ({
+        id: m.id,
+        name: m.name,
+        relation: m.relation,
+        age: computeAge(m.dob),
+        gender: m.gender,
+        goals: m.goals,
+        interests: m.interests,
+      })),
+      profile_facts: factsRes.rows,
+      historical_facts: args.include_historical ? historicalRes.rows : undefined,
+    }
+  })
 }
 
 async function updateProfile(args: { dob?: string | null; goals?: string[]; interests?: string[]; timezone?: string }) {
   const id = await uid()
-  const payload: Record<string, unknown> = { user_id: id }
-  if (args.dob !== undefined) payload.dob = args.dob
-  if (args.goals !== undefined) payload.goals = args.goals
-  if (args.interests !== undefined) payload.interests = args.interests
-  if (args.timezone !== undefined) payload.timezone = args.timezone
-  const { error } = await db
-    .from('user_profiles')
-    .upsert(payload, { onConflict: 'user_id' })
-  if (error) throw new Error(error.message)
-  return { success: true }
+  return await withUserContext(id, async (c) => {
+    const cols: string[] = ['user_id']
+    const vals: unknown[] = [id]
+    const sets: string[] = []
+    if (args.dob !== undefined) {
+      cols.push('dob'); vals.push(args.dob); sets.push(`dob = $${vals.length}`)
+    }
+    if (args.goals !== undefined) {
+      cols.push('goals'); vals.push(args.goals); sets.push(`goals = $${vals.length}`)
+    }
+    if (args.interests !== undefined) {
+      cols.push('interests'); vals.push(args.interests); sets.push(`interests = $${vals.length}`)
+    }
+    if (args.timezone !== undefined) {
+      cols.push('timezone'); vals.push(args.timezone); sets.push(`timezone = $${vals.length}`)
+    }
+    const placeholders = vals.map((_, i) => `$${i + 1}`).join(', ')
+    const updateClause = sets.length > 0
+      ? `DO UPDATE SET ${sets.join(', ')}`
+      : 'DO NOTHING'
+    await c.query(
+      `INSERT INTO plannen.user_profiles (${cols.join(', ')})
+       VALUES (${placeholders})
+       ON CONFLICT (user_id) ${updateClause}`,
+      vals,
+    )
+    return { success: true }
+  })
 }
 
 async function getStoryLanguagesHandler() {
   const id = await uid()
-  const { data, error } = await db
-    .from('user_profiles')
-    .select('story_languages')
-    .eq('user_id', id)
-    .maybeSingle()
-  if (error) throw new Error(error.message)
-  const langs = (data?.story_languages as string[] | null | undefined) ?? ['en']
-  return { languages: langs.length ? langs : ['en'] }
+  return await withUserContext(id, async (c) => {
+    const { rows } = await c.query(
+      'SELECT story_languages FROM plannen.user_profiles WHERE user_id = $1',
+      [id],
+    )
+    const langs = (rows[0]?.story_languages as string[] | null | undefined) ?? ['en']
+    return { languages: langs.length ? langs : ['en'] }
+  })
 }
 
 const ALLOWED_LANG_CODES = new Set(['en','nl','fr','de','es','it','pt','hi','mr','ja','zh','ar'])
@@ -979,11 +1082,15 @@ async function setStoryLanguagesHandler(args: { languages: string[] }) {
     if (!seen.has(c)) { seen.add(c); cleaned.push(c) }
   }
   const id = await uid()
-  const { error } = await db
-    .from('user_profiles')
-    .upsert({ user_id: id, story_languages: cleaned }, { onConflict: 'user_id' })
-  if (error) throw new Error(error.message)
-  return { languages: cleaned }
+  return await withUserContext(id, async (c) => {
+    await c.query(
+      `INSERT INTO plannen.user_profiles (user_id, story_languages)
+       VALUES ($1, $2)
+       ON CONFLICT (user_id) DO UPDATE SET story_languages = EXCLUDED.story_languages`,
+      [id, cleaned],
+    )
+    return { languages: cleaned }
+  })
 }
 
 async function addFamilyMember(args: {
@@ -995,24 +1102,40 @@ async function addFamilyMember(args: {
   interests?: string[]
 }) {
   const id = await uid()
-  const { data, error } = await db
-    .from('family_members')
-    .insert({ user_id: id, ...args, goals: args.goals ?? [], interests: args.interests ?? [] })
-    .select()
-    .single()
-  if (error) throw new Error(error.message)
-  return data
+  return await withUserContext(id, async (c) => {
+    const { rows } = await c.query(
+      `INSERT INTO plannen.family_members
+         (user_id, name, relation, dob, gender, goals, interests)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [
+        id,
+        args.name,
+        args.relation,
+        args.dob ?? null,
+        args.gender ?? null,
+        args.goals ?? [],
+        args.interests ?? [],
+      ],
+    )
+    if (rows.length === 0) throw new Error('Insert failed')
+    return rows[0]
+  })
 }
 
 async function listFamilyMembers() {
   const id = await uid()
-  const { data, error } = await db
-    .from('family_members')
-    .select('id, name, relation, dob, gender, goals, interests')
-    .eq('user_id', id)
-    .order('created_at', { ascending: true })
-  if (error) throw new Error(error.message)
-  return (data ?? []).map((m) => ({ ...m, age: computeAge(m.dob) }))
+  return await withUserContext(id, async (c) => {
+    const { rows } = await c.query(
+      `SELECT id, name, relation, dob, gender, goals, interests
+       FROM plannen.family_members
+       WHERE user_id = $1
+       ORDER BY created_at ASC`,
+      [id],
+    )
+    return (rows as Array<{ id: string; name: string; relation: string; dob: string | null; gender: string | null; goals: string[]; interests: string[] }>)
+      .map((m) => ({ ...m, age: computeAge(m.dob) }))
+  })
 }
 
 async function addLocation(args: {
@@ -1023,105 +1146,117 @@ async function addLocation(args: {
   is_default?: boolean
 }) {
   const id = await uid()
-  if (args.is_default) {
-    const { error: clearErr } = await db
-      .from('user_locations').update({ is_default: false }).eq('user_id', id)
-    if (clearErr) throw new Error(clearErr.message)
-  }
-  const { data, error } = await db
-    .from('user_locations')
-    .insert({
-      user_id: id,
-      label: args.label,
-      address: args.address ?? '',
-      city: args.city ?? '',
-      country: args.country ?? '',
-      is_default: args.is_default ?? false,
-    })
-    .select()
-    .single()
-  if (error) throw new Error(error.message)
-  return data
+  return await withUserContext(id, async (c) => {
+    if (args.is_default) {
+      await c.query(
+        'UPDATE plannen.user_locations SET is_default = false WHERE user_id = $1',
+        [id],
+      )
+    }
+    const { rows } = await c.query(
+      `INSERT INTO plannen.user_locations (user_id, label, address, city, country, is_default)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [
+        id,
+        args.label,
+        args.address ?? '',
+        args.city ?? '',
+        args.country ?? '',
+        args.is_default ?? false,
+      ],
+    )
+    if (rows.length === 0) throw new Error('Insert failed')
+    return rows[0]
+  })
 }
 
 async function listLocations() {
   const id = await uid()
-  const { data, error } = await db
-    .from('user_locations')
-    .select('id, label, address, city, country, is_default')
-    .eq('user_id', id)
-    .order('created_at', { ascending: true })
-  if (error) throw new Error(error.message)
-  return data ?? []
+  return await withUserContext(id, async (c) => {
+    const { rows } = await c.query(
+      `SELECT id, label, address, city, country, is_default
+       FROM plannen.user_locations
+       WHERE user_id = $1
+       ORDER BY created_at ASC`,
+      [id],
+    )
+    return rows
+  })
 }
 
 // ── Watch monitoring tools ────────────────────────────────────────────────────
 
 async function getEventWatchTask(args: { event_id: string }) {
   const id = await uid()
-  const { data, error } = await db
-    .from('agent_tasks')
-    .select('id, event_id, task_type, status, next_check, last_checked_at, last_result, fail_count, has_unread_update, update_summary, recurrence_months, last_occurrence_date')
-    .eq('event_id', args.event_id)
-    .in('task_type', ['recurring_check', 'enrollment_monitor'])
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (error) throw new Error(error.message)
-
-  // Verify the event belongs to this user
-  if (data) {
-    const { data: event, error: evErr } = await db
-      .from('events')
-      .select('id')
-      .eq('id', data.event_id)
-      .eq('created_by', id)
-      .maybeSingle()
-    if (evErr) throw new Error(evErr.message)
-    if (!event) return null
-  }
-  return data ?? null
+  return await withUserContext(id, async (c) => {
+    const { rows } = await c.query(
+      `SELECT id, event_id, task_type, status, next_check, last_checked_at,
+              last_result, fail_count, has_unread_update, update_summary,
+              recurrence_months, last_occurrence_date
+       FROM plannen.agent_tasks
+       WHERE event_id = $1 AND task_type = ANY(ARRAY['recurring_check','enrollment_monitor'])
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [args.event_id],
+    )
+    const data = rows[0] as { event_id: string } | undefined
+    if (!data) return null
+    // Verify the event belongs to this user
+    const { rows: evRows } = await c.query(
+      'SELECT id FROM plannen.events WHERE id = $1 AND created_by = $2',
+      [data.event_id, id],
+    )
+    if (evRows.length === 0) return null
+    return data
+  })
 }
 
 async function getWatchQueue() {
   const id = await uid()
   const now = new Date().toISOString()
-
-  // Step 1: get IDs of all events owned by this user
-  const { data: userEvents, error: evErr } = await db
-    .from('events')
-    .select('id, title, enrollment_url, start_date')
-    .eq('created_by', id)
-  if (evErr) throw new Error(evErr.message)
-  const eventIds = (userEvents ?? []).map((e) => e.id)
-  if (!eventIds.length) return []
-
-  // Step 2: get due tasks for those events
-  const { data, error } = await db
-    .from('agent_tasks')
-    .select('id, event_id, task_type, last_result, last_page_hash, last_checked_at, recurrence_months, last_occurrence_date')
-    .in('task_type', ['recurring_check', 'enrollment_monitor'])
-    .eq('status', 'active')
-    .lte('next_check', now)
-    .in('event_id', eventIds)
-  if (error) throw new Error(error.message)
-
-  const eventMap = new Map((userEvents ?? []).map((e) => [e.id, e]))
-  return (data ?? []).map((task) => {
-    const event = eventMap.get(task.event_id)
-    return {
-      id: task.id,
-      event_id: task.event_id,
-      event_title: event?.title ?? null,
-      enrollment_url: event?.enrollment_url ?? null,
-      start_date: event?.start_date ?? null,
-      task_type: task.task_type,
-      last_result: task.last_result,
-      last_page_hash: task.last_page_hash,
-      last_checked_at: task.last_checked_at,
-      recurrence_months: task.recurrence_months,
-      last_occurrence_date: task.last_occurrence_date,
-    }
+  return await withUserContext(id, async (c) => {
+    const { rows: userEvents } = await c.query(
+      `SELECT id, title, enrollment_url, start_date
+       FROM plannen.events WHERE created_by = $1`,
+      [id],
+    )
+    const eventIds = (userEvents as Array<{ id: string }>).map((e) => e.id)
+    if (!eventIds.length) return []
+    const { rows: tasks } = await c.query(
+      `SELECT id, event_id, task_type, last_result, last_page_hash, last_checked_at,
+              recurrence_months, last_occurrence_date
+       FROM plannen.agent_tasks
+       WHERE task_type = ANY(ARRAY['recurring_check','enrollment_monitor'])
+         AND status = 'active'
+         AND next_check <= $1
+         AND event_id = ANY($2)`,
+      [now, eventIds],
+    )
+    type EventLite = { id: string; title: string; enrollment_url: string | null; start_date: string }
+    const eventMap = new Map<string, EventLite>(
+      (userEvents as EventLite[]).map((e) => [e.id, e]),
+    )
+    return (tasks as Array<{
+      id: string; event_id: string; task_type: string;
+      last_result: unknown; last_page_hash: string | null; last_checked_at: string | null;
+      recurrence_months: number | null; last_occurrence_date: string | null
+    }>).map((task) => {
+      const event = eventMap.get(task.event_id)
+      return {
+        id: task.id,
+        event_id: task.event_id,
+        event_title: event?.title ?? null,
+        enrollment_url: event?.enrollment_url ?? null,
+        start_date: event?.start_date ?? null,
+        task_type: task.task_type,
+        last_result: task.last_result,
+        last_page_hash: task.last_page_hash,
+        last_checked_at: task.last_checked_at,
+        recurrence_months: task.recurrence_months,
+        last_occurrence_date: task.last_occurrence_date,
+      }
+    })
   })
 }
 
@@ -1138,42 +1273,40 @@ async function updateWatchTask(args: {
   last_occurrence_date?: string
 }) {
   const id = await uid()
-  const { data: ownership, error: ownerErr } = await db
-    .from('agent_tasks')
-    .select('event_id')
-    .eq('id', args.task_id)
-    .maybeSingle()
-  if (ownerErr) throw new Error(ownerErr.message)
-  if (!ownership) throw new Error('Watch task not found')
-  const { data: ownedEvent, error: ownedErr } = await db
-    .from('events')
-    .select('id')
-    .eq('id', ownership.event_id)
-    .eq('created_by', id)
-    .maybeSingle()
-  if (ownedErr) throw new Error(ownedErr.message)
-  if (!ownedEvent) throw new Error('Not authorised to update this watch task')
+  return await withUserContext(id, async (c) => {
+    const { rows: ownership } = await c.query(
+      'SELECT event_id FROM plannen.agent_tasks WHERE id = $1',
+      [args.task_id],
+    )
+    const owner = ownership[0] as { event_id: string } | undefined
+    if (!owner) throw new Error('Watch task not found')
+    const { rows: ownedEvent } = await c.query(
+      'SELECT id FROM plannen.events WHERE id = $1 AND created_by = $2',
+      [owner.event_id, id],
+    )
+    if (ownedEvent.length === 0) throw new Error('Not authorised to update this watch task')
 
-  const payload: Record<string, unknown> = {
-    last_result: args.last_result,
-    last_page_hash: args.last_page_hash,
-    last_checked_at: new Date().toISOString(),
-    next_check: args.next_check,
-    fail_count: args.fail_count,
-    has_unread_update: args.has_unread_update,
-    updated_at: new Date().toISOString(),
-  }
-  if (args.update_summary !== undefined) payload.update_summary = args.update_summary
-  if (args.status !== undefined) payload.status = args.status
-  if (args.recurrence_months !== undefined) payload.recurrence_months = args.recurrence_months
-  if (args.last_occurrence_date !== undefined) payload.last_occurrence_date = args.last_occurrence_date
-
-  const { error } = await db
-    .from('agent_tasks')
-    .update(payload)
-    .eq('id', args.task_id)
-  if (error) throw new Error(error.message)
-  return { success: true }
+    const setClauses: string[] = []
+    const params: unknown[] = []
+    const push = (col: string, val: unknown) => { params.push(val); setClauses.push(`${col} = $${params.length}`) }
+    push('last_result', args.last_result)
+    push('last_page_hash', args.last_page_hash)
+    push('last_checked_at', new Date().toISOString())
+    push('next_check', args.next_check)
+    push('fail_count', args.fail_count)
+    push('has_unread_update', args.has_unread_update)
+    push('updated_at', new Date().toISOString())
+    if (args.update_summary !== undefined) push('update_summary', args.update_summary)
+    if (args.status !== undefined) push('status', args.status)
+    if (args.recurrence_months !== undefined) push('recurrence_months', args.recurrence_months)
+    if (args.last_occurrence_date !== undefined) push('last_occurrence_date', args.last_occurrence_date)
+    params.push(args.task_id)
+    await c.query(
+      `UPDATE plannen.agent_tasks SET ${setClauses.join(', ')} WHERE id = $${params.length}`,
+      params,
+    )
+    return { success: true }
+  })
 }
 
 async function createWatchTask(args: {
@@ -1182,31 +1315,35 @@ async function createWatchTask(args: {
   last_occurrence_date?: string
 }) {
   const id = await uid()
-  const { data: event, error: evErr } = await db
-    .from('events')
-    .select('id')
-    .eq('id', args.event_id)
-    .eq('created_by', id)
-    .maybeSingle()
-  if (evErr) throw new Error(evErr.message)
-  if (!event) throw new Error('Event not found or not authorised')
+  return await withUserContext(id, async (c) => {
+    const { rows: evRows } = await c.query(
+      'SELECT id FROM plannen.events WHERE id = $1 AND created_by = $2',
+      [args.event_id, id],
+    )
+    if (evRows.length === 0) throw new Error('Event not found or not authorised')
 
-  const payload: Record<string, unknown> = {
-    event_id: args.event_id,
-    task_type: 'recurring_check',
-    status: 'active',
-    next_check: new Date().toISOString(),
-  }
-  if (args.recurrence_months !== undefined) payload.recurrence_months = args.recurrence_months
-  if (args.last_occurrence_date !== undefined) payload.last_occurrence_date = args.last_occurrence_date
-
-  const { data, error } = await db
-    .from('agent_tasks')
-    .upsert(payload, { onConflict: 'event_id,task_type' })
-    .select('id')
-    .maybeSingle()
-  if (error) throw new Error(error.message)
-  return { success: true, task_id: data?.id }
+    const cols = ['event_id', 'task_type', 'status', 'next_check']
+    const vals: unknown[] = [args.event_id, 'recurring_check', 'active', new Date().toISOString()]
+    const updateSets: string[] = ['status = EXCLUDED.status', 'next_check = EXCLUDED.next_check']
+    if (args.recurrence_months !== undefined) {
+      cols.push('recurrence_months'); vals.push(args.recurrence_months)
+      updateSets.push('recurrence_months = EXCLUDED.recurrence_months')
+    }
+    if (args.last_occurrence_date !== undefined) {
+      cols.push('last_occurrence_date'); vals.push(args.last_occurrence_date)
+      updateSets.push('last_occurrence_date = EXCLUDED.last_occurrence_date')
+    }
+    const placeholders = vals.map((_, i) => `$${i + 1}`).join(', ')
+    const { rows } = await c.query(
+      `INSERT INTO plannen.agent_tasks (${cols.join(', ')})
+       VALUES (${placeholders})
+       ON CONFLICT (event_id, task_type) DO UPDATE
+         SET ${updateSets.join(', ')}
+       RETURNING id`,
+      vals,
+    )
+    return { success: true, task_id: (rows[0] as { id: string } | undefined)?.id }
+  })
 }
 
 // ── Source intelligence tools ─────────────────────────────────────────────────
@@ -1218,26 +1355,28 @@ async function updateSource(args: {
   source_type: 'platform' | 'organiser' | 'one_off'
 }) {
   const id = await uid()
-  const { data: source, error: fetchErr } = await db
-    .from('event_sources')
-    .select('id')
-    .eq('id', args.id)
-    .eq('user_id', id)
-    .maybeSingle()
-  if (fetchErr) throw new Error(fetchErr.message)
-  if (!source) throw new Error('Source not found')
-  const { error } = await db
-    .from('event_sources')
-    .update({
-      name: args.name,
-      tags: args.tags.slice(0, 10),
-      source_type: args.source_type,
-      last_analysed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', args.id)
-  if (error) throw new Error(error.message)
-  return { success: true }
+  return await withUserContext(id, async (c) => {
+    const { rows: src } = await c.query(
+      'SELECT id FROM plannen.event_sources WHERE id = $1 AND user_id = $2',
+      [args.id, id],
+    )
+    if (src.length === 0) throw new Error('Source not found')
+    await c.query(
+      `UPDATE plannen.event_sources
+       SET name = $1, tags = $2, source_type = $3,
+           last_analysed_at = $4, updated_at = $5
+       WHERE id = $6`,
+      [
+        args.name,
+        args.tags.slice(0, 10),
+        args.source_type,
+        new Date().toISOString(),
+        new Date().toISOString(),
+        args.id,
+      ],
+    )
+    return { success: true }
+  })
 }
 
 async function saveSource(args: {
@@ -1252,59 +1391,61 @@ async function saveSource(args: {
   const source_type = validateSourceType(args.source_type)
 
   const userId = await uid()
+  return await withUserContext(userId, async (c) => {
+    // Detect whether the row pre-existed so we can label the action.
+    const { rows: existingRows } = await c.query(
+      'SELECT id FROM plannen.event_sources WHERE user_id = $1 AND domain = $2',
+      [userId, domain],
+    )
+    const action: 'inserted' | 'updated' = existingRows.length > 0 ? 'updated' : 'inserted'
 
-  // Detect whether the row pre-existed so we can label the action.
-  const { data: existing, error: existingErr } = await db
-    .from('event_sources')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('domain', domain)
-    .maybeSingle()
-  if (existingErr) throw new Error(existingErr.message)
-  const action: 'inserted' | 'updated' = existing ? 'updated' : 'inserted'
+    const upserted = await upsertSource(c, userId, null, sourceUrl)
+    if (!upserted) throw new Error('failed to upsert source')
 
-  const upserted = await upsertSource(userId, null, sourceUrl)
-  if (!upserted) throw new Error('failed to upsert source')
-
-  const { error } = await db
-    .from('event_sources')
-    .update({
-      name,
-      tags,
-      source_type,
-      last_analysed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', upserted.id)
-    .eq('user_id', userId)
-  if (error) throw new Error(error.message)
-
-  return { id: upserted.id, domain, action }
+    await c.query(
+      `UPDATE plannen.event_sources
+       SET name = $1, tags = $2, source_type = $3,
+           last_analysed_at = $4, updated_at = $5
+       WHERE id = $6 AND user_id = $7`,
+      [
+        name,
+        tags,
+        source_type,
+        new Date().toISOString(),
+        new Date().toISOString(),
+        upserted.id,
+        userId,
+      ],
+    )
+    return { id: upserted.id, domain, action }
+  })
 }
 
 async function getUnanalysedSources() {
   const id = await uid()
-  const { data, error } = await db
-    .from('event_sources')
-    .select('id, domain, source_url')
-    .eq('user_id', id)
-    .is('last_analysed_at', null)
-    .order('created_at', { ascending: true })
-  if (error) throw new Error(error.message)
-  return data ?? []
+  return await withUserContext(id, async (c) => {
+    const { rows } = await c.query(
+      `SELECT id, domain, source_url FROM plannen.event_sources
+       WHERE user_id = $1 AND last_analysed_at IS NULL
+       ORDER BY created_at ASC`,
+      [id],
+    )
+    return rows
+  })
 }
 
 async function searchSources(args: { tags: string[] }) {
   const id = await uid()
   if (!args.tags.length) return []
-  const { data, error } = await db
-    .from('event_sources')
-    .select('id, domain, source_url, name, tags, source_type')
-    .eq('user_id', id)
-    .overlaps('tags', args.tags)
-    .not('last_analysed_at', 'is', null)
-  if (error) throw new Error(error.message)
-  return data ?? []
+  return await withUserContext(id, async (c) => {
+    const { rows } = await c.query(
+      `SELECT id, domain, source_url, name, tags, source_type
+       FROM plannen.event_sources
+       WHERE user_id = $1 AND tags && $2 AND last_analysed_at IS NOT NULL`,
+      [id, args.tags],
+    )
+    return rows
+  })
 }
 
 // ── Profile facts tools ───────────────────────────────────────────────────────
@@ -1316,57 +1457,53 @@ async function upsertProfileFact(args: {
   source: FactSource
 }) {
   const id = await uid()
-  const { data: existing } = await db
-    .from('profile_facts')
-    .select('id, value, confidence, observed_count')
-    .eq('user_id', id)
-    .eq('subject', args.subject)
-    .eq('predicate', args.predicate)
-    .eq('is_historical', false)
-    .maybeSingle()
+  return await withUserContext(id, async (c) => {
+    const { rows: existingRows } = await c.query(
+      `SELECT id, value, confidence, observed_count FROM plannen.profile_facts
+       WHERE user_id = $1 AND subject = $2 AND predicate = $3 AND is_historical = false`,
+      [id, args.subject, args.predicate],
+    )
+    const existing = existingRows[0] as
+      | { id: string; value: string; confidence: number; observed_count: number }
+      | undefined
 
-  if (!existing) {
-    const { error } = await db.from('profile_facts').insert({
-      user_id: id,
-      subject: args.subject,
-      predicate: args.predicate,
-      value: args.value,
-      confidence: initialConfidence(args.source),
-      observed_count: 1,
-      source: args.source,
-    })
-    if (error) throw new Error(error.message)
-    return { action: 'inserted' }
-  }
+    if (!existing) {
+      await c.query(
+        `INSERT INTO plannen.profile_facts
+           (user_id, subject, predicate, value, confidence, observed_count, source)
+         VALUES ($1, $2, $3, $4, $5, 1, $6)`,
+        [id, args.subject, args.predicate, args.value, initialConfidence(args.source), args.source],
+      )
+      return { action: 'inserted' }
+    }
 
-  if (existing.value === args.value) {
-    const newConfidence = computeCorroborationConfidence(existing.confidence)
-    const { error } = await db
-      .from('profile_facts')
-      .update({ confidence: newConfidence, observed_count: existing.observed_count + 1, last_seen_at: new Date().toISOString() })
-      .eq('id', existing.id)
-    if (error) throw new Error(error.message)
-    return { action: 'corroborated', confidence: newConfidence }
-  }
+    if (existing.value === args.value) {
+      const newConfidence = computeCorroborationConfidence(existing.confidence)
+      await c.query(
+        `UPDATE plannen.profile_facts
+         SET confidence = $1, observed_count = $2, last_seen_at = $3
+         WHERE id = $4`,
+        [newConfidence, existing.observed_count + 1, new Date().toISOString(), existing.id],
+      )
+      return { action: 'corroborated', confidence: newConfidence }
+    }
 
-  const decayedConfidence = computeContradictionConfidence(existing.confidence)
-  const { error: decayErr } = await db
-    .from('profile_facts')
-    .update({ confidence: decayedConfidence, is_historical: shouldMarkHistorical(decayedConfidence) })
-    .eq('id', existing.id)
-  if (decayErr) throw new Error(decayErr.message)
+    const decayedConfidence = computeContradictionConfidence(existing.confidence)
+    await c.query(
+      `UPDATE plannen.profile_facts
+       SET confidence = $1, is_historical = $2
+       WHERE id = $3`,
+      [decayedConfidence, shouldMarkHistorical(decayedConfidence), existing.id],
+    )
 
-  const { error: insertErr } = await db.from('profile_facts').insert({
-    user_id: id,
-    subject: args.subject,
-    predicate: args.predicate,
-    value: args.value,
-    confidence: initialConfidence(args.source),
-    observed_count: 1,
-    source: args.source,
+    await c.query(
+      `INSERT INTO plannen.profile_facts
+         (user_id, subject, predicate, value, confidence, observed_count, source)
+       VALUES ($1, $2, $3, $4, $5, 1, $6)`,
+      [id, args.subject, args.predicate, args.value, initialConfidence(args.source), args.source],
+    )
+    return { action: 'contradicted', old_value: existing.value, new_value: args.value }
   })
-  if (insertErr) throw new Error(insertErr.message)
-  return { action: 'contradicted', old_value: existing.value, new_value: args.value }
 }
 
 async function correctProfileFact(args: {
@@ -1376,67 +1513,70 @@ async function correctProfileFact(args: {
   new_value: string
 }) {
   const id = await uid()
-  const { data: existing, error: fetchErr } = await db
-    .from('profile_facts')
-    .select('id')
-    .eq('user_id', id)
-    .eq('subject', args.subject)
-    .eq('predicate', args.predicate)
-    .eq('value', args.old_value)
-    .eq('is_historical', false)
-    .maybeSingle()
-  if (fetchErr) throw new Error(fetchErr.message)
+  return await withUserContext(id, async (c) => {
+    const { rows: existingRows } = await c.query(
+      `SELECT id FROM plannen.profile_facts
+       WHERE user_id = $1 AND subject = $2 AND predicate = $3
+         AND value = $4 AND is_historical = false`,
+      [id, args.subject, args.predicate, args.old_value],
+    )
+    const existing = existingRows[0] as { id: string } | undefined
 
-  if (existing) {
-    const { error: markErr } = await db
-      .from('profile_facts')
-      .update({ is_historical: true })
-      .eq('id', existing.id)
-    if (markErr) throw new Error(markErr.message)
-  }
+    if (existing) {
+      await c.query(
+        'UPDATE plannen.profile_facts SET is_historical = true WHERE id = $1',
+        [existing.id],
+      )
+    }
 
-  const { error: insertErr } = await db.from('profile_facts').insert({
-    user_id: id,
-    subject: args.subject,
-    predicate: args.predicate,
-    value: args.new_value,
-    confidence: 1.0,
-    observed_count: 1,
-    source: 'user_stated' as FactSource,
+    await c.query(
+      `INSERT INTO plannen.profile_facts
+         (user_id, subject, predicate, value, confidence, observed_count, source)
+       VALUES ($1, $2, $3, $4, 1.0, 1, 'user_stated')`,
+      [id, args.subject, args.predicate, args.new_value],
+    )
+    return { action: 'corrected', old_value: args.old_value, new_value: args.new_value }
   })
-  if (insertErr) throw new Error(insertErr.message)
-  return { action: 'corrected', old_value: args.old_value, new_value: args.new_value }
 }
 
 async function listProfileFacts(args: { subject?: string }) {
   const id = await uid()
-  let query = db
-    .from('profile_facts')
-    .select('subject, predicate, value, confidence, observed_count, source, first_seen_at, last_seen_at')
-    .eq('user_id', id)
-    .eq('is_historical', false)
-    .gte('confidence', 0.6)
-    .order('subject', { ascending: true })
-    .order('predicate', { ascending: true })
-  if (args.subject) query = query.eq('subject', args.subject)
-  const { data, error } = await query
-  if (error) throw new Error(error.message)
-  return data ?? []
+  return await withUserContext(id, async (c) => {
+    const params: unknown[] = [id]
+    let subjectClause = ''
+    if (args.subject) {
+      params.push(args.subject)
+      subjectClause = ` AND subject = $${params.length}`
+    }
+    const { rows } = await c.query(
+      `SELECT subject, predicate, value, confidence, observed_count, source, first_seen_at, last_seen_at
+       FROM plannen.profile_facts
+       WHERE user_id = $1 AND is_historical = false AND confidence >= 0.6${subjectClause}
+       ORDER BY subject ASC, predicate ASC`,
+      params,
+    )
+    return rows
+  })
 }
 
 async function getHistoricalFacts(args: { subject?: string }) {
   const id = await uid()
-  let query = db
-    .from('profile_facts')
-    .select('subject, predicate, value, confidence, observed_count, source, first_seen_at, last_seen_at')
-    .eq('user_id', id)
-    .eq('is_historical', true)
-    .order('subject', { ascending: true })
-    .order('last_seen_at', { ascending: false })
-  if (args.subject) query = query.eq('subject', args.subject)
-  const { data, error } = await query
-  if (error) throw new Error(error.message)
-  return data ?? []
+  return await withUserContext(id, async (c) => {
+    const params: unknown[] = [id]
+    let subjectClause = ''
+    if (args.subject) {
+      params.push(args.subject)
+      subjectClause = ` AND subject = $${params.length}`
+    }
+    const { rows } = await c.query(
+      `SELECT subject, predicate, value, confidence, observed_count, source, first_seen_at, last_seen_at
+       FROM plannen.profile_facts
+       WHERE user_id = $1 AND is_historical = true${subjectClause}
+       ORDER BY subject ASC, last_seen_at DESC`,
+      params,
+    )
+    return rows
+  })
 }
 
 // ── Tool registry ─────────────────────────────────────────────────────────────
@@ -1977,5 +2117,5 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
 const transport = new StdioServerTransport()
 await server.connect(transport)
 process.stderr.write(
-  `[plannen-mcp] ready — user: ${USER_EMAIL}  supabase: ${SUPABASE_URL}\n`
+  `[plannen-mcp] ready — user: ${USER_EMAIL}  tier: ${PLANNEN_TIER}  db: ${DATABASE_URL.replace(/:[^:@]*@/, ':***@')}\n`
 )

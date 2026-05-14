@@ -1,5 +1,5 @@
 // src/services/profileService.ts
-import { supabase } from '../lib/supabase'
+import { dbClient } from '../lib/dbClient'
 import { validateStoryLanguages } from '../utils/storyLanguages'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -36,162 +36,128 @@ export interface FamilyMember {
 // ── user_profiles ─────────────────────────────────────────────────────────────
 
 export async function getProfile(): Promise<{ data: UserProfile | null; error: Error | null }> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { data: null, error: new Error('Not authenticated') }
-  const { data, error } = await supabase
-    .from('user_profiles')
-    .select('*')
-    .eq('user_id', user.id)
-    .maybeSingle()
-  if (error) return { data: null, error: new Error(error.message) }
-  return { data: data as UserProfile | null, error: null }
+  try {
+    const data = await dbClient.profile.get()
+    return { data: (data as unknown as UserProfile | null) ?? null, error: null }
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e : new Error('Get profile failed') }
+  }
 }
 
 export async function upsertProfile(
   updates: { dob?: string | null; goals?: string[]; interests?: string[]; timezone?: string }
 ): Promise<{ error: Error | null }> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: new Error('Not authenticated') }
-  const { error } = await supabase
-    .from('user_profiles')
-    .upsert({ user_id: user.id, ...updates }, { onConflict: 'user_id' })
-  return { error: error ? new Error(error.message) : null }
+  try {
+    await dbClient.profile.update(updates)
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e : new Error('Upsert profile failed') }
+  }
 }
 
 export async function getStoryLanguages(): Promise<{ data: string[]; error: Error | null }> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { data: ['en'], error: new Error('Not authenticated') }
-  const { data, error } = await supabase
-    .from('user_profiles')
-    .select('story_languages')
-    .eq('user_id', user.id)
-    .maybeSingle()
-  if (error) return { data: ['en'], error: new Error(error.message) }
-  const langs = (data?.story_languages as string[] | null | undefined) ?? ['en']
-  return { data: langs.length ? langs : ['en'], error: null }
+  try {
+    const data = await dbClient.profile.get()
+    const langs = (data?.story_languages as string[] | null | undefined) ?? ['en']
+    return { data: langs.length ? langs : ['en'], error: null }
+  } catch (e) {
+    return { data: ['en'], error: e instanceof Error ? e : new Error('Get story languages failed') }
+  }
 }
 
 export async function setStoryLanguages(input: readonly string[]): Promise<{ error: Error | null }> {
   const result = validateStoryLanguages(input)
   if (!result.ok) return { error: new Error(result.error) }
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: new Error('Not authenticated') }
-  const { error } = await supabase
-    .from('user_profiles')
-    .upsert({ user_id: user.id, story_languages: result.value }, { onConflict: 'user_id' })
-  return { error: error ? new Error(error.message) : null }
+  try {
+    await dbClient.profile.update({ story_languages: result.value })
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e : new Error('Set story languages failed') }
+  }
 }
 
 // ── user_locations ────────────────────────────────────────────────────────────
 
 export async function getLocations(): Promise<{ data: UserLocation[]; error: Error | null }> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { data: [], error: new Error('Not authenticated') }
-  const { data, error } = await supabase
-    .from('user_locations')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: true })
-  if (error) return { data: [], error: new Error(error.message) }
-  return { data: (data ?? []) as UserLocation[], error: null }
+  try {
+    const data = await dbClient.locations.list()
+    return { data: data as unknown as UserLocation[], error: null }
+  } catch (e) {
+    return { data: [], error: e instanceof Error ? e : new Error('List locations failed') }
+  }
 }
 
 export async function addLocation(
   loc: { label: string; address: string; city: string; country: string; is_default: boolean }
 ): Promise<{ data: UserLocation | null; error: Error | null }> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { data: null, error: new Error('Not authenticated') }
-  if (loc.is_default) {
-    const { error: clearError } = await supabase.from('user_locations').update({ is_default: false }).eq('user_id', user.id)
-    if (clearError) return { data: null, error: new Error(clearError.message) }
+  try {
+    const data = await dbClient.locations.create(loc)
+    return { data: data as unknown as UserLocation, error: null }
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e : new Error('Add location failed') }
   }
-  const { data, error } = await supabase
-    .from('user_locations')
-    .insert({ user_id: user.id, ...loc })
-    .select()
-    .single()
-  if (error) return { data: null, error: new Error(error.message) }
-  return { data: data as UserLocation, error: null }
 }
 
 export async function updateLocation(
   id: string,
   updates: Partial<Pick<UserLocation, 'label' | 'address' | 'city' | 'country' | 'is_default'>>
 ): Promise<{ error: Error | null }> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: new Error('Not authenticated') }
-  if (updates.is_default) {
-    const { error: clearError } = await supabase.from('user_locations').update({ is_default: false }).eq('user_id', user.id).neq('id', id)
-    if (clearError) return { error: new Error(clearError.message) }
+  try {
+    await dbClient.locations.update(id, updates)
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e : new Error('Update location failed') }
   }
-  const { error } = await supabase
-    .from('user_locations')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .eq('user_id', user.id)
-  return { error: error ? new Error(error.message) : null }
 }
 
 export async function deleteLocation(id: string): Promise<{ error: Error | null }> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: new Error('Not authenticated') }
-  const { error } = await supabase
-    .from('user_locations')
-    .delete()
-    .eq('id', id)
-    .eq('user_id', user.id)
-  return { error: error ? new Error(error.message) : null }
+  try {
+    await dbClient.locations.delete(id)
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e : new Error('Delete location failed') }
+  }
 }
 
 // ── family_members ────────────────────────────────────────────────────────────
 
 export async function getFamilyMembers(): Promise<{ data: FamilyMember[]; error: Error | null }> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { data: [], error: new Error('Not authenticated') }
-  const { data, error } = await supabase
-    .from('family_members')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: true })
-  if (error) return { data: [], error: new Error(error.message) }
-  return { data: (data ?? []) as FamilyMember[], error: null }
+  try {
+    const data = await dbClient.relationships.listFamilyMembers()
+    return { data: data as unknown as FamilyMember[], error: null }
+  } catch (e) {
+    return { data: [], error: e instanceof Error ? e : new Error('List family failed') }
+  }
 }
 
 export async function addFamilyMember(
   member: { name: string; relation: string; dob?: string | null; gender?: string | null; goals?: string[]; interests?: string[] }
 ): Promise<{ data: FamilyMember | null; error: Error | null }> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { data: null, error: new Error('Not authenticated') }
-  const { data, error } = await supabase
-    .from('family_members')
-    .insert({ user_id: user.id, goals: [], interests: [], ...member })
-    .select()
-    .single()
-  if (error) return { data: null, error: new Error(error.message) }
-  return { data: data as FamilyMember, error: null }
+  try {
+    const data = await dbClient.relationships.createFamilyMember(member)
+    return { data: data as unknown as FamilyMember, error: null }
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e : new Error('Add family failed') }
+  }
 }
 
 export async function updateFamilyMember(
   id: string,
   updates: Partial<Pick<FamilyMember, 'name' | 'relation' | 'dob' | 'gender' | 'goals' | 'interests'>>
 ): Promise<{ error: Error | null }> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: new Error('Not authenticated') }
-  const { error } = await supabase
-    .from('family_members')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .eq('user_id', user.id)
-  return { error: error ? new Error(error.message) : null }
+  try {
+    await dbClient.relationships.updateFamilyMember(id, updates)
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e : new Error('Update family failed') }
+  }
 }
 
 export async function deleteFamilyMember(id: string): Promise<{ error: Error | null }> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: new Error('Not authenticated') }
-  const { error } = await supabase
-    .from('family_members')
-    .delete()
-    .eq('id', id)
-    .eq('user_id', user.id)
-  return { error: error ? new Error(error.message) : null }
+  try {
+    await dbClient.relationships.deleteFamilyMember(id)
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e : new Error('Delete family failed') }
+  }
 }

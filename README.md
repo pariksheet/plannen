@@ -35,26 +35,31 @@ Together these turn Plannen from a calendar into an assistant. The data stays on
 
 ---
 
-> **Tier 1 — Fully Local.** Everything runs on your computer: Postgres via Supabase, a React web app, and an MCP server that lets Claude Desktop / Claude Code read and write your events directly. See [`docs/TIERED_DEPLOYMENT_MODEL.md`](docs/TIERED_DEPLOYMENT_MODEL.md) for the full tier model — this README covers Tier 1 only.
+> **Tier 0 — Bundled (default).** Plannen runs on your computer with just Node 20+ — no Docker, no Supabase CLI. Postgres is an embedded binary started by Node; the MCP server talks to it directly. See [`docs/TIERED_DEPLOYMENT_MODEL.md`](docs/TIERED_DEPLOYMENT_MODEL.md) for the full tier model. Tier 1 (local Supabase + edge functions) stays available via `bash scripts/bootstrap.sh --tier 1` for users who want the full Docker stack.
 
 ---
 
 ## Prerequisites
 
+### Tier 0 (default)
+
 | Tool | Why | Install |
 |------|-----|---------|
-| A container runtime | Runs local Supabase (Postgres + Auth + Storage) | Docker Desktop, [Colima](https://github.com/abiosoft/colima), [OrbStack](https://orbstack.dev), Rancher Desktop, or podman with docker-compat |
-| [Supabase CLI](https://supabase.com/docs/guides/cli) ≥ 2.0 | Manages local DB, migrations, seeds | `brew install supabase/tap/supabase` |
-| [Node.js](https://nodejs.org/) ≥ 20 LTS | Runs the React app and MCP server | `brew install node` (or nvm/asdf/volta) |
+| [Node.js](https://nodejs.org/) ≥ 20 LTS | Runs the embedded Postgres, MCP server, web app | `brew install node` (or nvm/asdf/volta) |
 | [Claude Code](https://claude.com/claude-code) (recommended) or [Claude Desktop](https://claude.ai/download) | The AI interface | claude.com/claude-code |
 
-Verify everything is installed and your container runtime is up:
-
 ```bash
-docker info >/dev/null && echo "✓ docker daemon reachable"
-supabase --version
-node --version
+node --version  # expect v20+
 ```
+
+### Tier 1 (opt-in — `--tier 1`)
+
+Adds Docker + Supabase CLI to the above:
+
+| Tool | Why | Install |
+|------|-----|---------|
+| A container runtime | Runs local Supabase (Postgres + Auth + Storage) | Docker Desktop, [Colima](https://github.com/abiosoft/colima), [OrbStack](https://orbstack.dev), Rancher Desktop |
+| [Supabase CLI](https://supabase.com/docs/guides/cli) ≥ 2.0 | Manages local DB, migrations, seeds | `brew install supabase/tap/supabase` |
 
 ---
 
@@ -63,10 +68,11 @@ node --version
 ```bash
 git clone <repo-url> plannen
 cd plannen
-bash scripts/bootstrap.sh
+bash scripts/bootstrap.sh                # Tier 0, default
+# bash scripts/bootstrap.sh --tier 1     # opt-in to the local Supabase stack
 ```
 
-That's it. `bootstrap.sh` does prereq checks, npm install, supabase start, migrations, auth-user creation (admin API), env-file generation, starts `supabase functions serve` in the background, and offers to install the Claude Code plugin at the end.
+That's it. In Tier 0, `bootstrap.sh` does prereq checks, npm install, starts an embedded Postgres at port 54322, applies migrations (Tier 0 overlay + main schema), inserts your user row, writes `.env` with `PLANNEN_TIER=0` + `DATABASE_URL`, and offers to install the Claude Code plugin. In Tier 1 it instead runs `supabase start`, `supabase migration up`, the auth-user admin call, and `functions-serve`.
 
 The script is idempotent — re-run it any time. If something gets broken, `/plannen-doctor` (inside Claude Code) will diagnose and suggest the targeted fix.
 
@@ -90,17 +96,57 @@ bash scripts/bootstrap.sh --non-interactive --email you@example.com [--install-p
 
 ## Daily workflow
 
-After a reboot you typically need:
+After a reboot, **one command brings the right stack up for your tier**:
 
 ```bash
-bash scripts/local-start.sh             # start Supabase (Kong-patched)
-bash scripts/functions-start.sh         # start edge functions in background
-npm run dev                              # web app at http://localhost:4321
+bash scripts/start.sh            # everything Plannen needs (pg/supabase + backend + web dev)
+bash scripts/start.sh --no-dev   # headless: pg + backend only (MCP/Claude use case)
+bash scripts/stop.sh             # graceful umbrella shutdown
 ```
 
-Or just re-run `bash scripts/bootstrap.sh` — it's idempotent and brings everything up in one command.
+`start.sh` reads `PLANNEN_TIER` from `.env` and calls the right sub-scripts (`pg-start` + `backend-start` for Tier 0; `local-start` + `functions-start` for Tier 1). All sub-scripts are idempotent, so re-running on a live stack is a no-op.
 
-To stop edge functions: `bash scripts/functions-stop.sh`.
+### Auto-start at login (macOS)
+
+Drop this LaunchAgent at `~/Library/LaunchAgents/com.plannen.start.plist`, then `launchctl load ~/Library/LaunchAgents/com.plannen.start.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.plannen.start</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/absolute/path/to/plannen/scripts/start.sh</string>
+    <string>--no-dev</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/Users/YOU/.plannen/start.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOU/.plannen/start.log</string>
+</dict>
+</plist>
+```
+
+Drop `--no-dev` if you want the web dev server running on login too. (Tier 1 needs Docker to be running first; `OnDemand`/`KeepAlive` can be added if Docker startup is slow.)
+
+### Lower-level (still works)
+
+```bash
+# Tier 0
+bash scripts/pg-start.sh        # embedded Postgres on 54322
+bash scripts/backend-start.sh   # Plannen backend on 54323
+npm run dev                     # web app at http://localhost:4321
+
+# Tier 1
+bash scripts/local-start.sh     # start Supabase (Kong-patched)
+bash scripts/functions-start.sh # start edge functions
+npm run dev                     # web app at http://localhost:4321
+```
+
+Or just re-run `bash scripts/bootstrap.sh [--tier 1]` — it's idempotent and will auto-restore `supabase/seed.sql` if your DB is empty.
 
 ---
 
@@ -180,8 +226,10 @@ For Claude-driven photo organisation of past events, configure Google OAuth:
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create a project and enable the **Photos Library API**.
 2. Generate OAuth 2.0 credentials of type **Web application**.
-3. Register `http://127.0.0.1:54321/functions/v1/google-oauth-callback` as an authorised redirect URI.
-4. Run `/plannen-setup` (in Claude Code) and paste the Client ID and Client Secret. The values are written to both `.env` and `supabase/functions/.env`. Restart the functions-serve process: `bash scripts/functions-stop.sh && bash scripts/functions-start.sh`.
+3. Register the OAuth callback as an authorised redirect URI:
+   - **Tier 0**: `http://127.0.0.1:54323/functions/v1/google-oauth-callback`
+   - **Tier 1**: `http://127.0.0.1:54321/functions/v1/google-oauth-callback`
+4. Run `/plannen-setup` (in Claude Code) and paste the Client ID and Client Secret. Values are written to `.env` (and, in Tier 1, also to `supabase/functions/.env`). Restart the relevant process: Tier 0 → `bash scripts/backend-stop.sh && bash scripts/backend-start.sh`; Tier 1 → `bash scripts/functions-stop.sh && bash scripts/functions-start.sh`.
 
 ---
 
@@ -189,22 +237,31 @@ For Claude-driven photo organisation of past events, configure Google OAuth:
 
 ```
 plannen/
-├── src/                    # React app (Vite + TypeScript)
-├── mcp/                    # MCP server (TS, single file at mcp/src/index.ts)
-├── plugin/                 # Claude Code plugin (skills + commands + manifest)
+├── src/                          # React app (Vite + TypeScript)
+│   ├── lib/dbClient/             # Tier-portable data layer (tier0 fetch + tier1 supabase-js)
+│   └── services/                 # Thin passthroughs to dbClient
+├── mcp/                          # MCP server — pg.Pool + withUserContext, BOTH tiers
+├── backend/                      # Tier 0 Hono backend (REST + storage + 12 function routes)
+├── plugin/                       # Claude Code plugin (skills + commands + manifest)
 ├── supabase/
-│   ├── migrations/         # Database schema (source of truth)
-│   ├── functions/          # Edge functions (incl. _shared/ai.ts BYOK wrapper)
-│   ├── config.toml         # Local Supabase config
-│   └── seed*.{sql,tar.gz}  # Personal data backups (gitignored)
+│   ├── migrations/               # Main schema (source of truth)
+│   ├── migrations-tier0/         # Tier-0 compat overlay (auth/storage stubs + roles)
+│   ├── functions/                # Edge functions — Deno entry per fn + pure handlers in _shared/handlers/
+│   ├── config.toml               # Tier 1 Supabase config
+│   └── seed*.{sql,tar.gz}        # Personal data backups (gitignored)
 ├── scripts/
-│   ├── bootstrap.sh                # One-shot first-run install
-│   ├── functions-{start,stop}.sh   # Edge-functions lifecycle
-│   ├── local-start.sh              # Supabase start + Kong patch
-│   ├── export-seed.sh              # Backup local DB + photos
-│   └── lib/                        # Shared bash + node helpers
+│   ├── bootstrap.sh              # One-shot first-run install (--tier 0|1)
+│   ├── start.sh / stop.sh        # Tier-aware umbrella lifecycle
+│   ├── pg-{start,stop}.sh        # Embedded Postgres lifecycle (Tier 0)
+│   ├── backend-{start,stop}.sh   # Plannen backend lifecycle (Tier 0)
+│   ├── functions-{start,stop}.sh # Edge-functions lifecycle (Tier 1)
+│   ├── local-start.sh            # Supabase start + Kong patch (Tier 1)
+│   ├── export-seed.sh            # Backup local DB + photos (tier-aware)
+│   ├── restore-photos.sh         # Restore photos (tier-aware)
+│   └── lib/                      # Shared bash + node helpers (migrate, restore, dump-tables)
 └── docs/
-    ├── TIERED_DEPLOYMENT_MODEL.md  # Tier 1–4 design
+    ├── TIERED_DEPLOYMENT_MODEL.md  # Tier 0/1/2/3+ — where Postgres lives
+    ├── INTEGRATIONS.md             # Google Calendar / Photos / Drive — orthogonal to tier
     └── superpowers/specs/          # Approved design docs
 ```
 
@@ -246,11 +303,15 @@ To restore: drop the two files into `supabase/`, run `bootstrap.sh`, then `bash 
 
 ## Troubleshooting
 
-**`supabase start` fails on Colima.** Ensure the docker socket is exposed: `colima start --network-address` plus `colima ssh -- sudo systemctl restart docker`. Some setups also need `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`.
+**Tier 0 — embedded Postgres won't come up on port 54322.** Check `~/.plannen/pg.log` for the error. If something else is bound to 54322 (e.g., a stale Supabase Docker container from a previous Tier 1 run), stop it first: `supabase stop --project-id plannen` and `bash scripts/pg-start.sh`.
+
+**Tier 0 — backend says `ECONNREFUSED 127.0.0.1:54322`.** Postgres died (e.g., laptop sleep). `bash scripts/pg-start.sh` then `bash scripts/backend-stop.sh && bash scripts/backend-start.sh` to clear stale pool connections.
+
+**Tier 1 — `supabase start` fails on Colima.** Ensure the docker socket is exposed: `colima start --network-address` plus `colima ssh -- sudo systemctl restart docker`. Some setups also need `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`.
 
 **MCP doesn't start when Claude Code is launched as a GUI app.** The plugin manifest uses bare `node`, which isn't found if you installed Node via NVM and Claude Code doesn't inherit your shell's PATH. Workaround: symlink to a system-PATH location (e.g. `sudo ln -s "$(which node)" /usr/local/bin/node`). A per-machine plugin override is on the V1.1 backlog.
 
-**`/plannen-doctor` says functions-serve is dead.** `bash scripts/functions-start.sh` (idempotent — no-op if already alive). Check `.plannen/functions.log` for the error.
+**Tier 1 — `/plannen-doctor` says functions-serve is dead.** `bash scripts/functions-start.sh` (idempotent — no-op if already alive). Check `.plannen/functions.log` for the error.
 
 **I previously ran `scripts/install-plannen-command.sh`.** That installer is gone — the plugin replaces it. Clean up the stale slash command and MCP registration:
 

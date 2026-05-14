@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase'
+import { dbClient } from '../lib/dbClient'
 
 export interface PhotoPickerSession {
   id: string
@@ -19,43 +19,13 @@ interface PollComplete {
 
 export type PhotoPickerPollResult = PollPending | PollComplete
 
-const getFunctionsUrl = () => {
-  const url = import.meta.env.VITE_SUPABASE_URL
-  if (!url) throw new Error('VITE_SUPABASE_URL is not set')
-  return url
-}
-
-async function authedFetch(path: string, body: unknown): Promise<Response> {
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session?.access_token) throw new Error('Not authenticated')
-  const base = getFunctionsUrl()
-  return fetch(`${base}${path}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body ?? {}),
-  })
-}
-
 export async function createPhotoPickerSession(): Promise<PhotoPickerSession> {
-  const res = await authedFetch('/functions/v1/picker-session-create', {})
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error((err as { error?: string }).error ?? `Failed to create picker session: ${res.status}`)
-  }
-  return (await res.json()) as PhotoPickerSession
+  return await dbClient.functions.invoke<PhotoPickerSession>('picker-session-create', {})
 }
 
 export async function pollPhotoPickerSession(
   sessionId: string,
   eventId: string,
 ): Promise<PhotoPickerPollResult> {
-  const res = await authedFetch('/functions/v1/picker-session-poll', { sessionId, eventId })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error((err as { error?: string }).error ?? `Failed to poll picker session: ${res.status}`)
-  }
-  return (await res.json()) as PhotoPickerPollResult
+  return await dbClient.functions.invoke<PhotoPickerPollResult>('picker-session-poll', { sessionId, eventId })
 }

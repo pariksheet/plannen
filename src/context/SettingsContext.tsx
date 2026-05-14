@@ -1,5 +1,8 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react'
 import { supabase } from '../lib/supabase'
+import { dbClient } from '../lib/dbClient'
+
+const TIER = (import.meta.env.VITE_PLANNEN_TIER ?? '1') as '0' | '1'
 import { useAuth } from './AuthContext'
 
 export type Provider = 'anthropic' // V1.1 widens
@@ -64,6 +67,40 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       return
     }
     setLoading(true)
+    if (TIER === '0') {
+      // Tier 0 backend redacts api_key on GET. Settings panel is mainly used
+      // for the BYOK key — in Tier 0 the Claude path doesn't need it; we just
+      // surface presence/provider/model so the UI can show "configured" state.
+      try {
+        const data = await dbClient.settings.get() as {
+          provider?: string
+          has_api_key?: boolean
+          default_model?: string | null
+          base_url?: string | null
+          last_used_at?: string | null
+          last_error_at?: string | null
+          last_error_code?: string | null
+        } | null
+        if (!data || !data.has_api_key) {
+          setSettings(null)
+        } else {
+          setSettings(ROW_TO_SETTINGS({
+            provider: data.provider as never,
+            api_key: '',  // backend doesn't expose; UI shows configured/not
+            default_model: data.default_model ?? null,
+            base_url: data.base_url ?? null,
+            last_used_at: data.last_used_at ?? null,
+            last_error_at: data.last_error_at ?? null,
+            last_error_code: data.last_error_code ?? null,
+          }))
+        }
+      } catch (e) {
+        console.warn('Failed to load user_settings:', (e as Error).message)
+        setSettings(null)
+      }
+      setLoading(false)
+      return
+    }
     const { data, error } = await supabase
       .from('user_settings')
       .select('provider, api_key, default_model, base_url, last_used_at, last_error_at, last_error_code')
@@ -87,6 +124,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const saveProvider = useCallback(
     async ({ provider, apiKey, defaultModel }: { provider: Provider; apiKey: string; defaultModel: string | null }) => {
       if (!user) throw new Error('Not authenticated')
+      if (TIER === '0') {
+        await dbClient.settings.update({ provider, api_key: apiKey, default_model: defaultModel, base_url: null, is_default: true })
+        await refresh()
+        return
+      }
       const { error } = await supabase
         .from('user_settings')
         .upsert(
@@ -108,6 +150,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const clearProvider = useCallback(async () => {
     if (!user || !settings) return
+    if (TIER === '0') {
+      // Tier 0: no DELETE route on /api/settings. Patch with null api_key to disable.
+      await dbClient.settings.update({ provider: settings.provider, api_key: null })
+      await refresh()
+      return
+    }
     const { error } = await supabase
       .from('user_settings')
       .delete()
@@ -119,6 +167,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const testProvider = useCallback(async (): Promise<{ ok: true } | { ok: false; code: string; message: string }> => {
     if (!settings) return { ok: false, code: 'no_provider_configured', message: 'No provider saved.' }
+    if (TIER === '0') {
+      try {
+        const data = await dbClient.functions.invoke<{ success?: boolean; error?: string; message?: string }>('agent-test', {})
+        if (data?.success) { await refresh(); return { ok: true } }
+        await refresh()
+        return { ok: false, code: data?.error ?? 'unknown_error', message: data?.message ?? 'Test call failed' }
+      } catch (e) {
+        return { ok: false, code: 'unknown_error', message: (e as Error).message }
+      }
+    }
     const { data, error } = await supabase.functions.invoke('agent-test', { body: {} })
     if (error) return { ok: false, code: 'unknown_error', message: error.message ?? 'Test call failed' }
     if (data?.success) {

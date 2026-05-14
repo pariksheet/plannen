@@ -1,34 +1,44 @@
 #!/usr/bin/env bash
 # Restore photos from supabase/seed-photos.tar.gz.
 #
-# `supabase db reset` clears storage.objects, and `tar czf` (used by
-# export-seed.sh) does not preserve the user.supabase.{cache-control,
-# content-type,etag} xattrs that the storage worker reads. So a naive
-# extract leaves files on disk that the API can't serve (404 if the
-# storage.objects row is missing, 500 ENODATA if the xattrs are missing).
+# Tier 0: extracts the tarball into ~/.plannen/photos/ (or $PLANNEN_PHOTOS_ROOT)
+#         and flattens Supabase Storage's <file>/<version-uuid> layout so files
+#         sit at <bucket>/<path>/<file> — the shape the Tier 0 backend serves.
+# Tier 1: extracts into the storage container's /mnt, sets the xattrs the
+#         storage worker reads, and upserts one storage.objects row per file.
 #
-# This script:
-#   1. Extracts seed-photos.tar.gz into the storage container's /mnt.
-#   2. Sets the 3 xattrs storage v1.x reads, on every file under each bucket.
-#   3. Inserts one storage.objects row per file (idempotent — ON CONFLICT skips).
-#
-# Idempotent: safe to re-run after every reset.
+# Reads PLANNEN_TIER from .env (default 0). Idempotent on both tiers.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ENV_FILE="$ROOT/.env"
 ARCHIVE="$ROOT/supabase/seed-photos.tar.gz"
+
+TIER=0
+if [ -f "$ENV_FILE" ]; then
+  TIER=$(grep -E '^PLANNEN_TIER=' "$ENV_FILE" | head -1 | cut -d= -f2 | tr -d '"' || echo 0)
+fi
+TIER=${TIER:-0}
+
+if [ ! -f "$ARCHIVE" ]; then
+  echo "ERROR: $ARCHIVE not found. Run scripts/export-seed.sh on a working machine first." >&2
+  exit 1
+fi
+
+if [ "$TIER" = "0" ]; then
+  echo "Tier 0 — restoring photos from $ARCHIVE ..."
+  exec node "$ROOT/scripts/lib/restore-photos.mjs" "$ARCHIVE"
+fi
+
+# ─── Tier 1 path (Supabase Storage with xattrs + storage.objects rows) ────────
+
 STORAGE_CONTAINER="${PLANNEN_STORAGE_CONTAINER:-supabase_storage_plannen}"
 DB_HOST="${PLANNEN_DB_HOST:-127.0.0.1}"
 DB_PORT="${PLANNEN_DB_PORT:-54322}"
 DB_USER="${PLANNEN_DB_USER:-postgres}"
 DB_PASS="${PLANNEN_DB_PASS:-postgres}"
 DB_NAME="${PLANNEN_DB_NAME:-postgres}"
-
-if [ ! -f "$ARCHIVE" ]; then
-  echo "ERROR: $ARCHIVE not found. Run scripts/export-seed.sh on a working machine first." >&2
-  exit 1
-fi
 
 if ! docker ps --format '{{.Names}}' | grep -q "^${STORAGE_CONTAINER}$"; then
   echo "ERROR: container $STORAGE_CONTAINER not running. Start with: bash scripts/local-start.sh" >&2
@@ -43,10 +53,6 @@ docker exec -i "$STORAGE_CONTAINER" tar xzf - -C /mnt < "$ARCHIVE"
 
 echo "→ Reconstructing xattrs and storage.objects rows…"
 
-# Container layout is /mnt/<tenant>/<project>/<bucket>/<name>/<version>.
-# Walk every regular file at depth ≥5; emit tab-separated columns matching the
-# temp-table schema below. The script runs inside the container so we can
-# both setfattr and stat in one pass.
 ROWS=$(docker exec "$STORAGE_CONTAINER" sh -c '
   set -e
   cd /mnt
@@ -80,8 +86,6 @@ ROWS=$(docker exec "$STORAGE_CONTAINER" sh -c '
     setfattr -n user.supabase.content-type  -v "$mime"     "$full"
     setfattr -n user.supabase.cache-control -v "no-cache"  "$full"
     setfattr -n user.supabase.etag          -v "\"$etag\"" "$full"
-    # owner is the 2nd segment of the bucket-relative name (event-id/owner-id/…).
-    # Empty if the layout differs; storage works without it.
     owner=$(printf %s "$name" | awk -F/ "{print \$2}")
     printf "%s\t%s\t%s\t%s\t%s\t%s\n" "$bucket" "$name" "$owner" "$version" "$size" "$mime"
   done

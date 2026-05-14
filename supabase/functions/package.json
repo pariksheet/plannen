@@ -1,0 +1,13 @@
+{
+  "name": "@plannen/edge-functions",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0",
+    "zod": "^3.23.0"
+  }
+}

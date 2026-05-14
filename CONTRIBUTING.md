@@ -23,8 +23,10 @@ bash scripts/bootstrap.sh
 Once it's running:
 
 - Web app: `npm run dev` → http://localhost:4321
-- Edge functions: `bash scripts/functions-start.sh` (background)
-- Tests: `npm test` (web) and `cd mcp && npm test` (MCP)
+- Backend (Tier 0): `bash scripts/backend-start.sh` (idempotent)
+- Edge functions (Tier 1 only): `bash scripts/functions-start.sh` (background)
+- Umbrella: `bash scripts/start.sh` / `bash scripts/stop.sh` — tier-aware lifecycle for the whole stack.
+- Tests: `npm test` (web), `cd mcp && npm test` (MCP), `cd backend && npm test` (backend), `cd supabase/functions && npm test` (pure handlers).
 
 ## Branching and PRs
 

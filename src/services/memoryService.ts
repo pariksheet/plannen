@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase'
+import { dbClient } from '../lib/dbClient'
 import type { MediaType } from '../utils/mediaType'
 import { mediaTypeFromMime } from '../utils/mediaType'
 import { compressImage } from '../utils/imageCompression'
@@ -24,15 +24,12 @@ export interface EventMemory {
 }
 
 export async function getEventMemories(eventId: string): Promise<{ data: EventMemory[]; error: Error | null }> {
-  const { data, error } = await supabase
-    .from('event_memories')
-    .select('id, event_id, user_id, media_url, media_type, caption, created_at, taken_at, source, external_id, transcript, transcript_lang, transcribed_at, user:users(full_name, email)')
-    .eq('event_id', eventId)
-    .order('taken_at', { ascending: false, nullsFirst: false })
-    .order('created_at', { ascending: false })
-  if (error) return { data: [], error: new Error(error.message) }
-  const rows = (data ?? []) as (Omit<EventMemory, 'user'> & { user?: { full_name?: string; email?: string } })[]
-  return { data: rows as EventMemory[], error: null }
+  try {
+    const rows = await dbClient.memories.list({ event_id: eventId })
+    return { data: rows as unknown as EventMemory[], error: null }
+  } catch (e) {
+    return { data: [], error: e instanceof Error ? e : new Error('List memories failed') }
+  }
 }
 
 export async function uploadMemory(
@@ -40,8 +37,13 @@ export async function uploadMemory(
   file: File,
   caption?: string
 ): Promise<{ data: EventMemory | null; error: Error | null }> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { data: null, error: new Error('Not authenticated') }
+  let userId: string
+  try {
+    const me = await dbClient.me.get()
+    userId = me.userId
+  } catch {
+    return { data: null, error: new Error('Not authenticated') }
+  }
 
   const detectedType = mediaTypeFromMime(file.type)
   let fileToUpload: File | Blob = file
@@ -54,25 +56,32 @@ export async function uploadMemory(
   }
 
   const ext = file.name.split('.').pop() || 'jpg'
-  const path = `${eventId}/${user.id}/${Date.now()}.${ext}`
-  const { error: uploadError } = await supabase.storage.from('event-photos').upload(path, fileToUpload, { upsert: false })
-  if (uploadError) return { data: null, error: new Error(uploadError.message) }
+  const filename = `${eventId}/${Date.now()}.${ext}`
+  let publicUrl: string
+  try {
+    const up = await dbClient.memories.uploadFile({
+      userId,
+      filename,
+      blob: fileToUpload,
+      contentType: file.type || 'application/octet-stream',
+    })
+    publicUrl = up.publicUrl
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e : new Error('Upload failed') }
+  }
 
-  const { data: { publicUrl } } = supabase.storage.from('event-photos').getPublicUrl(path)
-  const { data: row, error: insertError } = await supabase
-    .from('event_memories')
-    .insert({
+  try {
+    const row = await dbClient.memories.create({
       event_id: eventId,
-      user_id: user.id,
       media_url: publicUrl,
       media_type: detectedType,
       caption: caption || null,
       source: 'upload',
     })
-    .select()
-    .single()
-  if (insertError) return { data: null, error: new Error(insertError.message) }
-  return { data: row as EventMemory, error: null }
+    return { data: row as unknown as EventMemory, error: null }
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e : new Error('Insert memory failed') }
+  }
 }
 
 export async function addMemoryFromGoogle(
@@ -82,29 +91,28 @@ export async function addMemoryFromGoogle(
   caption?: string,
   mimeType?: string
 ): Promise<{ data: EventMemory | null; error: Error | null }> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { data: null, error: new Error('Not authenticated') }
   const detectedType: MediaType = mimeType ? mediaTypeFromMime(mimeType) : 'image'
-  const { data: row, error: insertError } = await supabase
-    .from('event_memories')
-    .insert({
+  try {
+    const row = await dbClient.memories.create({
       event_id: eventId,
-      user_id: user.id,
       media_url: null,
       media_type: detectedType,
       caption: caption || null,
       source,
       external_id: externalId,
     })
-    .select()
-    .single()
-  if (insertError) return { data: null, error: new Error(insertError.message) }
-  return { data: row as EventMemory, error: null }
+    return { data: row as unknown as EventMemory, error: null }
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e : new Error('Add memory failed') }
+  }
 }
 
 /** URL for the memory image proxy (use with fetch + Authorization header for external sources). */
 export function getMemoryImageProxyUrl(memoryId: string, supabaseUrl: string): string {
-  return `${supabaseUrl}/functions/v1/memory-image?memory_id=${encodeURIComponent(memoryId)}`
+  // In Tier 0, the caller passes "" or omits supabaseUrl — fall back to a
+  // same-origin path against the local backend.
+  const base = supabaseUrl || ''
+  return `${base}/functions/v1/memory-image?memory_id=${encodeURIComponent(memoryId)}`
 }
 
 const SOFT_CAP_BYTES = 200 * 1024 * 1024
@@ -116,6 +124,10 @@ export function shouldWarnLargeFile(file: File): string | null {
 }
 
 export async function deleteMemory(memoryId: string): Promise<{ error: Error | null }> {
-  const { error } = await supabase.from('event_memories').delete().eq('id', memoryId)
-  return { error: error ? new Error(error.message) : null }
+  try {
+    await dbClient.memories.delete(memoryId)
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e : new Error('Delete memory failed') }
+  }
 }

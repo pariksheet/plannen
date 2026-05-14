@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { hasAppAccess } from '../services/appAccessService'
 
+const TIER = (import.meta.env.VITE_PLANNEN_TIER ?? '1') as '0' | '1'
+
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading, profile } = useAuth()
   const location = useLocation()
@@ -61,6 +63,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     )
   }
   if (
+    TIER === '1' &&
     profile &&
     !profile.full_name &&
     location.pathname !== '/onboarding'
