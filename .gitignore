@@ -166,3 +166,9 @@ supabase/seed-photos.tar.gz
 
 # CodeGraph local index — built per-clone, never commit
 .codegraph/
+
+# Plugin install artefacts — files dropped into the plugin slots by plugin
+# install.sh scripts (symlinks to plugins/<name>/...). These are runtime
+# artefacts, not source. Each plugin owns its real source under plugins/<name>/.
+src/plugins/*.tsx
+supabase/migrations/*_kitchen_*.sql
