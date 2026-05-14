@@ -14,6 +14,12 @@ The storage tier (see [TIERED_DEPLOYMENT_MODEL.md](./TIERED_DEPLOYMENT_MODEL.md)
 
 Integrations are orthogonal to tier choice — pick any tier and any subset of integrations. New integration proposals get their own design spec in `docs/superpowers/specs/`.
 
+## Storage URL shape
+
+Plannen pins `media_url` columns to Supabase Storage's URL shape: `/storage/v1/object/public/event-photos/<userId>/<filename>`. In Tier 0, the backend serves this URL pattern from `~/.plannen/photos/event-photos/` (override via `PLANNEN_PHOTOS_ROOT`). In Tier 1, real Supabase Storage serves it.
+
+This pin means `media_url` rows are portable across tiers without rewriting. If Supabase ever changes the URL format, the Tier 0 mirror will need to follow suit (or the column has to be rewritten on tier switch).
+
 ## Why "integration" not "tier"
 
 The earlier mental model treated Google Drive / Calendar as tiers ("Tier 2 = sync to cloud"). That conflated two independent axes:

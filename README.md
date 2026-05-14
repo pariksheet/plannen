@@ -102,10 +102,11 @@ After a reboot you typically need:
 
 ```bash
 bash scripts/pg-start.sh                # embedded Postgres on 54322
-# (Phase 2 adds: bash scripts/backend-start.sh + npm run dev)
+bash scripts/backend-start.sh           # Plannen backend on 54323
+npm run dev                              # web app at http://localhost:4321
 ```
 
-Stop with `bash scripts/pg-stop.sh`. The Claude Code / Desktop MCP path works as soon as Postgres is up.
+Stop with `bash scripts/backend-stop.sh && bash scripts/pg-stop.sh`. The Claude Code / Desktop MCP path works as soon as Postgres is up — the backend is only needed for the web app and edge-function-equivalent routes.
 
 **Tier 1:**
 
