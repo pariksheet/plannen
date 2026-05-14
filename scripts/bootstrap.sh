@@ -33,12 +33,15 @@ START_DEV=0
 CONFIGURE_DESKTOP=0
 INSTALL_SKILLS=0
 ARG_EMAIL=""
+PLUGIN_NAMES=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --non-interactive) NON_INTERACTIVE=1; shift ;;
     --email) ARG_EMAIL=$2; shift 2 ;;
     --email=*) ARG_EMAIL=${1#--email=}; shift ;;
     --install-plugin) INSTALL_PLUGIN=1; shift ;;
+    --plugin) PLUGIN_NAMES+=("$2"); shift 2 ;;
+    --plugin=*) PLUGIN_NAMES+=("${1#--plugin=}"); shift ;;
     --start-dev) START_DEV=1; shift ;;
     --configure-desktop) CONFIGURE_DESKTOP=1; shift ;;
     --install-skills) INSTALL_SKILLS=1; shift ;;
@@ -428,6 +431,34 @@ EOF
       dim "  No brew detected — install ffmpeg manually if you want voice-note transcription."
     fi
   fi
+fi
+
+# ── 10d. Sibling plugins (--plugin) ───────────────────────────────────────────
+
+if [ ${#PLUGIN_NAMES[@]} -gt 0 ]; then
+  step "10d. Installing sibling plugins"
+  for plugin_name in "${PLUGIN_NAMES[@]}"; do
+    if [ "$plugin_name" = "all" ]; then
+      for plugin_dir in plugins/*/; do
+        if [ -x "${plugin_dir}install.sh" ]; then
+          ok "Installing plugin: $(basename "$plugin_dir")"
+          bash "${plugin_dir}install.sh" || err "Plugin install failed: $plugin_dir"
+        fi
+      done
+    else
+      plugin_dir="plugins/$plugin_name"
+      if [ ! -d "$plugin_dir" ]; then
+        err "Unknown plugin: $plugin_name (expected plugins/$plugin_name/ to exist)"
+        exit 1
+      fi
+      if [ ! -x "$plugin_dir/install.sh" ]; then
+        err "Plugin $plugin_name has no executable install.sh"
+        exit 1
+      fi
+      ok "Installing plugin: $plugin_name"
+      bash "$plugin_dir/install.sh" || err "Plugin install failed: $plugin_name"
+    fi
+  done
 fi
 
 # ── 11. Final printout ────────────────────────────────────────────────────────
