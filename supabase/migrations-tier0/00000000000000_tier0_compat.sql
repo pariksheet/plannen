@@ -6,13 +6,22 @@
 -- initial-schema migration can compile without modification.
 
 -- ---- Roles -----------------------------------------------------------------
--- The grants in plannen.* reference these. Created NOLOGIN as pure permission
--- targets, not login users.
+-- The grants and OWNER assignments in plannen.* reference these roles. Tier 1
+-- gets them from the Supabase image; Tier 0 ships these stubs. Created NOLOGIN
+-- as pure permission targets, not login users.
 DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres')      THEN CREATE ROLE postgres      NOLOGIN; END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon')          THEN CREATE ROLE anon          NOLOGIN; END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role')  THEN CREATE ROLE service_role  NOLOGIN; END IF;
 END $$;
+
+-- ---- extensions schema ----------------------------------------------------
+-- Supabase installs uuid-ossp into a dedicated 'extensions' schema; the dumped
+-- table DEFAULTs reference it as extensions.uuid_generate_v4(). Stub it here
+-- so initial_schema resolves those references on first apply.
+CREATE SCHEMA IF NOT EXISTS extensions;
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp" SCHEMA extensions;
 
 -- ---- auth schema -----------------------------------------------------------
 CREATE SCHEMA IF NOT EXISTS auth;
