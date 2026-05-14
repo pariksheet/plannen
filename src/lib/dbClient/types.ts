@@ -247,6 +247,7 @@ export type DbClient = {
   settings: {
     get: () => Promise<SettingsRow | null>
     update: (patch: Partial<SettingsRow> & { provider: string }) => Promise<SettingsRow | null>
+    system: () => Promise<{ tier: number; cliAvailable: boolean; cliVersion: string | null }>
   }
   agentTasks: {
     list: (params?: { event_id?: string; task_type?: string; limit?: number }) => Promise<AgentTaskRow[]>

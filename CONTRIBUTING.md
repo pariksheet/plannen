@@ -102,6 +102,10 @@ A short body explaining *why* the change is needed is welcome — the *what* is 
 
 We don't require 100% coverage, but the CI build must stay green.
 
+### Smoke testing the CLI provider
+
+`scripts/smoke-cli-provider.sh` verifies the `claude` binary is reachable and produces the expected JSON wrapper. Run it locally after touching anything in `backend/src/_shared-overlay/providers/claude-cli.ts` or `run-cli.ts`. Not part of CI (no real-binary tests run in CI).
+
 ## Reporting bugs and asking questions
 
 - **Bug?** Open an [issue](https://github.com/pariksheet/plannen/issues/new/choose) with the bug template.

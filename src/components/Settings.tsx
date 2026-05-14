@@ -25,7 +25,8 @@ function relativeTime(iso: string): string {
 }
 
 export function Settings() {
-  const { settings, loading, hasAiKey, saveProvider, clearProvider, testProvider } = useSettings()
+  const { settings, system, loading, hasAiKey, saveProvider, clearProvider, testProvider } = useSettings()
+  const [provider, setProvider] = useState<'anthropic' | 'claude-code-cli'>(settings?.provider ?? 'anthropic')
   const [key, setKey] = useState('')
   const [model, setModel] = useState(DEFAULT_MODEL)
   const [showKey, setShowKey] = useState(false)
@@ -35,11 +36,15 @@ export function Settings() {
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const cliAvailable = system?.tier === 0 && system.cliAvailable
+
   useEffect(() => {
     if (settings) {
+      setProvider(settings.provider)
       setKey(settings.apiKey)
       setModel(settings.defaultModel ?? DEFAULT_MODEL)
     } else {
+      setProvider('anthropic')
       setKey('')
       setModel(DEFAULT_MODEL)
     }
@@ -60,7 +65,7 @@ export function Settings() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!key.trim()) {
+    if (provider === 'anthropic' && !key.trim()) {
       setError('API key cannot be empty.')
       return
     }
@@ -69,7 +74,11 @@ export function Settings() {
     setSaved(false)
     setTestResult(null)
     try {
-      await saveProvider({ provider: 'anthropic', apiKey: key.trim(), defaultModel: model })
+      if (provider === 'claude-code-cli') {
+        await saveProvider({ provider: 'claude-code-cli', apiKey: '', defaultModel: null })
+      } else {
+        await saveProvider({ provider: 'anthropic', apiKey: key.trim(), defaultModel: model })
+      }
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (err) {
@@ -135,16 +144,18 @@ export function Settings() {
     <div className="max-w-xl mx-auto py-8 px-4">
       <h2 className="text-xl font-semibold text-gray-900 mb-1">AI Settings</h2>
       <p className="text-sm text-gray-500 mb-6">
-        Plannen uses an AI model for discovery, story generation, and event extraction. Bring your own key — it's stored in your local Plannen database (Tier 1) and never leaves your machine.
+        Plannen uses an AI model for discovery, story generation, and event extraction. Pick the Claude Code CLI to use your subscription, or paste an Anthropic API key — either way the choice stays on your machine.
       </p>
 
       <div className="bg-white rounded-lg border border-gray-200 p-5">
         <div className="flex items-center gap-2 mb-4">
           <KeyRound className="h-4 w-4 text-gray-400" />
-          <span className="text-sm font-medium text-gray-700">Anthropic API key</span>
+          <span className="text-sm font-medium text-gray-700">
+            {provider === 'claude-code-cli' ? 'Claude Code CLI' : 'Anthropic API key'}
+          </span>
           {hasAiKey ? (
             <span className="ml-auto flex items-center gap-1 text-xs text-green-600">
-              <CheckCircle className="h-3.5 w-3.5" /> Saved
+              <CheckCircle className="h-3.5 w-3.5" /> {provider === 'claude-code-cli' ? 'Active' : 'Saved'}
             </span>
           ) : (
             <span className="ml-auto flex items-center gap-1 text-xs text-amber-600">
@@ -155,40 +166,67 @@ export function Settings() {
 
         <form onSubmit={handleSave} className="space-y-3">
           <label className="block text-xs font-medium text-gray-600">Provider</label>
-          <div className="text-sm text-gray-700 px-3 py-2 border border-gray-200 rounded-md bg-gray-50">
-            Anthropic <span className="text-xs text-gray-400 ml-2">(more providers coming soon)</span>
-          </div>
-
-          <label className="block text-xs font-medium text-gray-600 mt-3">API key</label>
-          <div className="relative">
-            <input
-              type={showKey ? 'text' : 'password'}
-              value={key}
-              onChange={(e) => { setKey(e.target.value); setSaved(false); setTestResult(null) }}
-              placeholder="sk-ant-..."
-              className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              autoComplete="off"
-            />
-            <button
-              type="button"
-              onClick={() => setShowKey((s) => !s)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
-              aria-label={showKey ? 'Hide key' : 'Show key'}
-            >
-              {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            </button>
-          </div>
-
-          <label className="block text-xs font-medium text-gray-600 mt-3">Model</label>
           <select
-            value={model}
-            onChange={(e) => { setModel(e.target.value); setSaved(false) }}
+            value={provider}
+            onChange={(e) => { setProvider(e.target.value as 'anthropic' | 'claude-code-cli'); setSaved(false); setTestResult(null) }}
             className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
-            {ANTHROPIC_MODELS.map((m) => (
-              <option key={m.value} value={m.value}>{m.label}</option>
-            ))}
+            <option value="anthropic">Anthropic (BYOK)</option>
+            {cliAvailable && (
+              <option value="claude-code-cli">
+                Claude Code CLI (your subscription){system?.cliVersion ? ` — v${system.cliVersion}` : ''}
+              </option>
+            )}
           </select>
+
+          {provider === 'anthropic' && (
+            <>
+              <label className="block text-xs font-medium text-gray-600 mt-3">API key</label>
+              <div className="relative">
+                <input
+                  type={showKey ? 'text' : 'password'}
+                  value={key}
+                  onChange={(e) => { setKey(e.target.value); setSaved(false); setTestResult(null) }}
+                  placeholder="sk-ant-..."
+                  className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey((s) => !s)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
+                  aria-label={showKey ? 'Hide key' : 'Show key'}
+                >
+                  {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+
+              <label className="block text-xs font-medium text-gray-600 mt-3">Model</label>
+              <select
+                value={model}
+                onChange={(e) => { setModel(e.target.value); setSaved(false) }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                {ANTHROPIC_MODELS.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+            </>
+          )}
+
+          {provider === 'claude-code-cli' && (
+            <div className="rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 mt-3">
+              Plannen will use your installed Claude CLI for AI calls. Anthropic bills your subscription —
+              no API key needed here.
+            </div>
+          )}
+
+          {system?.tier === 0 && !system.cliAvailable && (
+            <p className="text-xs text-gray-500 mt-2">
+              To use your Claude subscription instead of an API key, install Claude Code at{' '}
+              <a href="https://claude.com/code" className="underline" target="_blank" rel="noopener noreferrer">claude.com/code</a>.
+            </p>
+          )}
 
           <div className="flex gap-2 pt-2">
             <button

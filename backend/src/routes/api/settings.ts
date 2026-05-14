@@ -8,6 +8,8 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { withUserContext } from '../../db.js'
 import { HttpError } from '../../middleware/error.js'
+import { detectClaudeCli } from '../../_shared/cliDetection.js'
+import { defaultRunCli } from '../../_shared/providers/run-cli.js'
 import type { AppVariables } from '../../types.js'
 
 export const settings = new Hono<{ Variables: AppVariables }>()
@@ -25,6 +27,18 @@ function redact(row: Record<string, unknown> | undefined): Record<string, unknow
   const { api_key, ...rest } = row
   return { ...rest, has_api_key: Boolean(api_key) }
 }
+
+settings.get('/system', async (c) => {
+  const tier = Number(process.env.PLANNEN_TIER ?? '0')
+  const detection = await detectClaudeCli(defaultRunCli)
+  return c.json({
+    data: {
+      tier,
+      cliAvailable: tier === 0 && detection.available,
+      cliVersion: detection.version,
+    },
+  })
+})
 
 settings.get('/', async (c) => {
   const userId = c.var.userId
@@ -47,8 +61,26 @@ settings.patch('/', async (c) => {
     throw new HttpError(400, 'VALIDATION', 'Invalid settings', JSON.stringify(parsed.error.issues))
   }
   const s = parsed.data
+
+  // Provider-specific validation.
+  if (s.provider === 'claude-code-cli') {
+    if (s.api_key) {
+      throw new HttpError(400, 'VALIDATION',
+        'claude-code-cli provider does not accept an api_key. Omit it.')
+    }
+    if (process.env.PLANNEN_TIER !== '0') {
+      throw new HttpError(400, 'VALIDATION',
+        'claude-code-cli is only available in Tier 0.')
+    }
+  } else if (s.provider === 'anthropic') {
+    if (!s.api_key) {
+      throw new HttpError(400, 'VALIDATION',
+        'anthropic provider requires an api_key.')
+    }
+  }
+
   return await withUserContext(userId, async (db) => {
-    if (s.is_default) {
+    if (s.is_default !== false) {
       await db.query('UPDATE plannen.user_settings SET is_default = false WHERE user_id = $1', [userId])
     }
     const { rows } = await db.query(

@@ -31,7 +31,9 @@ import { getGoogleAccessToken } from './routes/functions/getGoogleAccessToken.js
 import { getGoogleAuthUrl } from './routes/functions/getGoogleAuthUrl.js'
 import { googleOauthCallback } from './routes/functions/googleOauthCallback.js'
 import { sendInviteEmail } from './routes/functions/sendInviteEmail.js'
-import { sendReminder } from './routes/functions/sendReminder.js'
+import { detectClaudeCli } from './_shared/cliDetection.js'
+import { defaultRunCli } from './_shared/providers/run-cli.js'
+import { maybeAutoConfigureCliProvider } from './_shared/maybeAutoConfigureCliProvider.js'
 import type { AppVariables } from './types.js'
 
 const PORT = Number(process.env.PLANNEN_BACKEND_PORT ?? 54323)
@@ -44,6 +46,13 @@ if (!USER_EMAIL) {
 
 const user = await resolveUserAtBoot(USER_EMAIL)
 console.log(`resolved user: ${user.email} (${user.userId})`)
+
+if (process.env.PLANNEN_TIER === '0') {
+  const detection = await detectClaudeCli(defaultRunCli)
+  if (detection.available) {
+    await maybeAutoConfigureCliProvider(pool, user.userId, detection.version)
+  }
+}
 
 const app = new Hono<{ Variables: AppVariables }>()
 
@@ -85,7 +94,6 @@ app.route('/functions/v1/get-google-access-token', getGoogleAccessToken)
 app.route('/functions/v1/get-google-auth-url', getGoogleAuthUrl)
 app.route('/functions/v1/google-oauth-callback', googleOauthCallback)
 app.route('/functions/v1/send-invite-email', sendInviteEmail)
-app.route('/functions/v1/send-reminder', sendReminder)
 
 serve({ fetch: app.fetch, port: PORT, hostname: HOST }, (info) => {
   console.log(`backend listening on http://${info.address}:${info.port}`)

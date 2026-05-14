@@ -175,6 +175,7 @@ export const tier0: DbClient = {
     get: () => api<SettingsRow | null>('/api/settings'),
     update: (patch) =>
       api<SettingsRow | null>('/api/settings', { method: 'PATCH', body: JSON.stringify(patch) }),
+    system: () => api<{ tier: number; cliAvailable: boolean; cliVersion: string | null }>('/api/settings/system'),
   },
 
   // ── agentTasks ────────────────────────────────────────────────────────────

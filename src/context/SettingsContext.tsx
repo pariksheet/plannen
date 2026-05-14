@@ -5,7 +5,7 @@ import { dbClient } from '../lib/dbClient'
 const TIER = (import.meta.env.VITE_PLANNEN_TIER ?? '1') as '0' | '1'
 import { useAuth } from './AuthContext'
 
-export type Provider = 'anthropic' // V1.1 widens
+export type Provider = 'anthropic' | 'claude-code-cli'
 
 export interface ProviderSettings {
   provider: Provider
@@ -17,8 +17,15 @@ export interface ProviderSettings {
   lastErrorCode: string | null
 }
 
+export interface SystemInfo {
+  tier: number
+  cliAvailable: boolean
+  cliVersion: string | null
+}
+
 interface SettingsContextValue {
   settings: ProviderSettings | null
+  system: SystemInfo | null
   loading: boolean
   hasAiKey: boolean
   saveProvider: (input: { provider: Provider; apiKey: string; defaultModel: string | null }) => Promise<void>
@@ -29,6 +36,7 @@ interface SettingsContextValue {
 
 const SettingsContext = createContext<SettingsContextValue>({
   settings: null,
+  system: null,
   loading: true,
   hasAiKey: false,
   saveProvider: async () => {},
@@ -58,7 +66,14 @@ const ROW_TO_SETTINGS = (row: {
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   const [settings, setSettings] = useState<ProviderSettings | null>(null)
+  const [system, setSystem] = useState<SystemInfo | null>(null)
   const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    dbClient.settings.system()
+      .then(setSystem)
+      .catch(() => setSystem({ tier: TIER === '0' ? 0 : 1, cliAvailable: false, cliVersion: null }))
+  }, [])
 
   const refresh = useCallback(async () => {
     if (!user) {
@@ -81,17 +96,19 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           last_error_at?: string | null
           last_error_code?: string | null
         } | null
-        if (!data || !data.has_api_key) {
+        // CLI rows are configured even though has_api_key is false (no key needed).
+        const configured = !!data && (data.has_api_key || data.provider === 'claude-code-cli')
+        if (!configured) {
           setSettings(null)
         } else {
           setSettings(ROW_TO_SETTINGS({
-            provider: data.provider as never,
+            provider: data!.provider as never,
             api_key: '',  // backend doesn't expose; UI shows configured/not
-            default_model: data.default_model ?? null,
-            base_url: data.base_url ?? null,
-            last_used_at: data.last_used_at ?? null,
-            last_error_at: data.last_error_at ?? null,
-            last_error_code: data.last_error_code ?? null,
+            default_model: data!.default_model ?? null,
+            base_url: data!.base_url ?? null,
+            last_used_at: data!.last_used_at ?? null,
+            last_error_at: data!.last_error_at ?? null,
+            last_error_code: data!.last_error_code ?? null,
           }))
         }
       } catch (e) {
@@ -124,8 +141,17 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const saveProvider = useCallback(
     async ({ provider, apiKey, defaultModel }: { provider: Provider; apiKey: string; defaultModel: string | null }) => {
       if (!user) throw new Error('Not authenticated')
+      const isCli = provider === 'claude-code-cli'
+      const apiKeyForBackend = isCli ? null : apiKey
+      const modelForBackend = isCli ? null : defaultModel
       if (TIER === '0') {
-        await dbClient.settings.update({ provider, api_key: apiKey, default_model: defaultModel, base_url: null, is_default: true })
+        await dbClient.settings.update({
+          provider,
+          api_key: apiKeyForBackend,
+          default_model: modelForBackend,
+          base_url: null,
+          is_default: true,
+        })
         await refresh()
         return
       }
@@ -135,8 +161,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           {
             user_id: user.id,
             provider,
-            api_key: apiKey,
-            default_model: defaultModel,
+            api_key: apiKeyForBackend,
+            default_model: modelForBackend,
             base_url: null,
             is_default: true,
           },
@@ -195,8 +221,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     <SettingsContext.Provider
       value={{
         settings,
+        system,
         loading,
-        hasAiKey: !!(settings && settings.apiKey),
+        hasAiKey: !!(settings && (settings.provider === 'claude-code-cli' || settings.apiKey)),
         saveProvider,
         clearProvider,
         testProvider,

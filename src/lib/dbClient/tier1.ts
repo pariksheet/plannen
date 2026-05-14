@@ -503,6 +503,8 @@ export const tier1: DbClient = {
       if (error) throw new Error(error.message)
       return (data ?? null) as SettingsRow | null
     },
+    // Tier 1 has no backend boot probe — the CLI provider is unreachable.
+    system: async () => ({ tier: 1, cliAvailable: false, cliVersion: null }),
   },
 
   // ── agentTasks ────────────────────────────────────────────────────────────

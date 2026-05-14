@@ -201,7 +201,7 @@ export const AgentChat = forwardRef<AgentChatHandle, AgentChatProps>(function Ag
           <p className="text-sm text-red-800 font-medium mb-1">Error</p>
           <p className="text-sm text-red-700 whitespace-pre-line font-sans mb-2">{error}</p>
           <p className="text-xs text-red-600">
-            <strong>Quick checks:</strong> Functions deployed (supabase functions list), API key set (supabase secrets list), browser console (F12), TROUBLESHOOTING.md.
+            <strong>Quick checks:</strong> backend running (<code>bash scripts/backend-start.sh</code>), AI provider configured (<code>/settings</code>), browser console (F12), TROUBLESHOOTING.md.
           </p>
         </div>
       )}

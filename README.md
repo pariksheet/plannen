@@ -86,9 +86,12 @@ bash scripts/bootstrap.sh --non-interactive --email you@example.com [--install-p
 
 1. **Sign in to the web app.** `npm run dev`, then open [http://localhost:4321](http://localhost:4321). Enter the email you bootstrapped with and click *Magic link* — the link arrives at [Mailpit](http://127.0.0.1:54324) (no real email sent).
 
-2. **Add your AI key (only if you'll use AI features in the web app).** In the web app, go to **/settings** and paste your Anthropic API key from [console.anthropic.com](https://console.anthropic.com). The key is stored in your local Plannen database (Tier 1) and never leaves your machine. It powers web-app AI features — event discovery, story generation, image extraction — that run via edge functions.
+2. **Pick an AI provider (only if you'll use AI features in the web app).** Open **/settings** and choose one:
 
-   You can skip this if you only drive Plannen via Claude Code or Claude Desktop: Claude itself supplies the intelligence in that path, and the MCP tools / slash commands (`/plannen-discover`, `/plannen-write-story`, …) work without a key in `/settings`.
+   - **Claude Code CLI (Tier 0 only).** If you already have a Claude subscription and the `claude` binary in your PATH (install: [claude.com/code](https://claude.com/code)), the backend auto-detects it on first boot and routes AI calls through your subscription. No API key required. Tested with Claude Code 1.x.
+   - **Anthropic API key (BYOK).** Paste a key from [console.anthropic.com](https://console.anthropic.com). Stored in your local Plannen database, never leaves your machine. Works on both tiers.
+
+   Powers web-app AI features — event discovery, story generation, image extraction. Skip if you only drive Plannen via Claude Code or Claude Desktop: the MCP slash commands (`/plannen-discover`, `/plannen-write-story`, …) work without anything in `/settings`.
 
 3. **Use Claude.** If you accepted the plugin install at the end of bootstrap, you're done — Claude Code already has Plannen's tools and slash commands. Type `/plannen-doctor` to verify, then start chatting about events.
 

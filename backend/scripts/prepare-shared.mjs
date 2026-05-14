@@ -7,6 +7,12 @@
 //
 // The directory it produces is gitignored — only the originals under
 // `supabase/functions/_shared/` are committed.
+//
+// Node-only overlay: files at `backend/src/_shared-overlay/` are copied on
+// TOP of the Deno staging (after rewrites), letting Node-only modules
+// (e.g. providers/claude-cli.ts, providers/run-cli.ts, cliDetection.ts)
+// live alongside the staged Deno modules. Overlay files keep `.test.ts`
+// extensions intact and are NOT rewritten — they are already Node-native.
 
 import { existsSync, readFileSync, writeFileSync, rmSync, cpSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname, resolve } from 'node:path'
@@ -17,6 +23,7 @@ const backendRoot = resolve(here, '..')
 const repoRoot = resolve(backendRoot, '..')
 const sharedSrc = join(repoRoot, 'supabase', 'functions', '_shared')
 const sharedDst = join(backendRoot, 'src', '_shared')
+const overlaySrc = join(backendRoot, 'src', '_shared-overlay')
 
 function walk(dir) {
   const out = []
@@ -70,4 +77,12 @@ for (const file of walk(sharedDst)) {
     continue
   }
   if (file.endsWith('.ts')) rewriteFile(file)
+}
+
+// Overlay Node-only modules on top of the staged Deno tree. These files
+// are Node-native (real `node:child_process`, `pg.Pool`, etc.) so they
+// must NOT pass through `rewriteFile`. They DO ship test files because
+// vitest runs them straight out of `backend/src/_shared/`.
+if (existsSync(overlaySrc)) {
+  cpSync(overlaySrc, sharedDst, { recursive: true })
 }
