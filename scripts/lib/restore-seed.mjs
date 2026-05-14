@@ -125,7 +125,23 @@ try {
   process.exit(1)
 }
 
-console.log('4/4 verifying...')
+console.log('4/4 rewriting media_url to relative (drop hard-coded Tier 1 host)...')
+// Seed was dumped from Tier 1 — media_url etc. have `http://127.0.0.1:54321/...`
+// baked in. Strip the host so the Tier 0 web app fetches same-origin via Vite
+// proxy → backend.
+for (const [tbl, col] of [
+  ['event_memories', 'media_url'],
+  ['events', 'image_url'],
+  ['stories', 'cover_url'],
+]) {
+  const r = await client.query(
+    `UPDATE plannen.${tbl} SET ${col} = regexp_replace(${col}, $1, '') WHERE ${col} LIKE $2`,
+    ['^https?://[^/]+', '%://127.0.0.1:54321/%'],
+  )
+  if (r.rowCount > 0) console.log(`  ${tbl}.${col}: ${r.rowCount} rows`)
+}
+
+console.log('5/5 verifying...')
 const { rows: counts } = await client.query(`
   SELECT
     (SELECT count(*) FROM auth.users) AS auth_users,
