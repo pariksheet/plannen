@@ -35,26 +35,31 @@ Together these turn Plannen from a calendar into an assistant. The data stays on
 
 ---
 
-> **Tier 1 — Fully Local.** Everything runs on your computer: Postgres via Supabase, a React web app, and an MCP server that lets Claude Desktop / Claude Code read and write your events directly. See [`docs/TIERED_DEPLOYMENT_MODEL.md`](docs/TIERED_DEPLOYMENT_MODEL.md) for the full tier model — this README covers Tier 1 only.
+> **Tier 0 — Bundled (default).** Plannen runs on your computer with just Node 20+ — no Docker, no Supabase CLI. Postgres is an embedded binary started by Node; the MCP server talks to it directly. See [`docs/TIERED_DEPLOYMENT_MODEL.md`](docs/TIERED_DEPLOYMENT_MODEL.md) for the full tier model. Tier 1 (local Supabase + edge functions) stays available via `bash scripts/bootstrap.sh --tier 1` for users who want the full Docker stack.
 
 ---
 
 ## Prerequisites
 
+### Tier 0 (default)
+
 | Tool | Why | Install |
 |------|-----|---------|
-| A container runtime | Runs local Supabase (Postgres + Auth + Storage) | Docker Desktop, [Colima](https://github.com/abiosoft/colima), [OrbStack](https://orbstack.dev), Rancher Desktop, or podman with docker-compat |
-| [Supabase CLI](https://supabase.com/docs/guides/cli) ≥ 2.0 | Manages local DB, migrations, seeds | `brew install supabase/tap/supabase` |
-| [Node.js](https://nodejs.org/) ≥ 20 LTS | Runs the React app and MCP server | `brew install node` (or nvm/asdf/volta) |
+| [Node.js](https://nodejs.org/) ≥ 20 LTS | Runs the embedded Postgres, MCP server, web app | `brew install node` (or nvm/asdf/volta) |
 | [Claude Code](https://claude.com/claude-code) (recommended) or [Claude Desktop](https://claude.ai/download) | The AI interface | claude.com/claude-code |
 
-Verify everything is installed and your container runtime is up:
-
 ```bash
-docker info >/dev/null && echo "✓ docker daemon reachable"
-supabase --version
-node --version
+node --version  # expect v20+
 ```
+
+### Tier 1 (opt-in — `--tier 1`)
+
+Adds Docker + Supabase CLI to the above:
+
+| Tool | Why | Install |
+|------|-----|---------|
+| A container runtime | Runs local Supabase (Postgres + Auth + Storage) | Docker Desktop, [Colima](https://github.com/abiosoft/colima), [OrbStack](https://orbstack.dev), Rancher Desktop |
+| [Supabase CLI](https://supabase.com/docs/guides/cli) ≥ 2.0 | Manages local DB, migrations, seeds | `brew install supabase/tap/supabase` |
 
 ---
 
@@ -63,10 +68,11 @@ node --version
 ```bash
 git clone <repo-url> plannen
 cd plannen
-bash scripts/bootstrap.sh
+bash scripts/bootstrap.sh                # Tier 0, default
+# bash scripts/bootstrap.sh --tier 1     # opt-in to the local Supabase stack
 ```
 
-That's it. `bootstrap.sh` does prereq checks, npm install, supabase start, migrations, auth-user creation (admin API), env-file generation, starts `supabase functions serve` in the background, and offers to install the Claude Code plugin at the end.
+That's it. In Tier 0, `bootstrap.sh` does prereq checks, npm install, starts an embedded Postgres at port 54322, applies migrations (Tier 0 overlay + main schema), inserts your user row, writes `.env` with `PLANNEN_TIER=0` + `DATABASE_URL`, and offers to install the Claude Code plugin. In Tier 1 it instead runs `supabase start`, `supabase migration up`, the auth-user admin call, and `functions-serve`.
 
 The script is idempotent — re-run it any time. If something gets broken, `/plannen-doctor` (inside Claude Code) will diagnose and suggest the targeted fix.
 
@@ -92,15 +98,24 @@ bash scripts/bootstrap.sh --non-interactive --email you@example.com [--install-p
 
 After a reboot you typically need:
 
+**Tier 0:**
+
+```bash
+bash scripts/pg-start.sh                # embedded Postgres on 54322
+# (Phase 2 adds: bash scripts/backend-start.sh + npm run dev)
+```
+
+Stop with `bash scripts/pg-stop.sh`. The Claude Code / Desktop MCP path works as soon as Postgres is up.
+
+**Tier 1:**
+
 ```bash
 bash scripts/local-start.sh             # start Supabase (Kong-patched)
 bash scripts/functions-start.sh         # start edge functions in background
 npm run dev                              # web app at http://localhost:4321
 ```
 
-Or just re-run `bash scripts/bootstrap.sh` — it's idempotent and brings everything up in one command.
-
-To stop edge functions: `bash scripts/functions-stop.sh`.
+Or just re-run `bash scripts/bootstrap.sh [--tier 1]` — it's idempotent. Stop edge functions with `bash scripts/functions-stop.sh`.
 
 ---
 
