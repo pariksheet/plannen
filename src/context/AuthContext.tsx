@@ -34,6 +34,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile(null)
         return
       }
+      if (TIER === '0') {
+        // Tier 0: /api/me returns the auth-linked row including full_name +
+        // avatar_url; no Supabase round-trip.
+        try {
+          const me = await dbClient.me.get() as {
+            userId: string
+            email: string
+            full_name?: string | null
+            avatar_url?: string | null
+          }
+          setProfile({
+            id: me.userId,
+            email: me.email,
+            full_name: me.full_name ?? null,
+            avatar_sticker: me.avatar_url ?? null,
+          })
+        } catch {
+          setProfile(null)
+        }
+        return
+      }
       const { data, error } = await supabase
         .from('users')
         .select('id, email, full_name, avatar_url')
@@ -64,15 +85,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (TIER === '0') {
       // Tier 0: no Supabase Auth. The backend resolves the single user at boot
-      // from PLANNEN_USER_EMAIL and exposes them via GET /api/me. No login UI;
-      // no auth-state subscription. Synthesise a User-shaped object so existing
-      // consumers (which type-check against @supabase/supabase-js's User) work.
-      // Skip loadProfile entirely — it calls supabase.from('users') against the
-      // non-existent 54321; the profile fields we'd fetch are populated below
-      // from /api/me directly.
+      // from PLANNEN_USER_EMAIL and exposes them via GET /api/me, which also
+      // includes full_name + avatar_url. No login UI; no auth-state subscription.
+      // Synthesise a User-shaped object so existing consumers (which type-check
+      // against @supabase/supabase-js's User) work.
       ;(async () => {
         try {
-          const me = await dbClient.me.get()
+          const me = await dbClient.me.get() as {
+            userId: string
+            email: string
+            full_name?: string | null
+            avatar_url?: string | null
+          }
           if (!isMounted) return
           const u = {
             id: me.userId,
@@ -86,8 +110,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setProfile({
             id: me.userId,
             email: me.email,
-            full_name: null,
-            avatar_sticker: null,
+            full_name: me.full_name ?? null,
+            avatar_sticker: me.avatar_url ?? null,
           })
         } catch {
           if (isMounted) setUser(null)
