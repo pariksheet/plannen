@@ -42,8 +42,28 @@ jobs:
         working-directory: mcp
         run: npm ci
 
+      # mcp tests now include db.test.ts + userResolver.test.ts which exercise
+      # the pg.Pool + withUserContext helpers against a real Postgres. Start
+      # embedded pg + apply migrations + insert a CI user before running them.
+      - name: Start embedded Postgres + apply migrations (Tier 0)
+        env:
+          DATABASE_URL: postgres://plannen:plannen@127.0.0.1:54322/plannen
+          PLANNEN_TIER: '0'
+        run: |
+          nohup node scripts/lib/plannen-pg.mjs init >> /tmp/pg.log 2>&1 &
+          for i in $(seq 1 30); do
+            if nc -z 127.0.0.1 54322 2>/dev/null; then break; fi
+            sleep 1
+          done
+          node scripts/lib/migrate.mjs
+          node -e "const pg=require('pg');(async()=>{const c=new pg.Client({connectionString:process.env.DATABASE_URL});await c.connect();await c.query(\"INSERT INTO auth.users (id, email) VALUES (gen_random_uuid(), 'ci@plannen.local') ON CONFLICT (id) DO NOTHING\");await c.end();})()"
+
       - name: Test MCP
         working-directory: mcp
+        env:
+          DATABASE_URL: postgres://plannen:plannen@127.0.0.1:54322/plannen
+          PLANNEN_TIER: '0'
+          PLANNEN_USER_EMAIL: ci@plannen.local
         run: npm test
 
       - name: Build MCP
