@@ -55,6 +55,16 @@ for src in "$PLUGIN_DIR/supabase/migrations/"*.sql; do
   fi
 done
 
+# ── 3b. Remove kitchen from PostgREST exposed schemas ────────────────────────
+step "Removing kitchen from PostgREST exposed schemas"
+CONFIG="$REPO_ROOT/supabase/config.toml"
+if grep -qE '"kitchen"' "$CONFIG"; then
+  perl -i -pe 's/, "kitchen"//; s/"kitchen", //; s/\["kitchen"\]/[]/' "$CONFIG"
+  ok "  removed kitchen from schemas (restart Supabase to apply)"
+else
+  ok "  kitchen not in schemas list"
+fi
+
 # ── 4. Optionally drop the schema ────────────────────────────────────────────
 if [ "$DROP_SCHEMA" -eq 1 ]; then
   step "Dropping kitchen schema (--drop-schema)"

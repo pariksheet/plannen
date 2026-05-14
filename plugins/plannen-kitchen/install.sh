@@ -38,11 +38,30 @@ for src in "$PLUGIN_DIR/supabase/migrations/"*.sql; do
   fi
 done
 
-# ── 3. Run migrations ────────────────────────────────────────────────────────
+# ── 3. Expose kitchen schema via PostgREST ───────────────────────────────────
+step "Adding kitchen to PostgREST exposed schemas (supabase/config.toml)"
+CONFIG="$REPO_ROOT/supabase/config.toml"
+if grep -qE '^schemas = \[[^]]*"kitchen"' "$CONFIG"; then
+  ok "  kitchen already in schemas list"
+else
+  # Insert "kitchen" before the closing bracket of the schemas array.
+  # Matches: schemas = ["plannen", "public", "graphql_public"]
+  # Result:  schemas = ["plannen", "public", "graphql_public", "kitchen"]
+  if perl -i -pe 's/^(schemas = \[[^\]]*?)\]/$1, "kitchen"]/ if /^schemas = \[/' "$CONFIG" 2>/dev/null && grep -qE '"kitchen"' "$CONFIG"; then
+    ok "  added kitchen to schemas"
+  else
+    warn "  could not patch supabase/config.toml automatically — add \"kitchen\" to the schemas array manually"
+  fi
+fi
+
+# ── 4. Run migrations ────────────────────────────────────────────────────────
 step "Applying migrations (supabase migration up)"
 if supabase status >/dev/null 2>&1; then
   supabase migration up
   ok "Migrations applied"
+  warn "Restart Supabase to expose the kitchen schema via PostgREST:"
+  warn "  supabase stop && supabase start"
+  warn "(The web UI at /kitchen won't work until you do this.)"
 else
   warn "supabase not running — start it (supabase start) then re-run this script"
 fi
