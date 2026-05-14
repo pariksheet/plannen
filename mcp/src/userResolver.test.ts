@@ -11,21 +11,29 @@ describe('resolveUserIdByEmail', () => {
     try {
       // plannen.users.id FKs to auth.users.id. Insert into auth.users; the
       // handle_new_user trigger populates plannen.users automatically.
-      const { rows } = await c.query(
-        `INSERT INTO auth.users (id, email) VALUES (gen_random_uuid(), $1)
-         ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
-         RETURNING id`,
+      // Real Supabase auth.users.email has no UNIQUE constraint, so we
+      // SELECT-then-INSERT instead of ON CONFLICT (email).
+      const existing = await c.query(
+        'SELECT id FROM auth.users WHERE lower(email) = lower($1) LIMIT 1',
         [TEST_EMAIL],
       )
-      testUserId = rows[0].id
+      if (existing.rows.length > 0) {
+        testUserId = existing.rows[0].id
+      } else {
+        const { rows } = await c.query(
+          'INSERT INTO auth.users (id, email) VALUES (gen_random_uuid(), $1) RETURNING id',
+          [TEST_EMAIL],
+        )
+        testUserId = rows[0].id
+      }
     } finally { c.release() }
   })
 
   afterAll(async () => {
     const c = await pool.connect()
     try {
-      await c.query('DELETE FROM plannen.users WHERE email = $1', [TEST_EMAIL])
-      await c.query('DELETE FROM auth.users WHERE email = $1', [TEST_EMAIL])
+      await c.query('DELETE FROM plannen.users WHERE id = $1', [testUserId])
+      await c.query('DELETE FROM auth.users WHERE id = $1', [testUserId])
     } finally { c.release() }
   })
 

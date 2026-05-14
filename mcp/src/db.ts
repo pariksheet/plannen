@@ -25,7 +25,11 @@ export async function withUserContext<T>(
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
+    // Tier 0: app.current_user_id is read by the stub auth.uid() in the overlay.
+    // Tier 1: request.jwt.claim.sub is read by Supabase's real auth.uid(), so we
+    // set both — same client code drives both tiers without runtime branching.
     await client.query('SELECT set_config($1, $2, true)', ['app.current_user_id', userId])
+    await client.query('SELECT set_config($1, $2, true)', ['request.jwt.claim.sub', userId])
     const out = await fn(client)
     await client.query('COMMIT')
     return out
