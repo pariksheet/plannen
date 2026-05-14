@@ -140,7 +140,14 @@ function buildTools(s: AISettings, requested: ReadonlyArray<string> | undefined)
   for (const name of requested) {
     if (name === 'web_search') {
       if (s.provider === 'anthropic') {
-        tools.web_search = anthropic.tools.webSearch_20250305({ maxUses: 5 })
+        // The web_search tool ships in newer Anthropic SDK builds and
+        // Deno's `npm:` resolver may surface a version that includes it
+        // while Node's 1.x stable does not. Reach for the factory
+        // dynamically so the same source compiles for both tiers; when
+        // the factory is missing we silently drop the tool.
+        const factory = (anthropic.tools as unknown as Record<string, ((opts: { maxUses: number }) => unknown) | undefined>)
+          .webSearch_20250305
+        if (typeof factory === 'function') tools.web_search = factory({ maxUses: 5 })
       }
       // V1.1: provider-specific search tool here
     }
