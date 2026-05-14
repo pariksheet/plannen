@@ -1,0 +1,17 @@
+{
+  "name": "plannen-kitchen",
+  "version": "0.1.0",
+  "description": "Weekly grocery, pantry, and meal-plan reasoning for Plannen. Adds the kitchen.* schema, an MCP server, three skills (kitchen-shop, kitchen-pantry, kitchen-meal-plan), and a mobile-first in-store check-off page.",
+  "author": {
+    "name": "Pari",
+    "url": "https://github.com/pariksheet/plannen"
+  },
+  "homepage": "https://github.com/pariksheet/plannen",
+  "license": "AGPL-3.0-only",
+  "mcpServers": {
+    "plannen-kitchen": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/dist/index.js"]
+    }
+  }
+}
