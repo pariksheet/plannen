@@ -51,7 +51,7 @@ supabase/functions/_shared/
 backend/src/index.ts            # MODIFIED: invoke CLI boot probe + auto-config
 backend/src/routes/api/settings.ts  # MODIFIED: tier endpoint + CLI validation
 web/src/routes/settings/...     # MODIFIED: UI for CLI provider option
-scripts/bootstrap.sh            # MODIFIED: write PLANNEN_TIER=<n> to .env
+# scripts/bootstrap.sh — already writes PLANNEN_TIER to .env (line 251); no change needed
 ```
 
 **Tier-1 invariant.** The Deno tree never imports `claude-cli.ts` or `run-cli.ts`. The provider value `claude-code-cli` is unreachable at runtime in Tier 1 (onboarding never writes it; defensive `no_provider_configured` throw in the Deno dispatcher if it somehow appears).
@@ -246,9 +246,9 @@ try {
 
 ## Onboarding
 
-### `bootstrap.sh` change
+### `bootstrap.sh` (already done — verify, don't modify)
 
-Both the Tier-0 default path and the `--tier 1` path write `PLANNEN_TIER=<n>` into `.env`. Idempotent: leave correct value alone; update wrong value if user re-bootstraps a different tier. No other bootstrap changes.
+The existing `bootstrap.sh:251` already writes `PLANNEN_TIER=<n>` into `.env` (`env_set "$ENV_FILE" PLANNEN_TIER "$TIER"`). No bootstrap changes required for this design.
 
 ### Boot probe (`backend/src/_shared/cliDetection.ts`)
 
@@ -312,9 +312,9 @@ Re-boots are no-ops once a row exists.
 
 `cliAvailable` reflects the cached boot probe. `cliVersion` is `null` if probe failed.
 
-### `PUT /api/settings` validation
+### `PATCH /api/settings` validation
 
-Body accepts `{ provider, api_key?, default_model? }`. Rules:
+Body accepts `{ provider, api_key?, base_url?, default_model?, is_default? }` (unchanged shape from today). New rules:
 
 - `provider: 'claude-code-cli'` → `api_key` must be null/absent; tier must be 0 and `cliAvailable` must be true. Otherwise 400 with explanatory message.
 - `provider: 'anthropic'` → `api_key` required (unchanged behaviour).
