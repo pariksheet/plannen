@@ -10,6 +10,7 @@ import { events } from './routes/api/events.js'
 import { memories } from './routes/api/memories.js'
 import { stories } from './routes/api/stories.js'
 import { profile } from './routes/api/profile.js'
+import { relationships } from './routes/api/relationships.js'
 import { eventPhotos } from './routes/storage/eventPhotos.js'
 import { agentTest } from './routes/functions/agentTest.js'
 import { agentDiscover } from './routes/functions/agentDiscover.js'
@@ -53,6 +54,7 @@ app.route('/api/events', events)
 app.route('/api/memories', memories)
 app.route('/api/stories', stories)
 app.route('/api/profile', profile)
+app.route('/api/relationships', relationships)
 app.route('/storage/v1/object', eventPhotos)
 
 // /functions/v1/* — pure handlers extracted from `supabase/functions/<name>`.
