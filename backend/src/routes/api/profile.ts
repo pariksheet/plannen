@@ -12,7 +12,14 @@ import type { AppVariables } from '../../types.js'
 
 export const profile = new Hono<{ Variables: AppVariables }>()
 
+// full_name + avatar_url live on plannen.users (the auth-linked row), the rest
+// live on plannen.user_profiles. PATCH dispatches each field to its table.
+const USERS_COLS = new Set(['full_name', 'avatar_url'])
+const PROFILE_COLS = new Set(['dob', 'goals', 'interests', 'timezone', 'story_languages'])
+
 const ProfilePatch = z.object({
+  full_name: z.string().nullable().optional(),
+  avatar_url: z.string().nullable().optional(),
   dob: z.string().nullable().optional(),
   goals: z.array(z.string()).optional(),
   interests: z.array(z.string()).optional(),
@@ -53,26 +60,55 @@ profile.patch('/', async (c) => {
     throw new HttpError(400, 'VALIDATION', 'Invalid profile', JSON.stringify(parsed.error.issues))
   }
   const p = parsed.data
+  const userFields: Record<string, unknown> = {}
+  const profileFields: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(p)) {
+    if (USERS_COLS.has(k)) userFields[k] = v
+    else if (PROFILE_COLS.has(k)) profileFields[k] = v
+  }
   return await withUserContext(userId, async (db) => {
-    const cols = ['user_id']
-    const vals: unknown[] = [userId]
-    const updates: string[] = []
-    for (const [k, v] of Object.entries(p)) {
-      cols.push(k)
-      vals.push(v)
-      updates.push(`${k} = EXCLUDED.${k}`)
+    // 1. Update plannen.users for full_name / avatar_url (if present).
+    if (Object.keys(userFields).length > 0) {
+      const sets: string[] = []
+      const vals: unknown[] = []
+      for (const [k, v] of Object.entries(userFields)) {
+        vals.push(v)
+        sets.push(`${k} = $${vals.length}`)
+      }
+      vals.push(userId)
+      await db.query(
+        `UPDATE plannen.users SET ${sets.join(', ')}, updated_at = now() WHERE id = $${vals.length}`,
+        vals,
+      )
     }
-    const placeholders = vals.map((_, i) => `$${i + 1}`).join(', ')
-    const onConflict = updates.length > 0
-      ? `ON CONFLICT (user_id) DO UPDATE SET ${updates.join(', ')}`
-      : 'ON CONFLICT (user_id) DO NOTHING'
-    const { rows } = await db.query(
-      `INSERT INTO plannen.user_profiles (${cols.join(', ')}) VALUES (${placeholders})
-       ${onConflict}
-       RETURNING *`,
-      vals,
-    )
-    return c.json({ data: rows[0] ?? null })
+    // 2. Upsert plannen.user_profiles for the rest (if present).
+    let profileRow: unknown = null
+    if (Object.keys(profileFields).length > 0) {
+      const cols = ['user_id']
+      const vals: unknown[] = [userId]
+      const updates: string[] = []
+      for (const [k, v] of Object.entries(profileFields)) {
+        cols.push(k)
+        vals.push(v)
+        updates.push(`${k} = EXCLUDED.${k}`)
+      }
+      const placeholders = vals.map((_, i) => `$${i + 1}`).join(', ')
+      const onConflict = `ON CONFLICT (user_id) DO UPDATE SET ${updates.join(', ')}`
+      const { rows } = await db.query(
+        `INSERT INTO plannen.user_profiles (${cols.join(', ')}) VALUES (${placeholders})
+         ${onConflict}
+         RETURNING *`,
+        vals,
+      )
+      profileRow = rows[0]
+    } else {
+      const { rows } = await db.query(
+        'SELECT * FROM plannen.user_profiles WHERE user_id = $1',
+        [userId],
+      )
+      profileRow = rows[0] ?? null
+    }
+    return c.json({ data: profileRow })
   })
 })
 
