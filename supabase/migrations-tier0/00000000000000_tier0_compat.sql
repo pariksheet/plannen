@@ -63,3 +63,22 @@ CREATE TABLE IF NOT EXISTS storage.objects (
 
 -- The initial_schema's storage policies reference 'authenticated' role.
 -- That role exists from the block above, so the CREATE POLICY blocks succeed.
+
+-- ---- Grants ---------------------------------------------------------------
+-- Tier 1 has Supabase's privilege-bootstrap script that grants USAGE on auth /
+-- storage / extensions to every role. Tier 0 needs the same so SECURITY DEFINER
+-- functions owned by 'postgres' (e.g., audit_trigger_func, handle_new_user)
+-- can call auth.uid() and touch storage.* / extensions.* without permission
+-- errors.
+
+GRANT USAGE ON SCHEMA auth       TO postgres, anon, authenticated, service_role;
+GRANT USAGE ON SCHEMA storage    TO postgres, anon, authenticated, service_role;
+GRANT USAGE ON SCHEMA extensions TO postgres, anon, authenticated, service_role;
+
+GRANT EXECUTE ON FUNCTION auth.uid() TO postgres, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION extensions.uuid_generate_v4() TO postgres, anon, authenticated, service_role;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON auth.users        TO postgres, service_role;
+GRANT SELECT ON auth.users                                TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON storage.buckets   TO postgres, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON storage.objects   TO postgres, service_role;
