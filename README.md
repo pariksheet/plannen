@@ -96,27 +96,57 @@ bash scripts/bootstrap.sh --non-interactive --email you@example.com [--install-p
 
 ## Daily workflow
 
-After a reboot you typically need:
-
-**Tier 0:**
+After a reboot, **one command brings the right stack up for your tier**:
 
 ```bash
-bash scripts/pg-start.sh                # embedded Postgres on 54322
-bash scripts/backend-start.sh           # Plannen backend on 54323
-npm run dev                              # web app at http://localhost:4321
+bash scripts/start.sh            # everything Plannen needs (pg/supabase + backend + web dev)
+bash scripts/start.sh --no-dev   # headless: pg + backend only (MCP/Claude use case)
+bash scripts/stop.sh             # graceful umbrella shutdown
 ```
 
-Stop with `bash scripts/backend-stop.sh && bash scripts/pg-stop.sh`. The Claude Code / Desktop MCP path works as soon as Postgres is up — the backend is only needed for the web app and edge-function-equivalent routes.
+`start.sh` reads `PLANNEN_TIER` from `.env` and calls the right sub-scripts (`pg-start` + `backend-start` for Tier 0; `local-start` + `functions-start` for Tier 1). All sub-scripts are idempotent, so re-running on a live stack is a no-op.
 
-**Tier 1:**
+### Auto-start at login (macOS)
+
+Drop this LaunchAgent at `~/Library/LaunchAgents/com.plannen.start.plist`, then `launchctl load ~/Library/LaunchAgents/com.plannen.start.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.plannen.start</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/absolute/path/to/plannen/scripts/start.sh</string>
+    <string>--no-dev</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/Users/YOU/.plannen/start.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOU/.plannen/start.log</string>
+</dict>
+</plist>
+```
+
+Drop `--no-dev` if you want the web dev server running on login too. (Tier 1 needs Docker to be running first; `OnDemand`/`KeepAlive` can be added if Docker startup is slow.)
+
+### Lower-level (still works)
 
 ```bash
-bash scripts/local-start.sh             # start Supabase (Kong-patched)
-bash scripts/functions-start.sh         # start edge functions in background
-npm run dev                              # web app at http://localhost:4321
+# Tier 0
+bash scripts/pg-start.sh        # embedded Postgres on 54322
+bash scripts/backend-start.sh   # Plannen backend on 54323
+npm run dev                     # web app at http://localhost:4321
+
+# Tier 1
+bash scripts/local-start.sh     # start Supabase (Kong-patched)
+bash scripts/functions-start.sh # start edge functions
+npm run dev                     # web app at http://localhost:4321
 ```
 
-Or just re-run `bash scripts/bootstrap.sh [--tier 1]` — it's idempotent. Stop edge functions with `bash scripts/functions-stop.sh`.
+Or just re-run `bash scripts/bootstrap.sh [--tier 1]` — it's idempotent and will auto-restore `supabase/seed.sql` if your DB is empty.
 
 ---
 
