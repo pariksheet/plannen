@@ -226,8 +226,10 @@ For Claude-driven photo organisation of past events, configure Google OAuth:
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create a project and enable the **Photos Library API**.
 2. Generate OAuth 2.0 credentials of type **Web application**.
-3. Register `http://127.0.0.1:54321/functions/v1/google-oauth-callback` as an authorised redirect URI.
-4. Run `/plannen-setup` (in Claude Code) and paste the Client ID and Client Secret. The values are written to both `.env` and `supabase/functions/.env`. Restart the functions-serve process: `bash scripts/functions-stop.sh && bash scripts/functions-start.sh`.
+3. Register the OAuth callback as an authorised redirect URI:
+   - **Tier 0**: `http://127.0.0.1:54323/functions/v1/google-oauth-callback`
+   - **Tier 1**: `http://127.0.0.1:54321/functions/v1/google-oauth-callback`
+4. Run `/plannen-setup` (in Claude Code) and paste the Client ID and Client Secret. Values are written to `.env` (and, in Tier 1, also to `supabase/functions/.env`). Restart the relevant process: Tier 0 → `bash scripts/backend-stop.sh && bash scripts/backend-start.sh`; Tier 1 → `bash scripts/functions-stop.sh && bash scripts/functions-start.sh`.
 
 ---
 
@@ -235,22 +237,31 @@ For Claude-driven photo organisation of past events, configure Google OAuth:
 
 ```
 plannen/
-├── src/                    # React app (Vite + TypeScript)
-├── mcp/                    # MCP server (TS, single file at mcp/src/index.ts)
-├── plugin/                 # Claude Code plugin (skills + commands + manifest)
+├── src/                          # React app (Vite + TypeScript)
+│   ├── lib/dbClient/             # Tier-portable data layer (tier0 fetch + tier1 supabase-js)
+│   └── services/                 # Thin passthroughs to dbClient
+├── mcp/                          # MCP server — pg.Pool + withUserContext, BOTH tiers
+├── backend/                      # Tier 0 Hono backend (REST + storage + 12 function routes)
+├── plugin/                       # Claude Code plugin (skills + commands + manifest)
 ├── supabase/
-│   ├── migrations/         # Database schema (source of truth)
-│   ├── functions/          # Edge functions (incl. _shared/ai.ts BYOK wrapper)
-│   ├── config.toml         # Local Supabase config
-│   └── seed*.{sql,tar.gz}  # Personal data backups (gitignored)
+│   ├── migrations/               # Main schema (source of truth)
+│   ├── migrations-tier0/         # Tier-0 compat overlay (auth/storage stubs + roles)
+│   ├── functions/                # Edge functions — Deno entry per fn + pure handlers in _shared/handlers/
+│   ├── config.toml               # Tier 1 Supabase config
+│   └── seed*.{sql,tar.gz}        # Personal data backups (gitignored)
 ├── scripts/
-│   ├── bootstrap.sh                # One-shot first-run install
-│   ├── functions-{start,stop}.sh   # Edge-functions lifecycle
-│   ├── local-start.sh              # Supabase start + Kong patch
-│   ├── export-seed.sh              # Backup local DB + photos
-│   └── lib/                        # Shared bash + node helpers
+│   ├── bootstrap.sh              # One-shot first-run install (--tier 0|1)
+│   ├── start.sh / stop.sh        # Tier-aware umbrella lifecycle
+│   ├── pg-{start,stop}.sh        # Embedded Postgres lifecycle (Tier 0)
+│   ├── backend-{start,stop}.sh   # Plannen backend lifecycle (Tier 0)
+│   ├── functions-{start,stop}.sh # Edge-functions lifecycle (Tier 1)
+│   ├── local-start.sh            # Supabase start + Kong patch (Tier 1)
+│   ├── export-seed.sh            # Backup local DB + photos (tier-aware)
+│   ├── restore-photos.sh         # Restore photos (tier-aware)
+│   └── lib/                      # Shared bash + node helpers (migrate, restore, dump-tables)
 └── docs/
-    ├── TIERED_DEPLOYMENT_MODEL.md  # Tier 1–4 design
+    ├── TIERED_DEPLOYMENT_MODEL.md  # Tier 0/1/2/3+ — where Postgres lives
+    ├── INTEGRATIONS.md             # Google Calendar / Photos / Drive — orthogonal to tier
     └── superpowers/specs/          # Approved design docs
 ```
 
@@ -292,11 +303,15 @@ To restore: drop the two files into `supabase/`, run `bootstrap.sh`, then `bash 
 
 ## Troubleshooting
 
-**`supabase start` fails on Colima.** Ensure the docker socket is exposed: `colima start --network-address` plus `colima ssh -- sudo systemctl restart docker`. Some setups also need `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`.
+**Tier 0 — embedded Postgres won't come up on port 54322.** Check `~/.plannen/pg.log` for the error. If something else is bound to 54322 (e.g., a stale Supabase Docker container from a previous Tier 1 run), stop it first: `supabase stop --project-id plannen` and `bash scripts/pg-start.sh`.
+
+**Tier 0 — backend says `ECONNREFUSED 127.0.0.1:54322`.** Postgres died (e.g., laptop sleep). `bash scripts/pg-start.sh` then `bash scripts/backend-stop.sh && bash scripts/backend-start.sh` to clear stale pool connections.
+
+**Tier 1 — `supabase start` fails on Colima.** Ensure the docker socket is exposed: `colima start --network-address` plus `colima ssh -- sudo systemctl restart docker`. Some setups also need `DOCKER_HOST=unix://$HOME/.colima/default/docker.sock`.
 
 **MCP doesn't start when Claude Code is launched as a GUI app.** The plugin manifest uses bare `node`, which isn't found if you installed Node via NVM and Claude Code doesn't inherit your shell's PATH. Workaround: symlink to a system-PATH location (e.g. `sudo ln -s "$(which node)" /usr/local/bin/node`). A per-machine plugin override is on the V1.1 backlog.
 
-**`/plannen-doctor` says functions-serve is dead.** `bash scripts/functions-start.sh` (idempotent — no-op if already alive). Check `.plannen/functions.log` for the error.
+**Tier 1 — `/plannen-doctor` says functions-serve is dead.** `bash scripts/functions-start.sh` (idempotent — no-op if already alive). Check `.plannen/functions.log` for the error.
 
 **I previously ran `scripts/install-plannen-command.sh`.** That installer is gone — the plugin replaces it. Clean up the stale slash command and MCP registration:
 

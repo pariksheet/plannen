@@ -17,12 +17,12 @@ Plannen runs in a small set of tiers. The choice is one axis: **where Postgres l
 
 Two abstractions, not one — because the web app cannot speak raw Postgres.
 
-**Server-side: Postgres connection.** MCP server and the (Phase 2) HTTP backend share a single `pg.Pool` driven by `DATABASE_URL`, with a `withUserContext(userId, fn)` helper that sets the `app.current_user_id` GUC so `auth.uid()` resolves correctly across tiers.
+**Server-side: Postgres connection.** MCP server and the Node HTTP backend share a single `pg.Pool` driven by `DATABASE_URL`, with a `withUserContext(userId, fn)` helper that sets `app.current_user_id` (Tier 0 stub) and `request.jwt.claim.sub` (Tier 1 real) GUCs so `auth.uid()` resolves correctly across tiers.
 
 **Client-side: HTTP API contract.** The web app's `src/services/*.ts` calls go through a `dbClient` factory at `src/lib/dbClient.ts`. Tier 1 wraps `@supabase/supabase-js`; Tier 0/2 use `fetch` against the local backend's REST surface (`/api`, `/storage/v1`, `/functions/v1`). Components are unchanged.
 
 ## What's in this repo
 
-Phase 1 (MCP path) and Phase 2 (backend + web app) ship Tier 0 by default while keeping Tier 1 fully working. Tier 2 is a future config change (point `DATABASE_URL` elsewhere); Tier 3+ is not part of the OSS plan.
+Tier 0 ships as the default in v0.2.0; Tier 1 stays fully supported. Tier 2 is a future config change (point `DATABASE_URL` at a hosted Postgres); Tier 3+ is not part of the OSS plan.
 
 Storage tiers are orthogonal to publishing / social features. The earlier doc's "publish opt-in / social layer" idea folds in as a future feature flag rather than its own tier.
