@@ -18,6 +18,7 @@ import { watch } from './routes/api/watch.js'
 import { rsvp } from './routes/api/rsvp.js'
 import { groups } from './routes/api/groups.js'
 import { wishlist } from './routes/api/wishlist.js'
+import { settings } from './routes/api/settings.js'
 import { eventPhotos } from './routes/storage/eventPhotos.js'
 import { agentTest } from './routes/functions/agentTest.js'
 import { agentDiscover } from './routes/functions/agentDiscover.js'
@@ -55,6 +56,7 @@ export function buildApp(user: { userId: string; userEmail: string }) {
   app.route('/api/rsvp', rsvp)
   app.route('/api/groups', groups)
   app.route('/api/wishlist', wishlist)
+  app.route('/api/settings', settings)
   app.route('/storage/v1/object', eventPhotos)
   app.route('/functions/v1/agent-test', agentTest)
   app.route('/functions/v1/agent-discover', agentDiscover)
