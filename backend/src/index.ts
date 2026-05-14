@@ -15,6 +15,7 @@ import { locations } from './routes/api/locations.js'
 import { sources } from './routes/api/sources.js'
 import { watch } from './routes/api/watch.js'
 import { rsvp } from './routes/api/rsvp.js'
+import { groups } from './routes/api/groups.js'
 import { eventPhotos } from './routes/storage/eventPhotos.js'
 import { agentTest } from './routes/functions/agentTest.js'
 import { agentDiscover } from './routes/functions/agentDiscover.js'
@@ -63,6 +64,7 @@ app.route('/api/locations', locations)
 app.route('/api/sources', sources)
 app.route('/api/watch', watch)
 app.route('/api/rsvp', rsvp)
+app.route('/api/groups', groups)
 app.route('/storage/v1/object', eventPhotos)
 
 // /functions/v1/* — pure handlers extracted from `supabase/functions/<name>`.
