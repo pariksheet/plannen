@@ -3,9 +3,10 @@ import { Hono } from 'hono'
 import { health } from './health.js'
 import { pool } from './db.js'
 import { resolveUserAtBoot } from './auth.js'
-import { errorMiddleware } from './middleware/error.js'
+import { errorHandler } from './middleware/error.js'
 import { corsMiddleware } from './middleware/cors.js'
 import { me } from './routes/api/me.js'
+import { eventPhotos } from './routes/storage/eventPhotos.js'
 import type { AppVariables } from './types.js'
 
 const PORT = Number(process.env.PLANNEN_BACKEND_PORT ?? 54323)
@@ -21,7 +22,7 @@ console.log(`resolved user: ${user.email} (${user.userId})`)
 
 const app = new Hono<{ Variables: AppVariables }>()
 
-app.use('*', errorMiddleware)
+app.onError(errorHandler)
 app.use('*', corsMiddleware)
 app.use('*', async (c, next) => {
   c.set('pool', pool)
@@ -32,6 +33,7 @@ app.use('*', async (c, next) => {
 
 app.route('/', health)
 app.route('/api/me', me)
+app.route('/storage/v1/object', eventPhotos)
 
 serve({ fetch: app.fetch, port: PORT, hostname: HOST }, (info) => {
   console.log(`backend listening on http://${info.address}:${info.port}`)

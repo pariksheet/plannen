@@ -4,14 +4,15 @@
 
 import { Hono } from 'hono'
 import { pool } from './db.js'
-import { errorMiddleware } from './middleware/error.js'
+import { errorHandler } from './middleware/error.js'
 import { health } from './health.js'
 import { me } from './routes/api/me.js'
+import { eventPhotos } from './routes/storage/eventPhotos.js'
 import type { AppVariables } from './types.js'
 
 export function buildApp(user: { userId: string; userEmail: string }) {
   const app = new Hono<{ Variables: AppVariables }>()
-  app.use('*', errorMiddleware)
+  app.onError(errorHandler)
   app.use('*', async (c, next) => {
     c.set('pool', pool)
     c.set('userId', user.userId)
@@ -20,5 +21,6 @@ export function buildApp(user: { userId: string; userEmail: string }) {
   })
   app.route('/', health)
   app.route('/api/me', me)
+  app.route('/storage/v1/object', eventPhotos)
   return app
 }
