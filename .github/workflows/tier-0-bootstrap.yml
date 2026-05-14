@@ -9,15 +9,23 @@ on:
     paths:
       - 'supabase/migrations/**'
       - 'supabase/migrations-tier0/**'
+      - 'supabase/functions/_shared/**'
       - 'scripts/lib/plannen-pg.mjs'
       - 'scripts/lib/migrate.mjs'
       - 'scripts/bootstrap.sh'
       - 'scripts/pg-start.sh'
       - 'scripts/pg-stop.sh'
-      - 'mcp/src/db.ts'
-      - 'mcp/src/userResolver.ts'
-      - 'mcp/src/index.ts'
+      - 'scripts/backend-start.sh'
+      - 'scripts/backend-stop.sh'
+      - 'mcp/src/**'
       - 'mcp/package.json'
+      - 'backend/**'
+      - 'src/lib/dbClient/**'
+      - 'src/lib/dbClient.ts'
+      - 'src/context/AuthContext.tsx'
+      - 'src/hooks/useStories.ts'
+      - 'tests/e2e/**'
+      - 'vite.config.ts'
       - 'package.json'
 
 jobs:
@@ -41,3 +49,28 @@ jobs:
           DATABASE_URL: postgres://plannen:plannen@127.0.0.1:54322/plannen
           PLANNEN_TIER: '0'
           PLANNEN_USER_EMAIL: ci@plannen.local
+      - run: cd backend && npm test
+        env:
+          DATABASE_URL: postgres://plannen:plannen@127.0.0.1:54322/plannen
+          PLANNEN_TIER: '0'
+          PLANNEN_USER_EMAIL: ci@plannen.local
+      - run: cd supabase/functions && npm install && npm test
+        env:
+          DATABASE_URL: postgres://plannen:plannen@127.0.0.1:54322/plannen
+      - run: npx vitest run src/lib/dbClient/contract.test.ts
+      - run: npx playwright install --with-deps chromium
+      - run: nohup npm run dev > /tmp/vite.log 2>&1 &
+        env:
+          VITE_PLANNEN_TIER: '0'
+          VITE_PLANNEN_BACKEND_MODE: plannen-api
+          BACKEND_URL: http://127.0.0.1:54323
+      - run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:4321 > /dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          echo "Vite did not come up"; cat /tmp/vite.log; exit 1
+      - run: npx playwright test tests/e2e/tier0-smoke.spec.ts
+        env:
+          VITE_PLANNEN_TIER: '0'
+          VITE_PLANNEN_BACKEND_MODE: plannen-api
