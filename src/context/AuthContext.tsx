@@ -1,6 +1,9 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react'
 import { User } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
+import { dbClient } from '../lib/dbClient'
+
+const TIER = (import.meta.env.VITE_PLANNEN_TIER ?? '1') as '0' | '1'
 
 type UserProfile = {
   id: string
@@ -58,6 +61,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let isMounted = true
+
+    if (TIER === '0') {
+      // Tier 0: no Supabase Auth. The backend resolves the single user at boot
+      // from PLANNEN_USER_EMAIL and exposes them via GET /api/me. No login UI;
+      // no auth-state subscription. Synthesise a User-shaped object so existing
+      // consumers (which type-check against @supabase/supabase-js's User) work.
+      ;(async () => {
+        try {
+          const me = await dbClient.me.get()
+          if (!isMounted) return
+          const u = {
+            id: me.userId,
+            email: me.email,
+            app_metadata: {},
+            user_metadata: {},
+            aud: 'authenticated',
+            created_at: new Date(0).toISOString(),
+          } as User
+          setUser(u)
+          await loadProfile(u)
+        } catch {
+          if (isMounted) setUser(null)
+        } finally {
+          if (isMounted) setLoading(false)
+        }
+      })()
+      return () => { isMounted = false }
+    }
+
     ;(async () => {
       const { data: { user: u } } = await supabase.auth.getUser()
       if (!isMounted) return
@@ -81,6 +113,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadProfile, user])
 
   const signIn = async (email: string, redirectTo?: string) => {
+    if (TIER === '0') {
+      // Tier 0 doesn't have login — the user is resolved at backend boot.
+      return { error: new Error('Sign-in is not available in Tier 0 (single-user, no auth UI)') }
+    }
     const options: { email: string; options?: { emailRedirectTo?: string } } = { email }
     if (typeof window !== 'undefined') {
       const isProd = import.meta.env.PROD
@@ -95,6 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const signOut = async () => {
+    if (TIER === '0') return  // no-op in single-user Tier 0
     await supabase.auth.signOut()
   }
 

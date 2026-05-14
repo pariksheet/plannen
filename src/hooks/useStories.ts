@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { supabase } from '../lib/supabase'
+import { dbClient } from '../lib/dbClient'
 import { listStories } from '../services/storyService'
 import type { StoryWithEvents } from '../types/story'
 
@@ -22,11 +22,9 @@ export function useStories() {
 
   useEffect(() => {
     refresh()
-    const channel = supabase
-      .channel('stories-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'stories' }, () => { refresh() })
-      .subscribe()
-    return () => { void supabase.removeChannel(channel) }
+    // Tier 1 wraps Realtime; Tier 0 polls every 30s. Same surface either way.
+    const unsubscribe = dbClient.realtime.subscribeToStories(() => { refresh() })
+    return unsubscribe
   }, [refresh])
 
   return { stories, loading, error, refresh }
