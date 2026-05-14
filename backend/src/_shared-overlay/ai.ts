@@ -1,24 +1,21 @@
-// BYOK AI dispatcher. Routes calls through an internal AIProvider interface.
-// Anthropic in both trees; claude-code-cli is Node-only (Tier 0) and physically
-// absent from the Deno tree — see `backend/src/_shared-overlay/ai.ts` for the
-// Node variant that wires the CLI provider.
-//
-// Public surface (both trees): getUserAI, generate, generateStructured,
-// generateFromImage, aiErrorResponse, AIError, AIProviderNotConfigured,
-// parseJsonAgainstSchema, AISettings, Provider.
+// Node-tree variant of the BYOK AI dispatcher. Same surface as the Deno copy
+// in `supabase/functions/_shared/ai.ts`, but wires the Tier-0 `claude-code-cli`
+// subprocess provider that Deno cannot host. The overlay copy is layered on
+// top of the staged Deno tree by `backend/scripts/prepare-shared.mjs`.
 
-import { z } from 'npm:zod@3'
-import type { HandlerCtx } from './handlers/types.ts'
+import { z } from 'zod'
+import type { HandlerCtx } from './handlers/types.js'
 import type {
   AIProvider,
   GenerateOpts,
   GenerateStructuredOpts,
   GenerateFromImageOpts,
   Provider,
-} from './providers/types.ts'
-import { anthropicProvider } from './providers/anthropic.ts'
+} from './providers/types.js'
+import { anthropicProvider } from './providers/anthropic.js'
+import { claudeCliProvider } from './providers/claude-cli.js'
 
-export type { Provider } from './providers/types.ts'
+export type { Provider } from './providers/types.js'
 
 export type AISettings = {
   provider: Provider
@@ -83,7 +80,6 @@ export async function getUserAI(ctx: HandlerCtx): Promise<AISettings> {
   )
   if (rows.length === 0) throw new AIProviderNotConfigured()
   const r = rows[0]
-  // CLI provider rows have api_key = NULL by design; only anthropic requires it.
   if (r.provider === 'anthropic' && !r.api_key) throw new AIProviderNotConfigured()
   return {
     provider: r.provider as Provider,
@@ -116,15 +112,14 @@ async function recordUsage(ctx: HandlerCtx, ok: boolean, code: AIErrorCode | nul
   }
 }
 
-// ── Provider dispatch (Deno tree — Tier 1 only) ────────────────────────────────
+// ── Provider dispatch (Node tree — Tier 0) ─────────────────────────────────────
 
 function providerFor(s: AISettings): AIProvider {
   switch (s.provider) {
     case 'anthropic':
       return anthropicProvider(s)
     case 'claude-code-cli':
-      throw new AIError('no_provider_configured',
-        'claude-code-cli is not available in Tier 1 edge functions.')
+      return claudeCliProvider(s)
     default: {
       const _exhaustive: never = s.provider
       throw new AIError('no_provider_configured', `Unsupported provider: ${String(_exhaustive)}`)
@@ -137,7 +132,7 @@ function providerFor(s: AISettings): AIProvider {
 function normaliseError(err: unknown): AIError {
   if (err instanceof AIError) return err
   const message = err instanceof Error ? err.message : String(err)
-  // deno-lint-ignore no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const e = err as any
   const status = typeof e?.statusCode === 'number'
     ? e.statusCode
