@@ -39,10 +39,12 @@ backend/src/index.ts                   # invoke boot probe + maybeAutoConfigureC
 backend/src/routes/api/settings.ts     # GET /api/settings/system + PATCH validation
 ```
 
-**Web tree:** (modifying existing settings page — exact file path depends on layout)
+**Web tree** (React + Vite, project-root `src/`):
 
 ```
-web/src/routes/settings/...            # provider dropdown w/ CLI option + UI conditionals
+src/context/SettingsContext.tsx        # widen Provider union; thread through cliAvailable
+src/components/Settings.tsx            # provider dropdown w/ CLI option + UI conditionals
+src/lib/dbClient.ts                    # add settings.system() helper for new endpoint
 ```
 
 **NOT modified:** `scripts/bootstrap.sh` already writes `PLANNEN_TIER` to `.env` at line 251.
@@ -1764,83 +1766,127 @@ git commit -m "settings: validate provider+api_key per tier (anthropic / claude-
 
 ### Task 14: Update `/settings` web UI for CLI provider option
 
+This is a React app (Vite); the settings page lives at `src/components/Settings.tsx` (318 lines) and the context at `src/context/SettingsContext.tsx` (213 lines). The DB client used in Tier 0 is `src/lib/dbClient.ts`. Three sub-changes: widen the `Provider` type in the context, add a `system()` helper to `dbClient`, and wire the UI in `Settings.tsx`.
+
 **Files:**
-- Modify: web `/settings` page (exact path depends on web tree layout — likely `web/src/routes/settings/+page.svelte` or `web/src/pages/settings.tsx` depending on framework)
-- Modify: associated test file if one exists
+- Modify: `src/context/SettingsContext.tsx` — widen `Provider`; track `cliAvailable` + `tier`; pass through context
+- Modify: `src/lib/dbClient.ts` — add `settings.system()` method calling `GET /api/settings/system`
+- Modify: `src/components/Settings.tsx` — dropdown, conditional fields, banner
 
-**Pre-task:** locate the existing settings page first.
+- [ ] **Step 1: Widen `Provider` union in `SettingsContext.tsx`**
 
-- [ ] **Step 1: Find the existing settings page**
-
-Run: `find web/src -type f \( -name '*settings*' -o -name '*Settings*' \) | head -20`
-
-Open the file. It currently has a provider dropdown (anthropic only) and an API key paste field.
-
-- [ ] **Step 2: Fetch system info on page load**
-
-At the top of the settings page component, alongside the existing `/api/settings` fetch, add a `/api/settings/system` fetch. Pseudocode (adapt to the actual framework):
+Edit `src/context/SettingsContext.tsx:8`:
 
 ```ts
-const [system, setSystem] = useState<{ tier: number; cliAvailable: boolean; cliVersion: string | null }>()
+export type Provider = 'anthropic' | 'claude-code-cli'
+```
+
+- [ ] **Step 2: Add `system` info to `SettingsContextValue`**
+
+In `src/context/SettingsContext.tsx`, after the `ProviderSettings` interface (line 18), add:
+
+```ts
+export interface SystemInfo {
+  tier: number
+  cliAvailable: boolean
+  cliVersion: string | null
+}
+```
+
+Extend `SettingsContextValue` (line 20-28) with `system: SystemInfo | null`. Initialise to `null` in the default context value.
+
+In `SettingsProvider` (line 58+), add a `system` state and load it on mount in Tier 0 only:
+
+```ts
+const [system, setSystem] = useState<SystemInfo | null>(null)
+
 useEffect(() => {
-  fetch('/api/settings/system').then(r => r.json()).then(b => setSystem(b.data))
+  if (TIER === '0') {
+    dbClient.settings.system().then(setSystem).catch(() => setSystem(null))
+  } else {
+    setSystem({ tier: 1, cliAvailable: false, cliVersion: null })
+  }
 }, [])
 ```
 
-- [ ] **Step 3: Add `claude-code-cli` to provider dropdown when available**
+Pass `system` in the context provider value.
+
+- [ ] **Step 3: Add `settings.system()` to `dbClient`**
+
+Open `src/lib/dbClient.ts`, find the existing `settings` namespace (which already has `get()` and `update()`), and add:
+
+```ts
+async system(): Promise<{ tier: number; cliAvailable: boolean; cliVersion: string | null }> {
+  const res = await fetch('/api/settings/system')
+  if (!res.ok) throw new Error(`settings.system failed: ${res.status}`)
+  const body = await res.json()
+  return body.data
+},
+```
+
+- [ ] **Step 4: Wire dropdown in `Settings.tsx`**
+
+In `src/components/Settings.tsx:28`, destructure `system` from `useSettings()`:
+
+```ts
+const { settings, loading, hasAiKey, saveProvider, clearProvider, testProvider, system } = useSettings()
+const [provider, setProvider] = useState<'anthropic' | 'claude-code-cli'>(settings?.provider ?? 'anthropic')
+```
+
+Sync `provider` state from `settings` in the existing `useEffect` (line 38-46).
+
+Find the form section that renders the API key input and model dropdown. Wrap it with a provider conditional and add the dropdown above:
 
 ```tsx
-<select value={provider} onChange={(e) => setProvider(e.target.value)}>
+<label>Provider</label>
+<select value={provider} onChange={(e) => setProvider(e.target.value as 'anthropic' | 'claude-code-cli')}>
   <option value="anthropic">Anthropic (BYOK)</option>
   {system?.tier === 0 && system.cliAvailable && (
     <option value="claude-code-cli">
-      Claude Code CLI (your subscription)
-      {system.cliVersion ? ` — v${system.cliVersion} detected` : ''}
+      Claude Code CLI (your subscription){system.cliVersion ? ` — v${system.cliVersion}` : ''}
     </option>
   )}
 </select>
-```
 
-- [ ] **Step 4: Hide API key field and model dropdown when CLI provider selected**
-
-```tsx
 {provider === 'anthropic' && (
   <>
-    <input type="password" value={apiKey} onChange={...} placeholder="sk-ant-..." />
-    <select value={model} onChange={...}>...</select>
+    {/* existing API key input + model dropdown JSX stays here */}
   </>
 )}
+
 {provider === 'claude-code-cli' && (
-  <div class="banner">
-    Plannen will use your installed Claude CLI for AI calls. Anthropic bills your
-    subscription, not a separate API key.
+  <div className="rounded border border-blue-200 bg-blue-50 p-3 text-sm">
+    Plannen will use your installed Claude CLI for AI calls. Anthropic bills your subscription —
+    no API key needed here.
   </div>
 )}
-```
 
-- [ ] **Step 5: Add subtext when CLI not detected on tier 0**
-
-Below the provider dropdown:
-
-```tsx
 {system?.tier === 0 && !system.cliAvailable && (
-  <p class="hint">
-    To use your Claude subscription instead, install Claude Code:
-    <a href="https://claude.com/code">claude.com/code</a>
+  <p className="text-sm text-gray-500 mt-2">
+    To use your Claude subscription instead of an API key, install Claude Code at{' '}
+    <a href="https://claude.com/code" className="underline">claude.com/code</a>.
   </p>
 )}
 ```
 
-- [ ] **Step 6: Submit handler — omit api_key when CLI provider**
+- [ ] **Step 5: Update save handler to send the right body**
 
-In the save handler:
+Find the existing save handler. Change the body it sends:
 
 ```ts
-const body = provider === 'claude-code-cli'
-  ? { provider: 'claude-code-cli' }
-  : { provider: 'anthropic', api_key: apiKey, default_model: model }
-await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+if (provider === 'claude-code-cli') {
+  await saveProvider({ provider: 'claude-code-cli', apiKey: '', defaultModel: null })
+} else {
+  await saveProvider({ provider: 'anthropic', apiKey: key, defaultModel: model })
+}
 ```
+
+Then update `saveProvider` in `SettingsContext.tsx:124` so that when `provider === 'claude-code-cli'`, it sends `{ provider: 'claude-code-cli' }` (no api_key, no model). The backend now validates this.
+
+- [ ] **Step 6: Run typecheck**
+
+Run: `npx tsc --noEmit`
+Expected: PASS — no type errors after the Provider widening.
 
 - [ ] **Step 7: Manual verification**
 
@@ -1850,16 +1896,17 @@ Run the three-process Tier-0 stack:
 3. `npm run dev`
 
 Visit http://localhost:4321/settings. Verify:
-- With `claude` in PATH: dropdown shows CLI option, selecting it hides the API key field and shows the banner.
-- Click Save → settings row updated to `claude-code-cli`.
-- Click "Test AI" → succeeds via subprocess (takes a few seconds).
-- Without `claude` in PATH (rename binary temporarily): dropdown shows BYOK only with the install hint below.
+- With `claude` in PATH: dropdown shows CLI option ("Claude Code CLI (your subscription) — v1.x.x"), selecting it hides the API key field and shows the blue banner.
+- Click Save → backend returns 200; `GET /api/settings` shows provider=`claude-code-cli`, `has_api_key=false`.
+- Click "Test AI" → succeeds via subprocess (takes 1-3 seconds for CLI startup + model call).
+- Without `claude` in PATH (rename binary temporarily, restart backend): dropdown shows BYOK only; install hint appears.
+- Tier 1 (`PLANNEN_TIER=1`): dropdown shows BYOK only; CLI option hidden entirely.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add web/src/...
-git commit -m "settings UI: surface claude-code-cli provider option + conditional fields"
+git add src/context/SettingsContext.tsx src/lib/dbClient.ts src/components/Settings.tsx
+git commit -m "settings UI: surface claude-code-cli provider with conditional fields"
 ```
 
 ---
