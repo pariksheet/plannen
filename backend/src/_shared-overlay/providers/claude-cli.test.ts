@@ -28,8 +28,8 @@ describe('claudeCliProvider.generate', () => {
     expect(out).toBe('hello world')
     expect(runCli).toHaveBeenCalledWith(
       'claude',
-      ['-p', '--output-format=json', 'say hi'],
-      expect.objectContaining({ timeoutMs: 90_000 }),
+      ['-p', '--output-format=json'],
+      expect.objectContaining({ timeoutMs: 90_000, input: 'say hi' }),
     )
   })
 
@@ -44,6 +44,11 @@ describe('claudeCliProvider.generate', () => {
     const calledArgs = runCli.mock.calls[0][1]
     expect(calledArgs).toContain('--allowed-tools')
     expect(calledArgs).toContain('WebSearch')
+    // Prompt must NOT be in argv — it would be swallowed by the variadic
+    // --allowed-tools flag. It rides on stdin instead.
+    expect(calledArgs).not.toContain('find events')
+    const opts = runCli.mock.calls[0][2]
+    expect(opts.input).toBe('find events')
   })
 })
 
@@ -65,7 +70,9 @@ describe('claudeCliProvider.generateStructured', () => {
     const calledArgs = runCli.mock.calls[0][1]
     expect(calledArgs).toContain('-p')
     expect(calledArgs).toContain('--output-format=json')
-    expect(calledArgs[calledArgs.length - 1]).toMatch(/Return ONLY a JSON value/)
+    const stdinPrompt = runCli.mock.calls[0][2].input
+    expect(stdinPrompt).toMatch(/Return ONLY a JSON value/)
+    expect(stdinPrompt).toMatch(/pick a city/)
   })
 
   it('appends --allowed-tools WebSearch when tools include web_search', async () => {
@@ -116,9 +123,9 @@ describe('claudeCliProvider.generateFromImage', () => {
     const calledArgs = runCli.mock.calls[0][1]
     expect(calledArgs).toContain('--allowed-tools')
     expect(calledArgs).toContain('Read')
-    const lastArg = calledArgs[calledArgs.length - 1]
-    expect(lastArg).toContain('/tmp/plannen-img-fixed-uuid.png')
-    expect(lastArg).toContain('what is this')
+    const stdinPrompt = runCli.mock.calls[0][2].input
+    expect(stdinPrompt).toContain('/tmp/plannen-img-fixed-uuid.png')
+    expect(stdinPrompt).toContain('what is this')
 
     const { access } = await import('node:fs/promises')
     await expect(access('/tmp/plannen-img-fixed-uuid.png')).rejects.toThrow()

@@ -46,8 +46,7 @@ export function makeClaudeCliProvider(deps: Deps = {}): (s: AISettings) => AIPro
     async generate(_ctx: HandlerCtx, opts: GenerateOpts): Promise<string> {
       const args = ['-p', '--output-format=json']
       if (opts.tools?.includes('web_search')) args.push('--allowed-tools', 'WebSearch')
-      args.push(opts.prompt)
-      const { result } = await invokeCli(runCli, binary, args)
+      const { result } = await invokeCli(runCli, binary, args, opts.prompt)
       return result
     },
 
@@ -55,8 +54,7 @@ export function makeClaudeCliProvider(deps: Deps = {}): (s: AISettings) => AIPro
       const jsonInstruction = '\n\nReturn ONLY a JSON value matching the requested schema. No markdown, no prose.'
       const args = ['-p', '--output-format=json']
       if (opts.tools?.includes('web_search')) args.push('--allowed-tools', 'WebSearch')
-      args.push(opts.prompt + jsonInstruction)
-      const { result } = await invokeCli(runCli, binary, args)
+      const { result } = await invokeCli(runCli, binary, args, opts.prompt + jsonInstruction)
       return parseJsonAgainstSchema(result, opts.schema)
     },
 
@@ -68,12 +66,11 @@ export function makeClaudeCliProvider(deps: Deps = {}): (s: AISettings) => AIPro
       const path = join(tmp(), `plannen-img-${uuid()}.${ext}`)
       await writeFile(path, opts.imageBytes)
       try {
-        const args = [
-          '-p', '--output-format=json',
-          '--allowed-tools', 'Read',
+        const args = ['-p', '--output-format=json', '--allowed-tools', 'Read']
+        const { result } = await invokeCli(
+          runCli, binary, args,
           `Analyze the image at ${path}:\n\n${opts.prompt}`,
-        ]
-        const { result } = await invokeCli(runCli, binary, args)
+        )
         return result
       } finally {
         await unlink(path).catch(() => { /* best-effort */ })
@@ -87,10 +84,17 @@ export const claudeCliProvider = makeClaudeCliProvider()
 
 // ── Internals ──────────────────────────────────────────────────────────────────
 
-async function invokeCli(runCli: RunCli, binary: string, args: string[]): Promise<{ result: string }> {
+// Feed the prompt through stdin instead of as a positional arg. Claude Code
+// 2.x's `--allowed-tools` is variadic (consumes everything until the next
+// `--flag`), so any positional prompt placed after it would be swallowed as
+// a tool name. Stdin sidesteps that ambiguity and is safer for prompts that
+// contain shell-significant characters anyway.
+async function invokeCli(
+  runCli: RunCli, binary: string, args: string[], prompt: string,
+): Promise<{ result: string }> {
   let res
   try {
-    res = await runCli(binary, args, { timeoutMs: DEFAULT_TIMEOUT_MS })
+    res = await runCli(binary, args, { timeoutMs: DEFAULT_TIMEOUT_MS, input: prompt })
   } catch (e) {
     throw mapRunCliError(e)
   }
