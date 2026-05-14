@@ -6,6 +6,10 @@
 // resolves), runs the callback, and releases. The GUC is transaction-local
 // (`set_config(..., true)`), so it dies on commit/rollback — no leak.
 
+// Side-effect: load repo-root .env BEFORE we read process.env.DATABASE_URL.
+// Imports evaluate top-down; this must be first.
+import './env.js'
+
 import pg from 'pg'
 
 // Return DATE columns (OID 1082) as raw 'YYYY-MM-DD' strings, not JS Date.

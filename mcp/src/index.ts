@@ -1,11 +1,7 @@
-import { fileURLToPath } from 'node:url'
-import { dirname, resolve } from 'node:path'
-import { config as loadDotenv } from 'dotenv'
-
-// Load <repo-root>/.env before reading any process.env. Existing env vars (e.g.
-// from `claude mcp add -e ...`) take precedence — dotenv only fills in gaps.
-const __dirname = dirname(fileURLToPath(import.meta.url))
-loadDotenv({ path: resolve(__dirname, '../../.env') })
+// .env load is now a side-effect of ./env.js (also imported by db.ts). ESM
+// evaluates imports top-down BEFORE this module's body, so placing it first
+// guarantees process.env is populated before any downstream import reads it.
+import './env.js'
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
