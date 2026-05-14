@@ -1,0 +1,43 @@
+name: Tier 0 bootstrap
+
+# Runs `bash scripts/bootstrap.sh --tier 0` from scratch on every PR that
+# touches the migration / lifecycle / db-helper surface. Catches regressions
+# in the "runs with just Node" promise.
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/**'
+      - 'supabase/migrations-tier0/**'
+      - 'scripts/lib/plannen-pg.mjs'
+      - 'scripts/lib/migrate.mjs'
+      - 'scripts/bootstrap.sh'
+      - 'scripts/pg-start.sh'
+      - 'scripts/pg-stop.sh'
+      - 'mcp/src/db.ts'
+      - 'mcp/src/userResolver.ts'
+      - 'mcp/src/index.ts'
+      - 'mcp/package.json'
+      - 'package.json'
+
+jobs:
+  bootstrap-from-scratch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install
+      - run: bash scripts/bootstrap.sh --non-interactive --email ci@plannen.local --tier 0
+        env:
+          # bootstrap will write these into .env, but CI also reads them
+          # directly for the mcp test run below.
+          DATABASE_URL: postgres://plannen:plannen@127.0.0.1:54322/plannen
+          PLANNEN_TIER: '0'
+          PLANNEN_USER_EMAIL: ci@plannen.local
+      - run: cd mcp && npm test
+        env:
+          DATABASE_URL: postgres://plannen:plannen@127.0.0.1:54322/plannen
+          PLANNEN_TIER: '0'
+          PLANNEN_USER_EMAIL: ci@plannen.local
