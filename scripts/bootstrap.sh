@@ -151,12 +151,26 @@ DATABASE_URL_TIER0="postgres://plannen:plannen@127.0.0.1:54322/plannen"
 
 if [ "$TIER" = "0" ]; then
   step "4. Starting embedded Postgres (Tier 0)"
-  bash scripts/pg-start.sh
-  # pg-start.sh runs node lib/plannen-pg.mjs start which fails if there's no
-  # data dir; init is idempotent (no-op when PG_VERSION already exists).
-  if [ ! -f "$HOME/.plannen/pgdata/PG_VERSION" ]; then
-    node scripts/lib/plannen-pg.mjs init >> "$HOME/.plannen/pg.log" 2>&1 &
-    sleep 4
+  # `init` is the idempotent entry point: it initdb's on first run, then
+  # always starts pg and keeps the supervising Node process alive. Background
+  # it; record the pid for pg-stop.sh.
+  mkdir -p "$HOME/.plannen"
+  if [ -f "$HOME/.plannen/pg.pid" ] && kill -0 "$(cat "$HOME/.plannen/pg.pid")" 2>/dev/null; then
+    dim "embedded Postgres already running (pid $(cat "$HOME/.plannen/pg.pid"))"
+  else
+    nohup node scripts/lib/plannen-pg.mjs init >> "$HOME/.plannen/pg.log" 2>&1 &
+    disown
+    # Poll for readiness — first-run takes longer (initdb + createDatabase).
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+      sleep 1
+      if [ -f "$HOME/.plannen/pg.pid" ] && nc -z 127.0.0.1 54322 2>/dev/null; then
+        break
+      fi
+    done
+    if ! nc -z 127.0.0.1 54322 2>/dev/null; then
+      err "embedded Postgres did not come up on 54322 — tail $HOME/.plannen/pg.log"
+      exit 1
+    fi
   fi
   ok "embedded Postgres on 54322"
 
