@@ -6,6 +6,7 @@ import { resolveUserAtBoot } from './auth.js'
 import { errorHandler } from './middleware/error.js'
 import { corsMiddleware } from './middleware/cors.js'
 import { me } from './routes/api/me.js'
+import { events } from './routes/api/events.js'
 import { eventPhotos } from './routes/storage/eventPhotos.js'
 import { agentTest } from './routes/functions/agentTest.js'
 import { agentDiscover } from './routes/functions/agentDiscover.js'
@@ -45,6 +46,7 @@ app.use('*', async (c, next) => {
 
 app.route('/', health)
 app.route('/api/me', me)
+app.route('/api/events', events)
 app.route('/storage/v1/object', eventPhotos)
 
 // /functions/v1/* — pure handlers extracted from `supabase/functions/<name>`.

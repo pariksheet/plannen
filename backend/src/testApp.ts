@@ -7,6 +7,7 @@ import { pool } from './db.js'
 import { errorHandler } from './middleware/error.js'
 import { health } from './health.js'
 import { me } from './routes/api/me.js'
+import { events } from './routes/api/events.js'
 import { eventPhotos } from './routes/storage/eventPhotos.js'
 import { agentTest } from './routes/functions/agentTest.js'
 import { agentDiscover } from './routes/functions/agentDiscover.js'
@@ -33,6 +34,7 @@ export function buildApp(user: { userId: string; userEmail: string }) {
   })
   app.route('/', health)
   app.route('/api/me', me)
+  app.route('/api/events', events)
   app.route('/storage/v1/object', eventPhotos)
   app.route('/functions/v1/agent-test', agentTest)
   app.route('/functions/v1/agent-discover', agentDiscover)
