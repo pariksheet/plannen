@@ -8,6 +8,7 @@ import { ProtectedRoute } from '../components/ProtectedRoute'
 import { Onboarding } from '../pages/Onboarding'
 import { Profile } from '../pages/Profile'
 import { StoryReader } from '../components/StoryReader'
+import { plugins } from '../plugins'
 
 export function AppRoutes() {
   return (
@@ -48,6 +49,17 @@ export function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      {plugins.map(plugin => (
+        <Route
+          key={plugin.route}
+          path={plugin.route}
+          element={
+            <ProtectedRoute>
+              <plugin.Component />
+            </ProtectedRoute>
+          }
+        />
+      ))}
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   )

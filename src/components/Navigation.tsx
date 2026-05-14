@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Menu, X, LogOut, LayoutDashboard, Users, Handshake, UsersRound, Shield, Settings, UserCircle, BookOpen } from 'lucide-react'
+import { Menu, X, LogOut, LayoutDashboard, Users, Handshake, UsersRound, Shield, Settings, UserCircle, BookOpen, Puzzle } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
 import { Logo } from './Logo'
+import { plugins } from '../plugins'
 
 type View = 'feed' | 'family' | 'friends' | 'groups' | 'stories' | 'settings'
 
@@ -63,6 +64,15 @@ export function Navigation({ currentView, onViewChange, onSignOut, onInviteClick
             >
               {label}
             </button>
+          ))}
+          {plugins.map(plugin => (
+            <Link
+              key={plugin.route}
+              to={plugin.route}
+              className="inline-flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:bg-gray-100"
+            >
+              {plugin.label}
+            </Link>
           ))}
         </div>
         <div className="flex items-center gap-2">
@@ -163,6 +173,17 @@ export function Navigation({ currentView, onViewChange, onSignOut, onInviteClick
                   <Icon className="h-5 w-5" />
                   {label}
                 </button>
+              ))}
+              {plugins.map(plugin => (
+                <Link
+                  key={plugin.route}
+                  to={plugin.route}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  <Puzzle className="h-5 w-5" />
+                  {plugin.label}
+                </Link>
               ))}
               <div className="border-t border-gray-200 mt-2 pt-2 space-y-1">
                 <Link
