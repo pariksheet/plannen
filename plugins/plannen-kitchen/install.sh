@@ -83,10 +83,17 @@ fi
 # ── 5. Register the plugin with Claude Code ──────────────────────────────────
 step "Registering plugin with Claude Code"
 if command -v claude >/dev/null 2>&1; then
-  claude plugin install "$PLUGIN_DIR" || warn "claude plugin install failed — install manually with: /plugin install $PLUGIN_DIR"
-  ok "Plugin registered"
+  # Two-step: ensure the repo-level marketplace is registered (idempotent),
+  # then install by name. The marketplace at .claude-plugin/marketplace.json
+  # lists both `plannen` and `plannen-kitchen`.
+  (cd "$REPO_ROOT" && claude plugin marketplace add ./ 2>&1 | grep -qE 'Successfully added|already exists|already added' || claude plugin marketplace add ./ || true)
+  if (cd "$REPO_ROOT" && claude plugin install plannen-kitchen@plannen); then
+    ok "Plugin registered"
+  else
+    warn "claude plugin install failed — from inside Claude Code run: /plugin install plannen-kitchen@plannen"
+  fi
 else
-  warn "claude CLI not on PATH — install manually with: /plugin install $PLUGIN_DIR"
+  warn "claude CLI not on PATH — from inside Claude Code run: /plugin install plannen-kitchen@plannen"
 fi
 
 # ── 6. Done ──────────────────────────────────────────────────────────────────

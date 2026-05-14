@@ -13,6 +13,13 @@
       "source": "./plugin",
       "homepage": "https://github.com/pariksheet/plannen",
       "license": "AGPL-3.0-only"
+    },
+    {
+      "name": "plannen-kitchen",
+      "description": "Weekly grocery, pantry, and meal-plan reasoning for Plannen. Adds the kitchen.* schema, an MCP server, three skills, two slash commands, and a mobile-first in-store check-off page.",
+      "source": "./plugins/plannen-kitchen",
+      "homepage": "https://github.com/pariksheet/plannen",
+      "license": "AGPL-3.0-only"
     }
   ]
 }
