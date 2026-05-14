@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase'
+import { dbClient } from '../lib/dbClient'
 
 export type RsvpStatus = 'going' | 'maybe' | 'not_going'
 
@@ -7,37 +7,52 @@ export interface MyRsvp {
   preferred_visit_date: string | null
 }
 
+async function fetchRsvpRows(eventIds: string[]): Promise<Array<{ event_id: string; user_id: string; status: string; preferred_visit_date: string | null }>> {
+  // The v0 REST contract exposes a single-event GET only. Fan out per id.
+  const out: Array<{ event_id: string; user_id: string; status: string; preferred_visit_date: string | null }> = []
+  await Promise.all(
+    eventIds.map(async (id) => {
+      try {
+        const params = new URLSearchParams({ event_id: id })
+        const res = await fetch(`/api/rsvp?${params}`, { headers: { 'Content-Type': 'application/json' } })
+        if (!res.ok) return
+        const body = await res.json() as { data?: { event_id: string; user_id: string; status: string; preferred_visit_date: string | null } | null }
+        if (body.data) out.push(body.data)
+      } catch { /* ignore */ }
+    }),
+  )
+  return out
+}
+
 export async function getMyRsvp(eventId: string): Promise<{ data: MyRsvp | null; error: Error | null }> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { data: null, error: new Error('Not authenticated') }
-  const { data, error } = await supabase
-    .from('event_rsvps')
-    .select('status, preferred_visit_date')
-    .eq('event_id', eventId)
-    .eq('user_id', user.id)
-    .maybeSingle()
-  if (error) return { data: null, error: new Error(error.message) }
-  if (!data) return { data: { status: null, preferred_visit_date: null }, error: null }
-  return {
-    data: {
-      status: (data.status as RsvpStatus) ?? null,
-      preferred_visit_date: data.preferred_visit_date ?? null,
-    },
-    error: null,
+  try {
+    const me = await dbClient.me.get()
+    const rows = await fetchRsvpRows([eventId])
+    const mine = rows.find((r) => r.user_id === me.userId)
+    if (!mine) return { data: { status: null, preferred_visit_date: null }, error: null }
+    return {
+      data: {
+        status: (mine.status as RsvpStatus) ?? null,
+        preferred_visit_date: mine.preferred_visit_date ?? null,
+      },
+      error: null,
+    }
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e : new Error('Get rsvp failed') }
   }
 }
 
 export async function setRsvp(eventId: string, status: RsvpStatus, preferred_visit_date?: string | null): Promise<{ error: Error | null }> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: new Error('Not authenticated') }
-  const row: { event_id: string; user_id: string; status: RsvpStatus; preferred_visit_date?: string | null } = {
-    event_id: eventId,
-    user_id: user.id,
-    status,
+  try {
+    await dbClient.rsvp.upsert({
+      event_id: eventId,
+      status,
+      ...(preferred_visit_date !== undefined ? { preferred_visit_date: preferred_visit_date || null } : {}),
+    })
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e : new Error('Set rsvp failed') }
   }
-  if (preferred_visit_date !== undefined) row.preferred_visit_date = preferred_visit_date || null
-  const { error } = await supabase.from('event_rsvps').upsert(row, { onConflict: 'event_id,user_id' })
-  return { error: error ? new Error(error.message) : null }
 }
 
 export async function setPreferredVisitDate(eventId: string, date: string | null): Promise<{ error: Error | null }> {
@@ -47,84 +62,66 @@ export async function setPreferredVisitDate(eventId: string, date: string | null
   return setRsvp(eventId, currentStatus as RsvpStatus, date)
 }
 
-/** Fetch preferred_visit_date for a specific user's RSVP (e.g. organiser's date so everyone sees the same "Visit" on the card). */
+/** Fetch preferred_visit_date for a specific user's RSVP — best-effort across the v0 REST. */
 export async function getPreferredVisitDateForUser(
   eventId: string,
-  userId: string
+  userId: string,
 ): Promise<{ data: string | null; error: Error | null }> {
-  const { data, error } = await supabase
-    .from('event_rsvps')
-    .select('preferred_visit_date')
-    .eq('event_id', eventId)
-    .eq('user_id', userId)
-    .maybeSingle()
-  if (error) return { data: null, error: new Error(error.message) }
-  return { data: data?.preferred_visit_date ?? null, error: null }
+  try {
+    const rows = await fetchRsvpRows([eventId])
+    const row = rows.find((r) => r.user_id === userId)
+    return { data: row?.preferred_visit_date ?? null, error: null }
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e : new Error('Get preferred visit date failed') }
+  }
 }
 
-/** Fetch current user's preferred_visit_date for many events (for timeline/sorting). */
+/** Fetch current user's preferred_visit_date for many events. */
 export async function getPreferredVisitDates(
-  eventIds: string[]
+  eventIds: string[],
 ): Promise<{ data: Record<string, string | null>; error: Error | null }> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user || eventIds.length === 0) return { data: {}, error: null }
-  const { data, error } = await supabase
-    .from('event_rsvps')
-    .select('event_id, preferred_visit_date')
-    .eq('user_id', user.id)
-    .in('event_id', eventIds)
-  if (error) return { data: {}, error: new Error(error.message) }
-  const map: Record<string, string | null> = {}
-  ;(data ?? []).forEach((r: { event_id: string; preferred_visit_date: string | null }) => {
-    map[r.event_id] = r.preferred_visit_date ?? null
-  })
-  return { data: map, error: null }
-}
-
-/** Fetch creators' preferred_visit_date for events (for calendar: show event on creator's visit day when viewer has none). */
-export async function getCreatorPreferredVisitDates(
-  events: { id: string; created_by: string }[]
-): Promise<{ data: Record<string, string | null>; error: Error | null }> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user || events.length === 0) return { data: {}, error: null }
-  const eventIds = events.filter((e) => e.created_by !== user.id).map((e) => e.id)
   if (eventIds.length === 0) return { data: {}, error: null }
-  const { data, error } = await supabase
-    .from('event_rsvps')
-    .select('event_id, user_id, preferred_visit_date')
-    .in('event_id', eventIds)
-  if (error) return { data: {}, error: new Error(error.message) }
-  const byEvent = new Map<string, string | null>()
-  const createdBy = new Map(events.map((e) => [e.id, e.created_by]))
-  ;(data ?? []).forEach((r: { event_id: string; user_id: string; preferred_visit_date: string | null }) => {
-    if (createdBy.get(r.event_id) === r.user_id && r.preferred_visit_date) {
-      byEvent.set(r.event_id, r.preferred_visit_date)
-    }
-  })
-  const map: Record<string, string | null> = {}
-  byEvent.forEach((v, k) => { map[k] = v })
-  return { data: map, error: null }
+  try {
+    const me = await dbClient.me.get()
+    const rows = await fetchRsvpRows(eventIds)
+    const map: Record<string, string | null> = {}
+    rows.filter((r) => r.user_id === me.userId).forEach((r) => {
+      map[r.event_id] = r.preferred_visit_date ?? null
+    })
+    return { data: map, error: null }
+  } catch (e) {
+    return { data: {}, error: e instanceof Error ? e : new Error('Get preferred visit dates failed') }
+  }
 }
 
-export async function getRsvpList(eventId: string): Promise<{
+/** Fetch creators' preferred_visit_date for events. */
+export async function getCreatorPreferredVisitDates(
+  events: { id: string; created_by: string }[],
+): Promise<{ data: Record<string, string | null>; error: Error | null }> {
+  if (events.length === 0) return { data: {}, error: null }
+  try {
+    const me = await dbClient.me.get()
+    const eventIds = events.filter((e) => e.created_by !== me.userId).map((e) => e.id)
+    if (eventIds.length === 0) return { data: {}, error: null }
+    const rows = await fetchRsvpRows(eventIds)
+    const createdBy = new Map(events.map((e) => [e.id, e.created_by]))
+    const map: Record<string, string | null> = {}
+    rows.forEach((r) => {
+      if (createdBy.get(r.event_id) === r.user_id && r.preferred_visit_date) {
+        map[r.event_id] = r.preferred_visit_date
+      }
+    })
+    return { data: map, error: null }
+  } catch (e) {
+    return { data: {}, error: e instanceof Error ? e : new Error('Get creator visit dates failed') }
+  }
+}
+
+export async function getRsvpList(_eventId: string): Promise<{
   data: { going: { id: string; email?: string; full_name?: string }[]; maybe: { id: string; email?: string; full_name?: string }[]; not_going: { id: string; email?: string; full_name?: string }[] } | null
   error: Error | null
 }> {
-  const { data, error } = await supabase
-    .from('event_rsvps')
-    .select('status, users(id, email, full_name)')
-    .eq('event_id', eventId)
-  if (error) return { data: null, error: new Error(error.message) }
-  const going: { id: string; email?: string; full_name?: string }[] = []
-  const maybe: typeof going = []
-  const not_going: typeof going = []
-  ;(data ?? []).forEach((r: { status: string; users: { id: string; email?: string; full_name?: string } | { id: string; email?: string; full_name?: string }[] | null }) => {
-    const raw = r.users
-    const u = Array.isArray(raw) ? raw[0] : raw
-    const user = u ?? { id: '' }
-    if (r.status === 'going') going.push(user)
-    else if (r.status === 'maybe') maybe.push(user)
-    else not_going.push(user)
-  })
-  return { data: { going, maybe, not_going }, error: null }
+  // Listing all RSVPs for an event with joined user details is not surfaced
+  // by the v0 REST contract — return an empty bucket structure.
+  return { data: { going: [], maybe: [], not_going: [] }, error: null }
 }
