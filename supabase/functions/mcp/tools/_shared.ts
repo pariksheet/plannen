@@ -1,5 +1,71 @@
 import type { PoolClient } from 'npm:pg@8'
 
+// ── Env helper (works in both Deno and Node) ──────────────────────────────────
+
+declare const Deno: { env: { get(k: string): string | undefined } } | undefined
+export function envGet(key: string): string {
+  if (typeof Deno !== 'undefined') return Deno.env.get(key) ?? ''
+  return (process as { env: Record<string, string | undefined> }).env[key] ?? ''
+}
+
+// ── Google OAuth helper ───────────────────────────────────────────────────────
+
+export async function getGoogleAccessToken(client: PoolClient, userId: string): Promise<string> {
+  const { rows } = await client.query(
+    `SELECT access_token, expires_at, refresh_token
+     FROM plannen.user_oauth_tokens
+     WHERE user_id = $1 AND provider = 'google'`,
+    [userId],
+  )
+  const row = rows[0] as
+    | { access_token: string | null; expires_at: string | null; refresh_token: string }
+    | undefined
+  if (!row) {
+    throw new Error(
+      'Google not connected. Connect Google in the Plannen UI first (Settings → Connect Google).',
+    )
+  }
+  const expiresAt = row.expires_at ? new Date(row.expires_at) : null
+  const fresh =
+    row.access_token && expiresAt && expiresAt.getTime() - Date.now() > 5 * 60 * 1000
+  if (fresh && row.access_token) return row.access_token
+
+  const GOOGLE_CLIENT_ID = envGet('GOOGLE_CLIENT_ID')
+  const GOOGLE_CLIENT_SECRET = envGet('GOOGLE_CLIENT_SECRET')
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+    throw new Error(
+      'GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set in env to refresh tokens',
+    )
+  }
+
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      refresh_token: row.refresh_token,
+    }).toString(),
+  })
+  if (!tokenRes.ok) {
+    throw new Error(`Google token refresh failed: ${tokenRes.status} ${await tokenRes.text()}`)
+  }
+  const tokens = (await tokenRes.json()) as { access_token: string; expires_in: number }
+  await client.query(
+    `UPDATE plannen.user_oauth_tokens
+     SET access_token = $1, expires_at = $2, updated_at = $3
+     WHERE user_id = $4 AND provider = 'google'`,
+    [
+      tokens.access_token,
+      new Date(Date.now() + (tokens.expires_in ?? 3600) * 1000).toISOString(),
+      new Date().toISOString(),
+      userId,
+    ],
+  )
+  return tokens.access_token
+}
+
 // ── Pure-logic helpers ────────────────────────────────────────────────────────
 
 /**
