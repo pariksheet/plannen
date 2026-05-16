@@ -169,3 +169,10 @@ supabase/seed-photos.tar.gz
 
 # Git worktrees for isolated implementation work
 .worktrees/
+
+# Tier 2 (cloud) bootstrap state — backups of pre-migration config,
+# progress markers, and per-photo upload checkpoints. Never commit.
+.env.tier1.bak
+plugin.json.tier1.bak
+.plannen-tier2-progress
+.tier2-uploaded.txt
