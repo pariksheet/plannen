@@ -41,6 +41,40 @@ Reload the plannen plugin in Claude Code. Tool changes in `supabase/functions/mc
 
 End-to-end smoke: `bash tests/smoke/tier1-http-mcp.sh` (requires `local-start.sh` running).
 
+### Developing the Tier 2 (cloud) path
+
+The Tier 2 orchestrator and helpers live at:
+
+- `scripts/lib/migrate-tier1-to-tier2.mjs` — the eight-step orchestrator (snapshot → link → push → restore → photos → deploy → rewrite-config → verify).
+- `scripts/lib/cloud-link.mjs`, `cloud-deploy.mjs`, `storage-cloud-upload.mjs` — the per-step modules.
+- `scripts/cloud-doctor.mjs` — health check.
+- `scripts/lib/mcp-rotate-bearer.mjs` + `scripts/mcp-rotate-bearer.sh` — bearer rotation.
+
+Unit tests against the orchestrator and each module:
+
+```bash
+npx vitest run tests/scripts/
+```
+
+End-to-end smoke against a real (throwaway) Supabase Cloud project:
+
+```bash
+TIER2_TEST_PROJECT_REF=<ref> \
+TIER2_TEST_CLOUD_DB_URL='postgresql://...' \
+  bash tests/smoke/tier2-bootstrap.sh
+```
+
+Same flow, gated through vitest:
+
+```bash
+RUN_TIER2_INTEGRATION=1 \
+TIER2_TEST_PROJECT_REF=<ref> \
+TIER2_TEST_CLOUD_DB_URL='postgresql://...' \
+  npx vitest run tests/integration/tier2-bootstrap.test.ts
+```
+
+Design spec: [`docs/superpowers/specs/2026-05-16-tier-2-cloud-deploy-design.md`](docs/superpowers/specs/2026-05-16-tier-2-cloud-deploy-design.md).
+
 ## Branching and PRs
 
 We use a standard fork-and-PR flow:

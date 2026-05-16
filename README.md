@@ -61,6 +61,18 @@ Adds Docker + Supabase CLI to the above:
 | A container runtime | Runs local Supabase (Postgres + Auth + Storage) | Docker Desktop, [Colima](https://github.com/abiosoft/colima), [OrbStack](https://orbstack.dev), Rancher Desktop |
 | [Supabase CLI](https://supabase.com/docs/guides/cli) ≥ 2.0 | Manages local DB, migrations, seeds | `brew install supabase/tap/supabase` |
 
+### Tier 2 (opt-in — `--tier 2`)
+
+Cloud-resident DB + Storage + Edge Functions + remote MCP, against a Supabase Cloud project you own. Requires Supabase CLI (same as Tier 1) plus:
+
+| Step | Why |
+|------|-----|
+| A Supabase Cloud project | The destination. Create one at [supabase.com/dashboard](https://supabase.com/dashboard); copy the project ref (~20-char slug from the URL) and the connection-pooler URL (Project Settings → Database → Connection string → URI). |
+| `supabase login` | One-time CLI auth to your Supabase account. |
+| Tier 1 first | Tier 2 migrates from Tier 1 (snapshot → cloud). Run `bash scripts/bootstrap.sh --tier 1` first if you're not already there. (Fresh Tier 2 installs without prior data also work; the migration steps just no-op.) |
+
+See the [Tier 2 setup section below](#tier-2-cloud-opt-in) for the migration command.
+
 ---
 
 ## Setup — one command
@@ -81,6 +93,42 @@ For automated/CI use:
 ```bash
 bash scripts/bootstrap.sh --non-interactive --email you@example.com [--install-plugin]
 ```
+
+### Tier 2 (cloud, opt-in)
+
+If you already have a working Tier 1 install with data, migrate to your Supabase Cloud project in one command:
+
+```bash
+bash scripts/bootstrap.sh --tier 2 \
+  --project-ref <your-project-ref> \
+  --cloud-db-url 'postgresql://postgres.<ref>:<password>@<region>.pooler.supabase.com:6543/postgres'
+```
+
+What this does:
+
+1. Snapshots your local Tier 1 DB + photos.
+2. `supabase link`s the repo to your cloud project and reads its API keys.
+3. `supabase db push`es the schema.
+4. Restores Tier 1 data into the cloud DB inside a single transaction. Aborts if the cloud DB already has data unless you pass `--force-overwrite`.
+5. Uploads every object in your `event-photos` bucket to the cloud bucket via Storage REST. Resumable across runs via `.tier2-uploaded.txt`. Warns and stops at >1 GB unless you pass `--accept-storage-quota` (or skip with `--skip-photos`).
+6. Deploys all edge functions (MCP first, then the rest). Sets `MCP_BEARER_TOKEN` (generated) and other secrets.
+7. Rewrites local `.env` and `plugin/.claude-plugin/plugin.json` to point at the cloud project. Backs up the originals to `.env.tier1.bak` and `plugin.json.tier1.bak`.
+8. Runs `scripts/cloud-doctor.mjs` to confirm everything's healthy.
+
+After it finishes:
+- Reload the plannen plugin in Claude Code so the new HTTP MCP endpoint takes effect.
+- Add `https://<your-ref>.supabase.co/functions/v1/google-oauth-callback` to your Google Cloud OAuth client (if you use Google Calendar / Photos integration).
+- `npm run dev` now talks to your cloud Supabase project.
+
+Operating Tier 2:
+
+```bash
+bash scripts/mcp-rotate-bearer.sh    # rotate the MCP bearer (cloud secret + local files)
+node scripts/cloud-doctor.mjs        # ad-hoc health check
+bash scripts/bootstrap.sh --tier 1   # roll back to Tier 1 (cloud project left intact)
+```
+
+The Tier 2 design is in [`docs/superpowers/specs/2026-05-16-tier-2-cloud-deploy-design.md`](docs/superpowers/specs/2026-05-16-tier-2-cloud-deploy-design.md). Hosted web app (Vercel) is **Phase B.2** — a separate spec; today the web app still runs locally.
 
 ### After bootstrap
 
@@ -158,7 +206,7 @@ Or just re-run `bash scripts/bootstrap.sh [--tier 1]` — it's idempotent and wi
 Plannen ships two MCP server implementations:
 
 - **stdio (default)** — `mcp/src/` Node process, spawned by Claude Code as a subprocess. Used in Tier 0 and Tier 1 by default.
-- **HTTP (opt-in on Tier 1)** — `supabase/functions/mcp/` Deno Edge Function, served by `supabase functions serve mcp` and reached over HTTPS with a bearer token. Used for dev / for Tier 2 once the cloud deploy spec lands.
+- **HTTP (opt-in on Tier 1, default on Tier 2)** — `supabase/functions/mcp/` Deno Edge Function. On Tier 1 it's served locally by `supabase functions serve mcp`; on Tier 2 it's `supabase functions deploy mcp`ed to the cloud project and reached at `https://<ref>.supabase.co/functions/v1/mcp` with a bearer token.
 
 Switch between them with `bash scripts/mcp-mode.sh stdio` or `bash scripts/mcp-mode.sh http`. The HTTP mode generates and persists a bearer in `supabase/.env.local` on first use. After switching, reload the plannen plugin in Claude Code.
 

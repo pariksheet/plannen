@@ -6,7 +6,7 @@ Plannen runs in a small set of tiers. The ladder is shaped by four axes: **where
 |---|---|---|---|
 | **Tier 0 — Bundled** *(default)* | Embedded pg + local Node/Hono backend on `54323` + local MCP (stdio) | User (just Node 20+) | Easy onboarding |
 | **Tier 1 — Local Supabase** | Local Supabase Docker (full stack locally — pg + Auth + Storage + Edge Functions + local MCP stdio) | User (Docker + Supabase CLI) | Dev / contributor |
-| **Tier 2 — Self-Hosted Cloud** *(this brainstorm)* | Supabase Cloud — DB + Auth + Storage + Edge Functions deployed + MCP deployed as Edge Function (HTTP transport). Plugin-only locally. | User (own Supabase Cloud project) | Serious cloud alternative |
+| **Tier 2 — Self-Hosted Cloud** *(Phase B.1 — shipped)* | Supabase Cloud — DB + Auth + Storage + Edge Functions deployed + MCP deployed as Edge Function (HTTP transport). Plugin-only locally; web app still runs locally pointing at cloud. Hosted web app (Vercel) is Phase B.2. | User (own Supabase Cloud project) | Serious cloud alternative |
 | **Tier 3 — Plannen SaaS** *(out of scope here)* | Same shape as Tier 2, managed by Plannen | Plannen | Future SaaS |
 
 **Cost ladder.** Tier 0 = free, no setup beyond Node. Tier 1 = free, requires Docker. Tier 2 = free on Supabase Cloud's free tier; pay if you exceed. Tier 3 = pay Plannen.
@@ -25,6 +25,6 @@ Two abstractions, not one — because the web app cannot speak raw Postgres.
 
 ## What's in this repo
 
-Tier 0 ships as the default in v0.2.0; Tier 1 stays fully supported. Tier 2 (Self-Hosted Cloud) is the next tier to ship — full Supabase Cloud install including the MCP server as a deployed Edge Function. Phase 1 of Tier 2 is Supabase-only; a future Phase 2 adds pluggable adapters so users can pick their DB (Supabase / Neon / any pg URL), Storage (Supabase Storage / S3-compatible / Google Drive), and Auth (Supabase / single-user stub) provider per axis. Tier 3 (Plannen SaaS) is not part of the OSS plan.
+Tier 0 ships as the default in v0.2.0; Tier 1 stays fully supported. Tier 2 (Self-Hosted Cloud) Phase B.1 has shipped: full Supabase Cloud install (DB + Auth + Storage + Edge Functions), MCP deployed as Edge Function, end-to-end migration from Tier 1. Web app still runs locally pointing at cloud; Phase B.2 will move it to Vercel. Phase 1 of Tier 2 is Supabase-only; a future Phase 2 adds pluggable adapters so users can pick their DB (Supabase / Neon / any pg URL), Storage (Supabase Storage / S3-compatible / Google Drive), and Auth (Supabase / single-user stub) provider per axis. Tier 3 (Plannen SaaS) is not part of the OSS plan.
 
 Storage tiers are orthogonal to publishing / social features. The earlier doc's "publish opt-in / social layer" idea folds in as a future feature flag rather than its own tier.
