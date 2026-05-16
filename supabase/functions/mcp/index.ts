@@ -5,6 +5,7 @@ import { eventsModule } from './tools/events.ts'
 import { memoriesModule } from './tools/memories.ts'
 import { storiesModule } from './tools/stories.ts'
 import { photosModule } from './tools/photos.ts'
+import { gcalModule } from './tools/gcal.ts'
 
 declare const Deno:
   | {
@@ -62,7 +63,7 @@ export async function handleRequest(
 }
 
 // Module-level tool registry.
-const TOOLS: ToolModule[] = [eventsModule, memoriesModule, storiesModule, photosModule]
+const TOOLS: ToolModule[] = [eventsModule, memoriesModule, storiesModule, photosModule, gcalModule]
 
 if (typeof Deno !== 'undefined') {
   Deno.serve((req) => handleRequest(req, { tools: TOOLS }))
