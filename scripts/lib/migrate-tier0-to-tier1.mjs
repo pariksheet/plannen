@@ -28,14 +28,19 @@
 //   8. Verify counts match between source and destination
 
 import { spawn, execFileSync } from 'node:child_process'
-import { readdirSync, statSync, readFileSync, mkdirSync, mkdtempSync, copyFileSync, rmSync, existsSync } from 'node:fs'
+import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs'
 import { dirname, join, resolve, extname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { tmpdir, homedir } from 'node:os'
+import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
 import pg from 'pg'
 
-import { synthesize } from './storage-objects.mjs'
+// storage-objects.mjs holds the row-synthesis helper used by an earlier
+// approach (insert rows + docker cp files). The current migrator instead
+// uploads each photo through the Supabase storage REST API so the storage
+// worker sets the extended attributes its file backend reads on GET. We
+// keep the helper around because it documents the expected schema and
+// might be used by a future tier 1 → tier 2 carry-over.
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(HERE, '../..')
@@ -57,6 +62,9 @@ const MIME = {
   '.m4a': 'audio/mp4',
   '.wav': 'audio/wav',
   '.ogg': 'audio/ogg',
+  '.opus': 'audio/opus',
+  '.aac': 'audio/aac',
+  '.flac': 'audio/flac',
 }
 
 export function mimeFromPath(filename) {
@@ -170,6 +178,50 @@ async function truncateTier1(client) {
   await client.query('COMMIT')
 }
 
+async function clearStorageFiles(storageContainer) {
+  // Wipe any leftover files in the bucket so old version-uuid leaf dirs from a
+  // previous migration aren't orphaned on disk.
+  try {
+    execFileSync('docker', ['exec', storageContainer, 'rm', '-rf', '/mnt/stub/stub/event-photos'])
+  } catch {
+    // Directory may not exist on a fresh stack; that's fine.
+  }
+}
+
+async function uploadPhotos(inventory, { supabaseUrl, serviceRoleKey }) {
+  for (const f of inventory) {
+    const url = `${supabaseUrl}/storage/v1/object/${f.bucket}/${f.path}`
+    const body = readFileSync(f.srcAbsPath)
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${serviceRoleKey}`,
+        'Content-Type': f.mimetype,
+        'x-upsert': 'true',
+      },
+      body,
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`upload ${f.path} → HTTP ${res.status}: ${text}`)
+    }
+  }
+}
+
+async function setOwnersFromPath(client) {
+  // The REST upload runs as service_role, so storage.objects.owner is NULL.
+  // We know the original owner from the second path component
+  // (event-photos/<event>/<owner>/<filename>) — restore it.
+  await client.query(`
+    UPDATE storage.objects
+       SET owner = (split_part(name, '/', 2))::uuid,
+           owner_id = split_part(name, '/', 2)
+     WHERE bucket_id = 'event-photos'
+       AND owner IS NULL
+       AND split_part(name, '/', 2) ~ '^[0-9a-f-]{36}$'
+  `)
+}
+
 async function applyDump(client, dumpSql) {
   // The dump opens with `SET session_replication_role = replica;` so triggers
   // and FKs stay deferred for the whole load. It closes with `SET ... = DEFAULT;`
@@ -189,48 +241,6 @@ async function rewriteMediaUrls(client, storageHostUrl) {
       `UPDATE ${table} SET ${col} = $1 || ${col} WHERE ${col} LIKE '/storage/v1/%'`,
       [storageHostUrl],
     )
-  }
-}
-
-async function insertStorageObjects(client, rows) {
-  if (rows.length === 0) return
-  // Insert one row at a time. The volume is small (single-user app) and the
-  // simpler code is worth the small perf cost.
-  for (const r of rows) {
-    await client.query(
-      `INSERT INTO storage.objects
-        (id, bucket_id, name, owner, owner_id, created_at, updated_at, last_accessed_at, metadata, version, user_metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11::jsonb)`,
-      [
-        r.id,
-        r.bucket_id,
-        r.name,
-        r.owner,
-        r.owner_id,
-        r.created_at,
-        r.updated_at,
-        r.last_accessed_at,
-        JSON.stringify(r.metadata),
-        r.version,
-        JSON.stringify(r.user_metadata),
-      ],
-    )
-  }
-}
-
-function copyPhotosIntoContainer(layout, storageContainer) {
-  if (layout.length === 0) return
-  const stage = mkdtempSync(join(tmpdir(), 'plannen-migrate-'))
-  try {
-    for (const { srcAbsPath, destRelPath } of layout) {
-      const destAbs = join(stage, destRelPath)
-      mkdirSync(dirname(destAbs), { recursive: true })
-      copyFileSync(srcAbsPath, destAbs)
-    }
-    // `docker cp <stage>/. <container>:/mnt/` merges contents into /mnt.
-    execFileSync('docker', ['cp', `${stage}/.`, `${storageContainer}:/mnt/`])
-  } finally {
-    rmSync(stage, { recursive: true, force: true })
   }
 }
 
@@ -258,12 +268,16 @@ async function verify(tier0Client, tier1Client) {
 export async function migrate({
   databaseUrlTier0,
   databaseUrlTier1,
+  supabaseUrl,
+  serviceRoleKey,
   photosRoot = process.env.PLANNEN_PHOTOS_ROOT ?? join(homedir(), '.plannen', 'photos'),
   storageContainer = process.env.STORAGE_CONTAINER ?? 'supabase_storage_plannen',
   storageHostUrl = process.env.STORAGE_HOST_URL ?? 'http://127.0.0.1:54321',
 } = {}) {
   if (!databaseUrlTier0) throw new Error('databaseUrlTier0 is required')
   if (!databaseUrlTier1) throw new Error('databaseUrlTier1 is required')
+  if (!supabaseUrl) throw new Error('supabaseUrl is required')
+  if (!serviceRoleKey) throw new Error('serviceRoleKey is required')
 
   process.stderr.write('1/8 dumping Tier 0...\n')
   const dumpSql = await dumpTier0(databaseUrlTier0)
@@ -280,6 +294,7 @@ export async function migrate({
   try {
     process.stderr.write('3/8 TRUNCATE Tier 1 plannen.* + auth.users + storage.objects...\n')
     await truncateTier1(tier1)
+    await clearStorageFiles(storageContainer)
 
     process.stderr.write('4/8 applying Tier 0 dump...\n')
     await applyDump(tier1, dumpSql)
@@ -287,13 +302,12 @@ export async function migrate({
     process.stderr.write('5/8 rewriting media_url to absolute...\n')
     await rewriteMediaUrls(tier1, storageHostUrl)
 
-    process.stderr.write('6/8 synthesizing storage.objects rows...\n')
-    const { rows: objectRows, layout } = synthesize(inventory)
-    await insertStorageObjects(tier1, objectRows)
-    process.stderr.write(`    inserted ${objectRows.length} row(s)\n`)
+    process.stderr.write('6/8 uploading photos via storage REST API...\n')
+    await uploadPhotos(inventory, { supabaseUrl, serviceRoleKey })
+    process.stderr.write(`    uploaded ${inventory.length} file(s)\n`)
 
-    process.stderr.write('7/8 copying photos into storage container...\n')
-    copyPhotosIntoContainer(layout, storageContainer)
+    process.stderr.write('7/8 restoring owners on storage.objects...\n')
+    await setOwnersFromPath(tier1)
 
     process.stderr.write('8/8 verifying counts...\n')
     const mismatches = await verify(tier0, tier1)
@@ -302,7 +316,7 @@ export async function migrate({
     }
 
     process.stderr.write('migration complete.\n')
-    return { photoCount: inventory.length, storageObjectCount: objectRows.length }
+    return { photoCount: inventory.length }
   } finally {
     await tier0.end()
     await tier1.end()
@@ -313,13 +327,19 @@ export async function migrate({
 if (import.meta.url === `file://${process.argv[1]}`) {
   const databaseUrlTier0 = process.env.DATABASE_URL_TIER0
   const databaseUrlTier1 = process.env.DATABASE_URL_TIER1
+  const supabaseUrl = process.env.SUPABASE_URL
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!databaseUrlTier0 || !databaseUrlTier1) {
     console.error('DATABASE_URL_TIER0 and DATABASE_URL_TIER1 are required')
     process.exit(1)
   }
+  if (!supabaseUrl || !serviceRoleKey) {
+    console.error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required')
+    process.exit(1)
+  }
   try {
-    const r = await migrate({ databaseUrlTier0, databaseUrlTier1 })
-    console.log(`migrated: ${r.photoCount} photos, ${r.storageObjectCount} storage.objects rows`)
+    const r = await migrate({ databaseUrlTier0, databaseUrlTier1, supabaseUrl, serviceRoleKey })
+    console.log(`migrated: ${r.photoCount} photos`)
   } catch (e) {
     console.error(`migration failed: ${e.message}`)
     process.exit(1)

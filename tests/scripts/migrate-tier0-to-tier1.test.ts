@@ -12,6 +12,7 @@ describe('mimeFromPath', () => {
     expect(mimeFromPath('foo/bar/baz.heic')).toBe('image/heic')
     expect(mimeFromPath('clip.mp4')).toBe('video/mp4')
     expect(mimeFromPath('voice.m4a')).toBe('audio/mp4')
+    expect(mimeFromPath('recorded.opus')).toBe('audio/opus')
   })
 
   it('falls back to application/octet-stream for unknown extensions', () => {
