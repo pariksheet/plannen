@@ -63,6 +63,25 @@ case "$TIER" in
   *) err "unsupported --tier: $TIER (use 0 or 1)"; exit 1 ;;
 esac
 
+# ── 0. Tier-change detection ──────────────────────────────────────────────────
+#
+# If .env already exists with PLANNEN_TIER=0 and the user is invoking --tier 1
+# while their embedded-Postgres data dir exists, this is a tier change — bootstrap
+# auto-snapshots both tiers, applies the standard Tier 1 install, then carries
+# Tier 0's data across. The user never has to remember to run export-seed.sh.
+
+OLD_TIER=""
+TIER_CHANGE=""
+if [ -f .env ]; then
+  OLD_TIER=$(grep -E '^PLANNEN_TIER=' .env 2>/dev/null | head -1 | cut -d= -f2 | tr -d '"' || true)
+fi
+if [ "$OLD_TIER" = "0" ] && [ "$TIER" = "1" ] && [ -d "$HOME/.plannen/pgdata" ]; then
+  TIER_CHANGE="0->1"
+fi
+
+SNAPSHOT_DIR="$PROJECT_DIR/.plannen/snapshots"
+TIER0_SIDE_PORT="${PLANNEN_PG_MIGRATION_PORT:-54422}"
+
 # ── 1. Pre-flight ─────────────────────────────────────────────────────────────
 
 step "1. Pre-flight checks (Tier $TIER)"
@@ -214,6 +233,26 @@ if [ "$TIER" = "0" ]; then
   [ -n "$USER_UUID" ] || { err "failed to insert user row"; exit 1; }
   ok "plannen user: $USER_UUID"
 else
+  if [ "$TIER_CHANGE" = "0->1" ]; then
+    step "3a. Snapshotting Tier 0 before switching to Tier 1 (auto-backup)"
+    mkdir -p "$SNAPSHOT_DIR"
+    # Tier 0 PG might already be stopped; bring it up on its native port for
+    # the dump. pg-start.sh is idempotent.
+    if ! nc -z 127.0.0.1 54322 2>/dev/null; then
+      bash "$SCRIPT_DIR/pg-start.sh"
+      # Wait for readiness — embedded-postgres takes ~1s.
+      for i in 1 2 3 4 5 6 7 8; do
+        sleep 1
+        nc -z 127.0.0.1 54322 2>/dev/null && break
+      done
+    fi
+    node "$SCRIPT_DIR/lib/snapshot.mjs" --tier 0 --out "$SNAPSHOT_DIR" --keep 5
+    bash "$SCRIPT_DIR/pg-stop.sh"
+    # Tier 0 PG must be stopped before Tier 1's Docker binds 54322.
+    sleep 1
+    ok "Tier 0 snapshot saved under $SNAPSHOT_DIR"
+  fi
+
   step "4. Starting local Supabase"
   bash scripts/local-start.sh
 
@@ -240,6 +279,34 @@ else
   fi
   [ $RC -eq 0 ] || { err "auth-user step failed"; exit 1; }
   ok "auth user: $USER_UUID"
+
+  if [ "$TIER_CHANGE" = "0->1" ]; then
+    step "6b. Snapshotting empty Tier 1 (auto-backup)"
+    node "$SCRIPT_DIR/lib/snapshot.mjs" --tier 1 --out "$SNAPSHOT_DIR" --keep 5
+    ok "Tier 1 snapshot saved"
+
+    step "6c. Migrating Tier 0 data → Tier 1"
+    # Bring Tier 0 PG up on a side port so it doesn't fight Tier 1's Docker
+    # Postgres on 54322. PLANNEN_PG_PORT is honoured by plannen-pg.mjs.
+    PLANNEN_PG_PORT="$TIER0_SIDE_PORT" bash "$SCRIPT_DIR/pg-start.sh"
+    for i in 1 2 3 4 5 6 7 8; do
+      sleep 1
+      nc -z 127.0.0.1 "$TIER0_SIDE_PORT" 2>/dev/null && break
+    done
+    if ! nc -z 127.0.0.1 "$TIER0_SIDE_PORT" 2>/dev/null; then
+      err "Tier 0 PG did not come up on side port $TIER0_SIDE_PORT — tail $HOME/.plannen/pg.log"
+      exit 1
+    fi
+
+    DATABASE_URL_TIER0="postgres://plannen:plannen@127.0.0.1:${TIER0_SIDE_PORT}/plannen" \
+    DATABASE_URL_TIER1="postgres://postgres:postgres@127.0.0.1:54322/postgres" \
+    SUPABASE_URL="$SUPABASE_URL_FOR_NODE" \
+    SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_FOR_NODE" \
+      node "$SCRIPT_DIR/lib/migrate-tier0-to-tier1.mjs"
+
+    bash "$SCRIPT_DIR/pg-stop.sh"
+    ok "Tier 0 data migrated to Tier 1; restore points in $SNAPSHOT_DIR"
+  fi
 fi
 
 # ── 7. Write .env ─────────────────────────────────────────────────────────────
