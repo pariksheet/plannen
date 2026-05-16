@@ -8,13 +8,18 @@
 # Usage:
 #   bash scripts/bootstrap.sh                    # interactive, Tier 0 (default)
 #   bash scripts/bootstrap.sh --non-interactive  # CI / scripted
-#     [--tier 0|1]                               # 0 = embedded Postgres (default), 1 = local Supabase
+#     [--tier 0|1|2]                             # 0 = embedded Postgres (default), 1 = local Supabase, 2 = cloud
 #     [--email you@example.com]                  # required if PLANNEN_USER_EMAIL not in .env
 #     [--install-plugin]                         # only installs the plugin in --non-interactive when set
 #     [--start-dev]                              # only starts npm run dev in --non-interactive when set
 #                                                # (Tier 0 web app is wired in Phase 2 — flag is a no-op there)
 #     [--configure-desktop]                      # only writes Claude Desktop MCP config in --non-interactive when set
 #     [--install-skills]                         # only installs skills under ~/.claude/skills in --non-interactive when set
+#     [--project-ref <ref>]                      # Tier 2: Supabase Cloud project ref (defaults to SUPABASE_PROJECT_REF in .env)
+#     [--cloud-db-url <url>]                     # Tier 2: full pg URL for cloud DB (required for data restore step)
+#     [--force-overwrite]                        # Tier 2: replace existing cloud data during restore
+#     [--accept-storage-quota]                   # Tier 2: proceed even if photo bucket > 1 GB
+#     [--skip-photos]                            # Tier 2: skip the photo upload step
 #
 # See docs/superpowers/specs/2026-05-09-bootstrap-and-setup-story-design.md.
 
@@ -36,6 +41,11 @@ CONFIGURE_DESKTOP=0
 INSTALL_SKILLS=0
 ARG_EMAIL=""
 TIER=0
+ARG_PROJECT_REF=""
+ARG_CLOUD_DB_URL=""
+FORCE_OVERWRITE=0
+ACCEPT_STORAGE_QUOTA=0
+SKIP_PHOTOS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --non-interactive) NON_INTERACTIVE=1; shift ;;
@@ -47,8 +57,15 @@ while [ $# -gt 0 ]; do
     --start-dev) START_DEV=1; shift ;;
     --configure-desktop) CONFIGURE_DESKTOP=1; shift ;;
     --install-skills) INSTALL_SKILLS=1; shift ;;
+    --project-ref) ARG_PROJECT_REF=$2; shift 2 ;;
+    --project-ref=*) ARG_PROJECT_REF=${1#--project-ref=}; shift ;;
+    --cloud-db-url) ARG_CLOUD_DB_URL=$2; shift 2 ;;
+    --cloud-db-url=*) ARG_CLOUD_DB_URL=${1#--cloud-db-url=}; shift ;;
+    --force-overwrite) FORCE_OVERWRITE=1; shift ;;
+    --accept-storage-quota) ACCEPT_STORAGE_QUOTA=1; shift ;;
+    --skip-photos) SKIP_PHOTOS=1; shift ;;
     -h|--help)
-      sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -59,8 +76,8 @@ while [ $# -gt 0 ]; do
 done
 
 case "$TIER" in
-  0|1) ;;
-  *) err "unsupported --tier: $TIER (use 0 or 1)"; exit 1 ;;
+  0|1|2) ;;
+  *) err "unsupported --tier: $TIER (use 0, 1, or 2)"; exit 1 ;;
 esac
 
 # ── 0. Tier-change detection ──────────────────────────────────────────────────
@@ -78,6 +95,34 @@ fi
 if [ "$OLD_TIER" = "0" ] && [ "$TIER" = "1" ] && [ -d "$HOME/.plannen/pgdata" ]; then
   TIER_CHANGE="0->1"
 fi
+if [ "$OLD_TIER" = "1" ] && [ "$TIER" = "2" ]; then
+  TIER_CHANGE="1->2"
+fi
+if [ "$OLD_TIER" = "0" ] && [ "$TIER" = "2" ]; then
+  err "Tier 0 → Tier 2 is not a direct path; run 'bash scripts/bootstrap.sh --tier 1' first, then '--tier 2'."
+  exit 1
+fi
+
+# Tier 2 → Tier 1 reverse path: restore the pre-migration backups in place.
+# Cloud project is left intact; we don't sync data back.
+if [ "$OLD_TIER" = "2" ] && [ "$TIER" = "1" ]; then
+  TIER_CHANGE="2->1"
+  if [ -f .env.tier1.bak ]; then
+    cp .env.tier1.bak .env
+    ok "restored .env from .env.tier1.bak (Tier 2 → Tier 1)"
+  fi
+  if [ -f plugin/.claude-plugin/plugin.json.tier1.bak ]; then
+    cp plugin/.claude-plugin/plugin.json.tier1.bak plugin/.claude-plugin/plugin.json
+    ok "restored plugin.json from plugin.json.tier1.bak"
+  fi
+  if [ -f .plannen-tier2-progress ]; then
+    rm -f .plannen-tier2-progress
+  fi
+  dim "  cloud project still exists; not synced back. Re-run --tier 2 to return."
+  # Re-read OLD_TIER from restored .env so the rest of bootstrap behaves as
+  # if we'd never been on Tier 2.
+  OLD_TIER=$(grep -E '^PLANNEN_TIER=' .env 2>/dev/null | head -1 | cut -d= -f2 | tr -d '"' || true)
+fi
 
 SNAPSHOT_DIR="$PROJECT_DIR/.plannen/snapshots"
 TIER0_SIDE_PORT="${PLANNEN_PG_MIGRATION_PORT:-54422}"
@@ -89,12 +134,15 @@ step "1. Pre-flight checks (Tier $TIER)"
 FAIL=0
 require_version node 20.0 "node --version" \
   "Install Node.js >= 20 LTS — https://nodejs.org or via nvm/asdf/volta" || FAIL=1
-if [ "$TIER" = "1" ]; then
+if [ "$TIER" = "1" ] || [ "$TIER_CHANGE" = "1->2" ]; then
   require_docker_running || FAIL=1
+fi
+if [ "$TIER" = "1" ] || [ "$TIER" = "2" ]; then
   require_version supabase 2.0 "supabase --version" \
     "macOS:  brew install supabase/tap/supabase
 Linux:  https://supabase.com/docs/guides/cli/getting-started" || FAIL=1
-else
+fi
+if [ "$TIER" = "0" ]; then
   dim "Tier 0 — skipping Docker and Supabase CLI checks (embedded Postgres only)"
 fi
 # bash version comes from $BASH_VERSION
@@ -163,6 +211,135 @@ ok "root npm install"
   npm run build --silent
 )
 ok "mcp/ install + build"
+
+# ── Tier 2 branch (cloud) ─────────────────────────────────────────────────────
+#
+# Self-contained from here on. The Tier 1->2 path requires the local Tier 1
+# Supabase Docker stack to be running (so we can dump its data and photos to
+# cloud); fresh Tier 2 installs skip that and the snapshot/restore/upload
+# steps via the orchestrator's resumable progress markers.
+
+if [ "$TIER" = "2" ]; then
+  step "4. Verifying supabase login"
+  if ! supabase projects list >/dev/null 2>&1; then
+    err "supabase CLI is not logged in. Run: supabase login"
+    exit 1
+  fi
+  ok "supabase login active"
+
+  step "5. Resolving cloud project"
+  PROJECT_REF="$ARG_PROJECT_REF"
+  if [ -z "$PROJECT_REF" ]; then
+    PROJECT_REF=$(env_get "$ENV_FILE" SUPABASE_PROJECT_REF)
+  fi
+  if [ -z "$PROJECT_REF" ]; then
+    if [ "$NON_INTERACTIVE" -eq 1 ]; then
+      err "--tier 2 needs --project-ref or SUPABASE_PROJECT_REF in .env when --non-interactive"
+      exit 1
+    fi
+    printf "  Supabase Cloud project ref: "
+    read -r PROJECT_REF
+  fi
+  if [ -z "$PROJECT_REF" ]; then
+    err "no project ref provided"
+    exit 1
+  fi
+  ok "project ref: $PROJECT_REF"
+
+  CLOUD_DB_URL="$ARG_CLOUD_DB_URL"
+  if [ -z "$CLOUD_DB_URL" ]; then
+    CLOUD_DB_URL=$(env_get "$ENV_FILE" CLOUD_DATABASE_URL)
+  fi
+  if [ "$TIER_CHANGE" = "1->2" ] && [ -z "$CLOUD_DB_URL" ]; then
+    cat <<EOF
+
+  Cloud database URL is required for the data-restore step.
+  Format: postgresql://postgres.${PROJECT_REF}:<DB-PASSWORD>@<region>.pooler.supabase.com:6543/postgres
+  Find it in: Supabase Dashboard → Project Settings → Database → Connection string (Pooler).
+
+EOF
+    if [ "$NON_INTERACTIVE" -eq 1 ]; then
+      err "--tier 2 1->2 needs --cloud-db-url or CLOUD_DATABASE_URL in .env when --non-interactive"
+      exit 1
+    fi
+    printf "  Cloud DATABASE_URL: "
+    read -r CLOUD_DB_URL
+  fi
+
+  if [ "$TIER_CHANGE" = "1->2" ]; then
+    step "6. Ensuring local Tier 1 stack is up (source for migration)"
+    if [ -f scripts/local-start.sh ]; then
+      bash scripts/local-start.sh
+    fi
+  else
+    step "6. Fresh Tier 2 (no prior Tier 1 data to migrate)"
+    # Mark snapshot + restore-data + upload-photos as already-done so the
+    # orchestrator skips them.
+    : > .plannen-tier2-progress
+    printf 'snapshot\nrestore-data\nupload-photos\n' >> .plannen-tier2-progress
+  fi
+
+  step "7. Running Tier 1 → Tier 2 migration orchestrator"
+  TIER1_SNAPSHOT_SQL=""
+  if [ "$TIER_CHANGE" = "1->2" ]; then
+    SNAPSHOT_DIR_T2="$PROJECT_DIR/.plannen/snapshots"
+    mkdir -p "$SNAPSHOT_DIR_T2"
+    LATEST_SNAP=$(ls -1t "$SNAPSHOT_DIR_T2"/tier1-*.sql 2>/dev/null | head -1 || true)
+    TIER1_SNAPSHOT_SQL="$LATEST_SNAP"
+  fi
+
+  TIER1_SR_KEY=$(env_get "$EXAMPLE_FILE" SUPABASE_SERVICE_ROLE_KEY)
+  EXISTING_KEY=$(env_get "$ENV_FILE" SUPABASE_SERVICE_ROLE_KEY)
+  [ -n "$EXISTING_KEY" ] && TIER1_SR_KEY=$EXISTING_KEY
+
+  SUPABASE_PROJECT_REF="$PROJECT_REF" \
+  CLOUD_DATABASE_URL="$CLOUD_DB_URL" \
+  TIER1_SNAPSHOT_SQL="$TIER1_SNAPSHOT_SQL" \
+  DATABASE_URL_TIER1="postgres://postgres:postgres@127.0.0.1:54322/postgres" \
+  TIER1_STORAGE_URL="http://127.0.0.1:54321" \
+  TIER1_SERVICE_ROLE_KEY="$TIER1_SR_KEY" \
+  PLANNEN_USER_EMAIL="$EMAIL" \
+  GOOGLE_CLIENT_ID="$(env_get "$ENV_FILE" GOOGLE_CLIENT_ID)" \
+  GOOGLE_CLIENT_SECRET="$(env_get "$ENV_FILE" GOOGLE_CLIENT_SECRET)" \
+  FORCE_OVERWRITE="$FORCE_OVERWRITE" \
+  ACCEPT_STORAGE_QUOTA="$ACCEPT_STORAGE_QUOTA" \
+    node scripts/lib/migrate-tier1-to-tier2.mjs
+
+  ok "Tier 2 deployed"
+
+  step "8. Cloud doctor"
+  CLOUD_BEARER=$(env_get "$ENV_FILE" MCP_BEARER_TOKEN)
+  SUPABASE_URL_T2=$(env_get "$ENV_FILE" SUPABASE_URL)
+  SUPABASE_URL="$SUPABASE_URL_T2" \
+  MCP_BEARER_TOKEN="$CLOUD_BEARER" \
+  PLANNEN_USER_EMAIL="$EMAIL" \
+  CLOUD_DATABASE_URL="$CLOUD_DB_URL" \
+    node scripts/cloud-doctor.mjs || warn "cloud-doctor reported issues — review above"
+
+  step "9. Next steps"
+  cat <<EOF
+
+  ${C_GREEN}✓${C_RESET} Plannen (Tier 2) is deployed for ${C_CYAN}$EMAIL${C_RESET}.
+
+  Cloud project: $PROJECT_REF
+  Cloud URL:     $SUPABASE_URL_T2
+
+  Next steps:
+    1. Reload the plannen plugin in Claude Code so it picks up the new
+       HTTP MCP endpoint. (In Claude Code: /plugin reload, or restart.)
+    2. Add the Google OAuth callback URL to your Google Cloud OAuth client:
+         $SUPABASE_URL_T2/functions/v1/google-oauth-callback
+    3. Web app: \`npm run dev\` now talks to your cloud project.
+    4. Rotate the MCP bearer any time with:
+         bash scripts/mcp-rotate-bearer.sh
+
+  Rollback to Tier 1: \`bash scripts/bootstrap.sh --tier 1\` will restore
+    .env.tier1.bak and plugin.json.tier1.bak. Your cloud project is left
+    untouched.
+
+EOF
+  exit 0
+fi
 
 # ── 4. Database + migrations + user row ───────────────────────────────────────
 
