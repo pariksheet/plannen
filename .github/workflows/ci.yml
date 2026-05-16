@@ -69,3 +69,14 @@ jobs:
       - name: Build MCP
         working-directory: mcp
         run: npm run build
+
+      # supabase/functions vitest covers the pure-logic handlers in
+      # _shared/handlers/ AND the Tier-1 HTTP MCP under supabase/functions/mcp/.
+      # No live Supabase needed — tests use mocked clients.
+      - name: Install supabase/functions dependencies
+        working-directory: supabase/functions
+        run: npm install
+
+      - name: Test supabase/functions (handlers + HTTP MCP)
+        working-directory: supabase/functions
+        run: npm test
