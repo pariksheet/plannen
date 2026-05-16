@@ -1,0 +1,40 @@
+# Vercel only needs the web app (src/, index.html, vite config, package.json,
+# tsconfig). Skip everything else so build context is small and we don't leak
+# local-only state (snapshots, backups, .env files).
+
+node_modules
+.git
+.github
+.codegraph
+.claude
+.superpowers
+.worktrees
+
+# Server / non-web subprojects (their own pipelines)
+mcp
+backend
+supabase
+
+# Local-only artifacts
+.plannen
+.env
+.env.*
+!.env.example
+.plannen-tier2-progress
+.tier2-uploaded.txt
+.env.tier1.bak
+plugin.json.tier1.bak
+
+# Tests + tooling not needed at build time
+tests
+playwright-report
+test-results
+coverage
+
+# Docs
+docs
+*.md
+!README.md
+
+# OS
+.DS_Store

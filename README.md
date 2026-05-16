@@ -128,7 +128,39 @@ node scripts/cloud-doctor.mjs        # ad-hoc health check
 bash scripts/bootstrap.sh --tier 1   # roll back to Tier 1 (cloud project left intact)
 ```
 
-The Tier 2 design is in [`docs/superpowers/specs/2026-05-16-tier-2-cloud-deploy-design.md`](docs/superpowers/specs/2026-05-16-tier-2-cloud-deploy-design.md). Hosted web app (Vercel) is **Phase B.2** — a separate spec; today the web app still runs locally.
+The Tier 2 design is in [`docs/superpowers/specs/2026-05-16-tier-2-cloud-deploy-design.md`](docs/superpowers/specs/2026-05-16-tier-2-cloud-deploy-design.md).
+
+### Tier 2 — Vercel hosting (Phase B.2)
+
+After Tier 2 is up and you can reach Plannen locally against cloud data, deploy the web app to Vercel for any-browser access.
+
+One-time:
+
+```bash
+npm i -g vercel
+vercel login
+vercel link          # interactive — pick your team/scope and project name
+```
+
+Then deploy any time:
+
+```bash
+bash scripts/vercel-deploy.sh
+```
+
+This pushes the `VITE_*` env vars from `.env` into the Vercel project (production target) and runs `vercel --prod`. Re-runs overwrite existing env values, so it's safe to use after each Tier 2 change. The script prints the deployed URL.
+
+**Post-deploy checklist** (one-time, in the Supabase dashboard):
+
+1. Go to `https://supabase.com/dashboard/project/<your-project-ref>/auth/url-configuration`.
+2. Set **Site URL** to your Vercel URL.
+3. Add the URL + `/**` to **Additional Redirect URLs** (e.g. `https://plannen.vercel.app/**`).
+
+Without step 1/2 the magic-link email still redirects to localhost.
+
+Custom domain: set it up in Vercel → Project Settings → Domains, then repeat the Supabase Auth steps with the custom URL.
+
+The Vercel hosting design is in [`docs/superpowers/specs/2026-05-16-tier-2-vercel-hosting-design.md`](docs/superpowers/specs/2026-05-16-tier-2-vercel-hosting-design.md).
 
 ### After bootstrap
 
