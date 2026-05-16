@@ -37,29 +37,36 @@ In order:
 5. **MCP build present** at `mcp/dist/index.js`.
    - Hard fail → `→ cd mcp && npm install && npm run build`.
 
-6. **Plugin installed in Claude Code**. Check `claude plugin list 2>/dev/null | grep -q plannen`.
+6. **MCP mode** — inspect `plugin/.claude-plugin/plugin.json` `mcpServers.plannen`:
+   - `{ "command": "node", ... }` → print `✓ MCP mode: stdio (Node, default)`.
+   - `{ "type": "http", ... }` → print `✓ MCP mode: http (Edge Function)`, then verify:
+     - `supabase/.env.local` contains `MCP_BEARER_TOKEN=` (warning if missing → `→ bash scripts/mcp-mode.sh http` to re-issue).
+     - `curl -s -o /dev/null -w "%{http_code}" "$URL"` returns `401` (server up, no bearer in probe) or `200` (with bearer). Hard fail if the URL is unreachable → `→ supabase functions serve mcp --env-file supabase/.env.local`.
+   - Neither shape → hard fail → `→ bash scripts/mcp-mode.sh stdio` (default mode).
+
+7. **Plugin installed in Claude Code**. Check `claude plugin list 2>/dev/null | grep -q plannen`.
    - Warning if absent → `→ claude plugin install ./plugin` (functional already; Claude Code just won't auto-load workflows).
 
-7. **Functions-serve running**. Check `.plannen/functions.pid` — if file exists and the PID is alive, pass.
+8. **Functions-serve running**. Check `.plannen/functions.pid` — if file exists and the PID is alive, pass.
    - Hard fail otherwise → `→ bash scripts/functions-start.sh`.
 
-8. **AI provider configured**. Query `user_settings` (via the auth user from check 4): is there a row with `is_default = true` and a non-empty `api_key`?
+9. **AI provider configured**. Query `user_settings` (via the auth user from check 4): is there a row with `is_default = true` and a non-empty `api_key`?
    - Warning if not → `→ web app → /settings`. AI features are disabled but Plannen still works.
 
-9. **whisper-cli availability**. Try `command -v whisper-cli`.
-   - Pass: present.
-   - Warning if missing → `→ brew install whisper-cpp` (mac) or build from https://github.com/ggerganov/whisper.cpp. Story flow will skip audio.
-   - Skipped (silent pass) if `PLANNEN_WHISPER_MODEL=disabled` in `.env`.
+10. **whisper-cli availability**. Try `command -v whisper-cli`.
+    - Pass: present.
+    - Warning if missing → `→ brew install whisper-cpp` (mac) or build from https://github.com/ggerganov/whisper.cpp. Story flow will skip audio.
+    - Skipped (silent pass) if `PLANNEN_WHISPER_MODEL=disabled` in `.env`.
 
-10. **whisper model file present** (only checked if check 9 passed).
+11. **whisper model file present** (only checked if check 10 passed).
     - Pass: file at `$PLANNEN_WHISPER_MODEL` (or `~/.plannen/whisper/ggml-base.en.bin` if unset) exists.
     - Warning otherwise → `→ download a model: curl -L -o ~/.plannen/whisper/ggml-base.en.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin`.
 
-11. **ffmpeg availability** (only checked if check 9 passed). Try `command -v ffmpeg`.
+12. **ffmpeg availability** (only checked if check 10 passed). Try `command -v ffmpeg`.
     - Pass: present. Browser voice notes (opus/webm) will transcribe correctly.
     - Warning if missing → `→ brew install ffmpeg`. Without it, whisper-cli silently fails on opus/m4a/webm audio (only mp3/wav/flac decode reliably).
 
-12. **Google OAuth keys**. `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env`.
+13. **Google OAuth keys**. `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env`.
     - Warning if either is empty → `→ /plannen-setup` (and configure the OAuth client per the README).
 
 ## Tail line (only when 2+ hard failures)
