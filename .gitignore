@@ -166,3 +166,6 @@ supabase/seed-photos.tar.gz
 
 # CodeGraph local index — built per-clone, never commit
 .codegraph/
+
+# Git worktrees for isolated implementation work
+.worktrees/
