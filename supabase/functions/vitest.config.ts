@@ -14,7 +14,7 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['_shared/handlers/**/*.test.ts'],
+    include: ['_shared/handlers/**/*.test.ts', 'mcp/**/*.test.ts'],
     testTimeout: 15000,
   },
   resolve: {

@@ -1,0 +1,9 @@
+{
+  "imports": {
+    "@modelcontextprotocol/sdk/": "npm:@modelcontextprotocol/sdk@^1/",
+    "pg": "npm:pg@8",
+    "zod": "npm:zod@3"
+  },
+  "lint": { "rules": { "tags": ["recommended"] } },
+  "fmt": { "options": { "useTabs": false, "indentWidth": 2, "singleQuote": true, "semiColons": false } }
+}
