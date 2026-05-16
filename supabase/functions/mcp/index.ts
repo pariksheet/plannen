@@ -1,6 +1,7 @@
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import { buildServer } from './server.ts'
 import type { ToolModule } from './types.ts'
+import { eventsModule } from './tools/events.ts'
 
 declare const Deno:
   | {
@@ -57,8 +58,8 @@ export async function handleRequest(
   return await transport.handleRequest(req)
 }
 
-// Module-level tool registry. Populated by future tasks (Task 4+).
-const TOOLS: ToolModule[] = []
+// Module-level tool registry.
+const TOOLS: ToolModule[] = [eventsModule]
 
 if (typeof Deno !== 'undefined') {
   Deno.serve((req) => handleRequest(req, { tools: TOOLS }))
