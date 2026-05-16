@@ -3,6 +3,7 @@ import { buildServer } from './server.ts'
 import type { ToolModule } from './types.ts'
 import { eventsModule } from './tools/events.ts'
 import { memoriesModule } from './tools/memories.ts'
+import { storiesModule } from './tools/stories.ts'
 
 declare const Deno:
   | {
@@ -60,7 +61,7 @@ export async function handleRequest(
 }
 
 // Module-level tool registry.
-const TOOLS: ToolModule[] = [eventsModule, memoriesModule]
+const TOOLS: ToolModule[] = [eventsModule, memoriesModule, storiesModule]
 
 if (typeof Deno !== 'undefined') {
   Deno.serve((req) => handleRequest(req, { tools: TOOLS }))
