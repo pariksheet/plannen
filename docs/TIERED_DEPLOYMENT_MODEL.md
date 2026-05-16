@@ -2,17 +2,16 @@
 
 Plannen runs in a small set of tiers. The ladder is shaped by four axes: **where the data lives**, **where compute lives**, **where the MCP server lives**, and **who operates the infrastructure**. Publishing / social-graph features are orthogonal — any tier can opt into them when they ship.
 
-| Tier | Postgres | Auth | Storage | Edge functions | MCP server | Operator |
-|---|---|---|---|---|---|---|
-| **Tier 0 — Bundled** *(default)* | `embedded-postgres` binary started by Node, listens on local port | `auth.uid()` stub from session GUC; no login UI | Local filesystem under `~/.plannen/photos/`, served by the Node backend | Local Node/Hono backend on `54323` | Local Node process, stdio transport | User (just Node 20+) |
-| **Tier 1 — Local Supabase** | Postgres in the Supabase Docker stack | Supabase Auth (GoTrue) magic-link | Supabase Storage with xattrs | Supabase Edge Functions (local Deno) | Local Node process, stdio transport | User (Docker + Supabase CLI) |
-| **Tier 2 — External Postgres** *(next — this brainstorm)* | Any Postgres URL (Neon, Supabase Cloud, self-hosted) | GUC stub, single user | Local filesystem (same as Tier 0) | Local Node/Hono backend (same as Tier 0) | Local Node process, stdio transport | User (DB hosting only) |
-| **Tier 3 — Self-Hosted Cloud** *(future)* | Supabase Cloud Postgres | Supabase Auth | Supabase Storage | Supabase Edge Functions (deployed via `supabase functions deploy`) | Deployed as Supabase Edge Function, HTTP transport; plugin connects over the network | User (own Supabase Cloud project) |
-| **Tier 4 — Plannen SaaS** *(out of scope here)* | Managed | Managed | Managed | Managed | Managed, exposed remote MCP | Plannen (commercial offering) |
+| Tier | Stack | Operator | Positioning |
+|---|---|---|---|
+| **Tier 0 — Bundled** *(default)* | Embedded pg + local Node/Hono backend on `54323` + local MCP (stdio) | User (just Node 20+) | Easy onboarding |
+| **Tier 1 — Local Supabase** | Local Supabase Docker (full stack locally — pg + Auth + Storage + Edge Functions + local MCP stdio) | User (Docker + Supabase CLI) | Dev / contributor |
+| **Tier 2 — Self-Hosted Cloud** *(this brainstorm)* | Supabase Cloud — DB + Auth + Storage + Edge Functions deployed + MCP deployed as Edge Function (HTTP transport). Plugin-only locally. | User (own Supabase Cloud project) | Serious cloud alternative |
+| **Tier 3 — Plannen SaaS** *(out of scope here)* | Same shape as Tier 2, managed by Plannen | Plannen | Future SaaS |
 
-**Cost ladder.** Tier 0 = free, no setup beyond Node. Tier 1 = free, requires Docker. Tier 2 = free on most providers' free tiers (Neon, Supabase Cloud); pay if you exceed. Tier 3 = pay Supabase (free tier available). Tier 4 = pay Plannen.
+**Cost ladder.** Tier 0 = free, no setup beyond Node. Tier 1 = free, requires Docker. Tier 2 = free on Supabase Cloud's free tier; pay if you exceed. Tier 3 = pay Plannen.
 
-**The MCP differentiator.** Tiers 0–2 run the MCP server locally as a stdio subprocess of Claude Code / Desktop. Tier 3 (and Tier 4) host the MCP server on the cloud and expose it over HTTP so any MCP-aware agent — Claude Code, Claude Desktop, the user's own — can reach it. Remote MCP exposure is the defining feature of cloud-hosted Plannen, not a sub-mode.
+**The MCP differentiator.** Tiers 0–1 run the MCP server locally as a stdio subprocess of Claude Code / Desktop. Tier 2 (and Tier 3) host the MCP server in the cloud as a Supabase Edge Function and expose it over HTTP, so any MCP-aware agent — Claude Code, Claude Desktop, the user's own — can reach it. Remote MCP exposure is the defining feature of cloud-hosted Plannen, not a sub-mode.
 
 **Default tier.** Tier 0 is the default for `bash scripts/bootstrap.sh` with no flag. Tier 1 stays available via `--tier 1`. The OSS-release framing is "runs with just Node" rather than "runs with Docker + Supabase."
 
@@ -26,6 +25,6 @@ Two abstractions, not one — because the web app cannot speak raw Postgres.
 
 ## What's in this repo
 
-Tier 0 ships as the default in v0.2.0; Tier 1 stays fully supported. Tier 2 is the next tier to ship (point `DATABASE_URL` at a hosted Postgres; everything else stays exactly as Tier 0). Tier 3 (Self-Hosted Cloud) is a follow-up spec building on top of Tier 2. Tier 4 (Plannen SaaS) is not part of the OSS plan.
+Tier 0 ships as the default in v0.2.0; Tier 1 stays fully supported. Tier 2 (Self-Hosted Cloud) is the next tier to ship — full Supabase Cloud install including the MCP server as a deployed Edge Function. Phase 1 of Tier 2 is Supabase-only; a future Phase 2 adds pluggable adapters so users can pick their DB (Supabase / Neon / any pg URL), Storage (Supabase Storage / S3-compatible / Google Drive), and Auth (Supabase / single-user stub) provider per axis. Tier 3 (Plannen SaaS) is not part of the OSS plan.
 
 Storage tiers are orthogonal to publishing / social features. The earlier doc's "publish opt-in / social layer" idea folds in as a future feature flag rather than its own tier.
