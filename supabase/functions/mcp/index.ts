@@ -1,7 +1,6 @@
-// Entry point for Plannen MCP HTTP server.
-// Validates bearer auth, then hands off to the MCP server (Task 3+ wires the
-// transport). Bearer is the shared MCP_BEARER_TOKEN env (single-user in Phase
-// A; per-user tokens land in Phase A.1).
+import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
+import { buildServer } from './server.ts'
+import type { ToolModule } from './types.ts'
 
 declare const Deno:
   | {
@@ -10,10 +9,6 @@ declare const Deno:
     }
   | undefined
 
-/**
- * Constant-time compare to avoid timing oracles on the bearer token.
- * Returns true if equal, false otherwise (including length mismatch).
- */
 function constantTimeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false
   let diff = 0
@@ -21,10 +16,6 @@ function constantTimeEqual(a: string, b: string): boolean {
   return diff === 0
 }
 
-/**
- * Returns null when the request's bearer matches MCP_BEARER_TOKEN.
- * Returns a 401 Response otherwise.
- */
 export function authenticate(req: Request): Response | null {
   const expected =
     (typeof Deno !== 'undefined' ? Deno.env.get('MCP_BEARER_TOKEN') : process.env.MCP_BEARER_TOKEN) ?? ''
@@ -46,14 +37,29 @@ export function authenticate(req: Request): Response | null {
   return null
 }
 
-if (typeof Deno !== 'undefined') {
-  Deno.serve(async (req: Request) => {
-    const authFailed = authenticate(req)
-    if (authFailed) return authFailed
-    // Task 3 wires the MCP transport here. Placeholder ack for now.
-    return new Response(
-      JSON.stringify({ status: 'authenticated', message: 'MCP transport not yet wired' }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } },
-    )
+/**
+ * Test-injectable wrapper. In production handleRequest is called with the
+ * module-loaded tool list; tests pass {tools: []} to verify the transport
+ * shape independently of the tool catalogue.
+ */
+export async function handleRequest(
+  req: Request,
+  opts: { tools: ToolModule[] } = { tools: [] },
+): Promise<Response> {
+  const authFailed = authenticate(req)
+  if (authFailed) return authFailed
+
+  const server = buildServer(opts.tools)
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    enableJsonResponse: true,
   })
+  await server.connect(transport)
+  return await transport.handleRequest(req)
+}
+
+// Module-level tool registry. Populated by future tasks (Task 4+).
+const TOOLS: ToolModule[] = []
+
+if (typeof Deno !== 'undefined') {
+  Deno.serve((req) => handleRequest(req, { tools: TOOLS }))
 }
