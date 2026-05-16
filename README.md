@@ -153,6 +153,17 @@ Or just re-run `bash scripts/bootstrap.sh [--tier 1]` — it's idempotent and wi
 
 ---
 
+## MCP server modes
+
+Plannen ships two MCP server implementations:
+
+- **stdio (default)** — `mcp/src/` Node process, spawned by Claude Code as a subprocess. Used in Tier 0 and Tier 1 by default.
+- **HTTP (opt-in on Tier 1)** — `supabase/functions/mcp/` Deno Edge Function, served by `supabase functions serve mcp` and reached over HTTPS with a bearer token. Used for dev / for Tier 2 once the cloud deploy spec lands.
+
+Switch between them with `bash scripts/mcp-mode.sh stdio` or `bash scripts/mcp-mode.sh http`. The HTTP mode generates and persists a bearer in `supabase/.env.local` on first use. After switching, reload the plannen plugin in Claude Code.
+
+The HTTP MCP does not include `transcribe_memory` (it requires a local Whisper binary not available in Deno). Use stdio if you need audio transcription.
+
 ## Slash commands (in Claude Code)
 
 After the plugin is installed:

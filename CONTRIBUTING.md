@@ -26,7 +26,20 @@ Once it's running:
 - Backend (Tier 0): `bash scripts/backend-start.sh` (idempotent)
 - Edge functions (Tier 1 only): `bash scripts/functions-start.sh` (background)
 - Umbrella: `bash scripts/start.sh` / `bash scripts/stop.sh` — tier-aware lifecycle for the whole stack.
-- Tests: `npm test` (web), `cd mcp && npm test` (MCP), `cd backend && npm test` (backend), `cd supabase/functions && npm test` (pure handlers).
+- Tests: `npm test` (web), `cd mcp && npm test` (MCP), `cd backend && npm test` (backend), `cd supabase/functions && npm test` (pure handlers + HTTP MCP).
+
+### Developing the HTTP MCP
+
+```bash
+bash scripts/local-start.sh                 # local Supabase up (Tier 1)
+bash scripts/mcp-mode.sh http               # switch plugin to HTTP MCP
+supabase functions serve mcp \
+  --env-file supabase/.env.local            # serve the function (foreground)
+```
+
+Reload the plannen plugin in Claude Code. Tool changes in `supabase/functions/mcp/` are picked up automatically by `supabase functions serve`. Switch back with `bash scripts/mcp-mode.sh stdio` when done.
+
+End-to-end smoke: `bash tests/smoke/tier1-http-mcp.sh` (requires `local-start.sh` running).
 
 ## Branching and PRs
 
