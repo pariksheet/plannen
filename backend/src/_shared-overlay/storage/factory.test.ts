@@ -49,4 +49,35 @@ describe('getStorage', () => {
     process.env.PLANNEN_STORAGE_BACKEND = 'supabase'
     expect(() => getStorage()).toThrow(/SUPABASE_URL/)
   })
+
+  it('returns an s3 adapter when PLANNEN_STORAGE_BACKEND=s3 and all keys present', () => {
+    process.env.PLANNEN_STORAGE_BACKEND = 's3'
+    process.env.S3_ENDPOINT = 'https://acc.r2.cloudflarestorage.com'
+    process.env.S3_BUCKET = 'plannen-photos'
+    process.env.S3_ACCESS_KEY_ID = 'AK'
+    process.env.S3_SECRET_ACCESS_KEY = 'SK'
+    try {
+      expect(getStorage()).toBeDefined()
+    } finally {
+      delete process.env.S3_ENDPOINT
+      delete process.env.S3_BUCKET
+      delete process.env.S3_ACCESS_KEY_ID
+      delete process.env.S3_SECRET_ACCESS_KEY
+    }
+  })
+
+  it('refuses s3 when a required key is missing', () => {
+    process.env.PLANNEN_STORAGE_BACKEND = 's3'
+    process.env.S3_ENDPOINT = 'https://acc.r2.cloudflarestorage.com'
+    // intentionally omit S3_BUCKET
+    process.env.S3_ACCESS_KEY_ID = 'AK'
+    process.env.S3_SECRET_ACCESS_KEY = 'SK'
+    try {
+      expect(() => getStorage()).toThrow(/S3_BUCKET/)
+    } finally {
+      delete process.env.S3_ENDPOINT
+      delete process.env.S3_ACCESS_KEY_ID
+      delete process.env.S3_SECRET_ACCESS_KEY
+    }
+  })
 })

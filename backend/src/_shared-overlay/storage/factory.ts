@@ -8,10 +8,40 @@
 import type { StorageAdapter } from './adapter.js'
 import { createLocalFsAdapter } from './localFs.js'
 import { createSupabaseAdapter } from './supabase.js'
+import { createS3Adapter, type S3AdapterOptions } from './s3.js'
 import { resolve, join } from 'node:path'
 import { homedir } from 'node:os'
 
 let cached: StorageAdapter | null = null
+
+function readS3Env(): S3AdapterOptions {
+  const endpoint = process.env.S3_ENDPOINT
+  const region = process.env.S3_REGION ?? 'auto'
+  const bucket = process.env.S3_BUCKET
+  const accessKeyId = process.env.S3_ACCESS_KEY_ID
+  const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY
+  const publicBaseUrl = process.env.S3_PUBLIC_BASE_URL ?? ''
+  const forcePathStyle = process.env.S3_FORCE_PATH_STYLE === 'true'
+  const required = {
+    S3_ENDPOINT: endpoint,
+    S3_BUCKET: bucket,
+    S3_ACCESS_KEY_ID: accessKeyId,
+    S3_SECRET_ACCESS_KEY: secretAccessKey,
+  }
+  const missingKeys = Object.entries(required).filter(([, v]) => !v).map(([k]) => k)
+  if (missingKeys.length > 0) {
+    throw new Error(`storage(s3): missing env: ${missingKeys.join(', ')}`)
+  }
+  return {
+    endpoint: endpoint!,
+    region,
+    bucket: bucket!,
+    accessKeyId: accessKeyId!,
+    secretAccessKey: secretAccessKey!,
+    publicBaseUrl,
+    forcePathStyle,
+  }
+}
 
 export function getStorage(): StorageAdapter {
   if (cached) return cached
@@ -41,8 +71,10 @@ export function getStorage(): StorageAdapter {
       cached = createSupabaseAdapter({ supabaseUrl, serviceRoleKey })
       return cached
     }
-    case 's3':
-      throw new Error(`storage: backend "${choice}" not yet wired (factory stub)`)
+    case 's3': {
+      cached = createS3Adapter(readS3Env())
+      return cached
+    }
     default:
       throw new Error(`storage: unknown storage backend "${choice}"`)
   }
