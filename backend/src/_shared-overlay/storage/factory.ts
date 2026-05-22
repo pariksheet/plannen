@@ -6,6 +6,9 @@
 // the surface only so the import path is stable.
 
 import type { StorageAdapter } from './adapter.js'
+import { createLocalFsAdapter } from './localFs.js'
+import { resolve, join } from 'node:path'
+import { homedir } from 'node:os'
 
 let cached: StorageAdapter | null = null
 
@@ -19,7 +22,13 @@ export function getStorage(): StorageAdapter {
     )
   }
   switch (choice) {
-    case 'local-fs':
+    case 'local-fs': {
+      const photosRoot = resolve(process.env.PLANNEN_PHOTOS_ROOT ?? join(homedir(), '.plannen', 'photos'))
+      const originBaseUrl = process.env.PLANNEN_BACKEND_ORIGIN
+        ?? `http://127.0.0.1:${process.env.PLANNEN_BACKEND_PORT ?? 54323}`
+      cached = createLocalFsAdapter({ photosRoot, originBaseUrl })
+      return cached
+    }
     case 'supabase':
     case 's3':
       throw new Error(`storage: backend "${choice}" not yet wired (factory stub)`)

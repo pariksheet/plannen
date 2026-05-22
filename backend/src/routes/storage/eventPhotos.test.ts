@@ -106,4 +106,15 @@ describe('storage event-photos', () => {
     )
     expect(res.status).toBe(404)
   })
+
+  it('PUT routes through the localFs adapter (canonical key, no event-photos/ prefix in URL)', async () => {
+    // Keys with a leading "event-photos/" prefix would double-prefix on disk —
+    // the adapter rejects them. Verify the route surface still strips correctly.
+    const put = await app.request(
+      `/storage/v1/object/event-photos/${testUserId}/sub/dir/x.jpg`,
+      { method: 'PUT', headers: { 'Content-Type': 'image/jpeg' }, body: new Uint8Array([0]) },
+    )
+    expect(put.status).toBe(200)
+    expect(existsSync(join(photosRoot, 'event-photos', testUserId, 'sub', 'dir', 'x.jpg'))).toBe(true)
+  })
 })
