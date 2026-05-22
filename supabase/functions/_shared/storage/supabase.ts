@@ -31,9 +31,17 @@ export function createSupabaseAdapter(opts: SupabaseAdapterOptions): StorageAdap
   return {
     async upload(key, body, options: UploadOptions) {
       assertCanonicalKey(key)
-      const bytes = body instanceof Uint8Array
-        ? body
-        : new Uint8Array(await new Response(body).arrayBuffer())
+      // Go through ArrayBuffer + Blob so the body is a `BodyInit` under both
+      // Deno's lib and the Node-side TS that prepare-shared re-checks against.
+      // Routing through Response.arrayBuffer() guarantees a real ArrayBuffer
+      // (not ArrayBufferLike / potentially SharedArrayBuffer), which is what
+      // Blob's BlobPart contract demands. It also handles subarray views
+      // correctly — `bytes.buffer` would leak unrelated bytes for a narrow view.
+      // `body` is `Uint8Array | ReadableStream<Uint8Array>` per the adapter
+      // contract — both are valid BodyInit at runtime, but TS's stricter
+      // typings see the Uint8Array's buffer as `ArrayBufferLike` rather than
+      // the `ArrayBuffer` that the Response constructor demands.
+      const ab = await new Response(body as BodyInit).arrayBuffer()
       const res = await f(objectUrl(key), {
         method: 'POST',
         headers: {
@@ -42,7 +50,7 @@ export function createSupabaseAdapter(opts: SupabaseAdapterOptions): StorageAdap
           'cache-control': options.cacheControl ?? 'private, max-age=3600',
           'x-upsert': 'true',
         },
-        body: bytes,
+        body: new Blob([ab], { type: options.contentType }),
       })
       if (!res.ok) {
         const detail = await res.text().catch(() => '')
