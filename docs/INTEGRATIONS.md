@@ -47,3 +47,41 @@ The earlier mental model treated Google Drive / Calendar as tiers ("Tier 2 = syn
 - **Integration**: which external services Plannen also mirrors data to.
 
 Confusing them led to questions like "if I want my photos backed up to Drive, do I have to use Supabase?" — the answer is **no**, those are separate decisions. The current model keeps them independent.
+
+## S3-compatible storage
+
+Photos can live in any S3-compatible bucket (Cloudflare R2, Tigris, Backblaze B2, MinIO, …) via the `PLANNEN_STORAGE_BACKEND=s3` setting. R2 in particular has zero egress, which is a big cost saver for a photo-heavy app.
+
+### Backend values
+
+| Value | Tier | Notes |
+|---|---|---|
+| `local-fs` | Tier 0 (locked) | Writes under `~/.plannen/photos` |
+| `supabase` | Tier 1/2 default | Uses Supabase Storage's `event-photos` bucket |
+| `s3` | Tier 1/2 opt-in | Any S3-compatible bucket |
+
+Tier 0 is locked to `local-fs` — creating a Tier 0 profile with `--storage=s3` is refused.
+
+### Enabling s3 on a new profile
+
+```bash
+npx plannen profile create r2-prod --mode=cloud_sb --storage=s3
+npx plannen cloud provision --profile r2-prod
+# answer "S3-compatible" when prompted, then supply the six S3_* keys
+```
+
+### Migrating an existing supabase deployment
+
+```bash
+# 1. copy bytes to the new bucket
+npx plannen storage migrate --from supabase --to s3 --profile <name>
+
+# 2. flip the env var (manual)
+#    edit ~/.plannen/profiles/<name>/env, set PLANNEN_STORAGE_BACKEND=s3
+npx plannen deploy --profile <name>
+
+# 3. verify post-cutover
+npx plannen storage migrate --from supabase --to s3 --profile <name> --verify-only
+```
+
+The old Supabase bucket is **not** deleted by the migrate command — keep it for at least one rollback window.
