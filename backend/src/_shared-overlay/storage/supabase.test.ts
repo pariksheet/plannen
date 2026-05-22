@@ -41,13 +41,35 @@ describe('supabase adapter', () => {
   it('signedUrl POSTs to /storage/v1/object/sign and returns absolute URL', async () => {
     const fetchFn = makeFetch([{
       status: 200,
-      _body: { signedURL: '/storage/v1/object/sign/event-photos/u/e/x.jpg?token=t' },
+      _body: { signedURL: '/object/sign/event-photos/u/e/x.jpg?token=t' },
     }])
     const a = createSupabaseAdapter({ ...baseOpts, fetchImpl: fetchFn })
     const url = await a.signedUrl('u/e/x.jpg', { ttlSeconds: 900 })
     expect(fetchFn.calls[0].url).toBe('https://abc.supabase.co/storage/v1/object/sign/event-photos/u/e/x.jpg')
     expect(JSON.parse(String(fetchFn.calls[0].body))).toEqual({ expiresIn: 900 })
     expect(url).toBe('https://abc.supabase.co/storage/v1/object/sign/event-photos/u/e/x.jpg?token=t')
+  })
+
+  it('signedUrl appends ?download= when opts.download is true', async () => {
+    const fetchFn = makeFetch([{
+      status: 200,
+      _body: { signedURL: '/object/sign/event-photos/u/e/x.jpg?token=t' },
+    }])
+    const a = createSupabaseAdapter({ ...baseOpts, fetchImpl: fetchFn })
+    const url = await a.signedUrl('u/e/x.jpg', { ttlSeconds: 900, download: true })
+    // The download flag must be in the URL, not the POST body:
+    expect(JSON.parse(String(fetchFn.calls[0].body))).toEqual({ expiresIn: 900 })
+    expect(url).toBe('https://abc.supabase.co/storage/v1/object/sign/event-photos/u/e/x.jpg?token=t&download=')
+  })
+
+  it('head reads content_type (snake_case) from the info endpoint', async () => {
+    const fetchFn = makeFetch([{
+      status: 200,
+      _body: { size: 12345, content_type: 'image/jpeg', etag: '"abc"' },
+    }])
+    const a = createSupabaseAdapter({ ...baseOpts, fetchImpl: fetchFn })
+    expect(await a.head('u/e/x.jpg')).toEqual({ size: 12345, contentType: 'image/jpeg', etag: '"abc"' })
+    expect(fetchFn.calls[0].url).toBe('https://abc.supabase.co/storage/v1/object/info/event-photos/u/e/x.jpg')
   })
 
   it('delete returns false when supabase reports the object missing', async () => {

@@ -21,11 +21,12 @@ export interface SupabaseAdapterOptions {
 
 export function createSupabaseAdapter(opts: SupabaseAdapterOptions): StorageAdapter {
   const base = opts.supabaseUrl.replace(/\/+$/, '')
+  const storageBase = `${base}/storage/v1`
   const f = opts.fetchImpl ?? fetch
   const auth = { authorization: `Bearer ${opts.serviceRoleKey}` }
 
   function objectUrl(key: string): string {
-    return `${base}/storage/v1/object/${BUCKET}/${key}`
+    return `${storageBase}/object/${BUCKET}/${key}`
   }
 
   return {
@@ -63,13 +64,10 @@ export function createSupabaseAdapter(opts: SupabaseAdapterOptions): StorageAdap
 
     async signedUrl(key, urlOpts: SignedUrlOptions) {
       assertCanonicalKey(key)
-      const res = await f(`${base}/storage/v1/object/sign/${BUCKET}/${key}`, {
+      const res = await f(`${storageBase}/object/sign/${BUCKET}/${key}`, {
         method: 'POST',
         headers: { ...auth, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          expiresIn: urlOpts.ttlSeconds,
-          ...(urlOpts.download ? { download: true } : {}),
-        }),
+        body: JSON.stringify({ expiresIn: urlOpts.ttlSeconds }),
       })
       if (!res.ok) {
         const detail = await res.text().catch(() => '')
@@ -77,13 +75,17 @@ export function createSupabaseAdapter(opts: SupabaseAdapterOptions): StorageAdap
       }
       const body = await res.json() as { signedURL?: string }
       if (!body.signedURL) throw new Error('storage(supabase): sign returned no signedURL')
-      return `${base}${body.signedURL}`
+      let url = `${storageBase}${body.signedURL}`
+      if (urlOpts.download) {
+        url += url.includes('?') ? '&download=' : '?download='
+      }
+      return url
     },
 
     async head(key): Promise<HeadResult | null> {
       assertCanonicalKey(key)
       // Supabase Storage doesn't expose a true HEAD; use the info endpoint.
-      const res = await f(`${base}/storage/v1/object/info/${BUCKET}/${key}`, {
+      const res = await f(`${storageBase}/object/info/${BUCKET}/${key}`, {
         method: 'GET',
         headers: auth,
       })
@@ -92,10 +94,16 @@ export function createSupabaseAdapter(opts: SupabaseAdapterOptions): StorageAdap
         const detail = await res.text().catch(() => '')
         throw new Error(`storage(supabase): info failed ${res.status} ${detail}`)
       }
-      const body = await res.json() as { size?: number; contentType?: string; mimetype?: string; etag?: string }
+      const body = await res.json() as {
+        size?: number
+        content_type?: string
+        contentType?: string
+        mimetype?: string
+        etag?: string
+      }
       return {
         size: body.size ?? 0,
-        contentType: body.contentType ?? body.mimetype ?? 'application/octet-stream',
+        contentType: body.content_type ?? body.contentType ?? body.mimetype ?? 'application/octet-stream',
         etag: body.etag,
       }
     },
