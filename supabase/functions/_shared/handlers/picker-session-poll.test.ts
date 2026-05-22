@@ -159,8 +159,8 @@ describe('picker-session-poll handler', () => {
     // storage_key (index 5) and media_url (index 4) are both populated
     const insertParams = inserts[0] as unknown[]
     expect(typeof insertParams[5]).toBe('string')
-    expect(insertParams[5]).toMatch(/^e1\/u1\/g1\.jpg$/)
+    expect(insertParams[5]).toMatch(/^u1\/e1\/g1\.jpg$/)
     expect(typeof insertParams[4]).toBe('string')
-    expect(insertParams[4]).toContain('e1/u1/g1.jpg')
+    expect(insertParams[4]).toContain('u1/e1/g1.jpg')
   })
 })

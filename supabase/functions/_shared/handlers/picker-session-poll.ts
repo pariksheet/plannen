@@ -205,7 +205,7 @@ export async function handle(req: Request, ctx: HandlerCtx): Promise<Response> {
     const contentType = bytesRes.headers.get('content-type') ?? ''
     const blob = await bytesRes.blob()
     const ext = pickExtension(item.mediaFile?.filename, contentType, item.type ?? '')
-    const path = `${eventId}/${ctx.userId}/${item.id}.${ext}`
+    const path = `${ctx.userId}/${eventId}/${item.id}.${ext}`
 
     // Adapter-routed upload: bytes go to whichever backend the profile names.
     const storageKey = path

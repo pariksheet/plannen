@@ -171,14 +171,14 @@ describe('picker-session-poll handler (Node/local-fs integration)', () => {
     // storage_key is the 6th param (index 5) in the INSERT — bare canonical key.
     const insertParams = inserts[0] as unknown[]
     expect(typeof insertParams[5]).toBe('string')
-    expect(insertParams[5]).toMatch(/^e1\/u1\/g1\.jpg$/)
+    expect(insertParams[5]).toMatch(/^u1\/e1\/g1\.jpg$/)
 
     // media_url is the 5th param (index 4) — a signed URL from the adapter.
     expect(typeof insertParams[4]).toBe('string')
-    expect(insertParams[4]).toContain('e1/u1/g1.jpg')
+    expect(insertParams[4]).toContain('u1/e1/g1.jpg')
 
     // The file should exist on disk under photosRoot/event-photos/<key>.
-    const storedPath = join(photosRoot, 'event-photos', 'e1', 'u1', 'g1.jpg')
+    const storedPath = join(photosRoot, 'event-photos', 'u1', 'e1', 'g1.jpg')
     expect(existsSync(storedPath)).toBe(true)
   })
 })
