@@ -67,7 +67,7 @@ export const storageClient = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ key }),
     })
-    if (!res.ok && res.status !== 204) {
+    if (!res.ok) {
       const detail = await res.text().catch(() => '')
       throw new Error(`storageClient.delete: ${res.status} ${detail}`)
     }
