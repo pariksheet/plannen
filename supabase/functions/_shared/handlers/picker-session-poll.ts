@@ -1,11 +1,9 @@
 // Polls a Google Photos Picker session, downloads all selected media from
-// Google, stores bytes via the local storage REST surface, and inserts an
-// event_memories row per item. Tracks attached + skipped sets so the UI
-// can show partial-success feedback.
-//
-// Storage write target: `${STORAGE_PUBLIC_URL_BASE}/storage/v1/object/...`.
-// On Tier 1 this is the Supabase URL; on Tier 0 it's the backend's own
-// /storage/v1/object route (which mirrors Supabase's REST shape).
+// Google, writes bytes via the configured storage adapter (local-fs /
+// supabase / s3 — picked at boot by PLANNEN_STORAGE_BACKEND), and inserts
+// an event_memories row per item with both `storage_key` (canonical,
+// backend-agnostic) and `media_url` (a 1h signed URL for immediate UI use).
+// Tracks attached + skipped sets so the UI can show partial-success feedback.
 
 import { refreshGoogleAccessToken } from '../googleOAuth.ts'
 import { getStorage } from '../storage/factory.ts'
