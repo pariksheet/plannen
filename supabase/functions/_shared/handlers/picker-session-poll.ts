@@ -8,6 +8,7 @@
 // /storage/v1/object route (which mirrors Supabase's REST shape).
 
 import { refreshGoogleAccessToken } from '../googleOAuth.ts'
+import { getStorage } from '../storage/factory.ts'
 import type { HandlerCtx } from './types.ts'
 
 function getEnv(name: string): string | undefined {
@@ -84,8 +85,7 @@ export async function handle(req: Request, ctx: HandlerCtx): Promise<Response> {
 
   const GOOGLE_CLIENT_ID = getEnv('GOOGLE_CLIENT_ID')
   const GOOGLE_CLIENT_SECRET = getEnv('GOOGLE_CLIENT_SECRET')
-  const STORAGE_PUBLIC_URL_BASE = getEnv('STORAGE_PUBLIC_URL_BASE') ?? getEnv('SUPABASE_URL')
-  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !STORAGE_PUBLIC_URL_BASE) {
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
     return jsonResponse({ error: 'Server config error' }, 500)
   }
 
@@ -209,25 +209,26 @@ export async function handle(req: Request, ctx: HandlerCtx): Promise<Response> {
     const ext = pickExtension(item.mediaFile?.filename, contentType, item.type ?? '')
     const path = `${eventId}/${ctx.userId}/${item.id}.${ext}`
 
-    const storagePut = await fetch(
-      `${STORAGE_PUBLIC_URL_BASE}/storage/v1/object/event-photos/${path}`,
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': contentType || 'application/octet-stream' },
-        body: blob,
-      },
-    )
-    if (!storagePut.ok) {
-      const detail = await storagePut.text().catch(() => '')
-      skipped.push({ external_id: item.id, reason: `upload failed: ${detail || storagePut.status}` })
+    // Adapter-routed upload: bytes go to whichever backend the profile names.
+    const storageKey = path
+    try {
+      const bytes = new Uint8Array(await blob.arrayBuffer())
+      await getStorage().upload(storageKey, bytes, {
+        contentType: contentType || 'application/octet-stream',
+      })
+    } catch (e) {
+      skipped.push({ external_id: item.id, reason: `upload failed: ${(e as Error).message}` })
       continue
     }
-
-    const publicUrl = `${STORAGE_PUBLIC_URL_BASE}/storage/v1/object/public/event-photos/${path}`
+    // Long-lived URL: signed for 1 hour. The frontend re-fetches via
+    // /api/photos/signed-url for older memories — this initial URL is just
+    // for the immediate UI response.
+    const publicUrl = await getStorage().signedUrl(storageKey, { ttlSeconds: 3600 })
 
     const insertResult = await ctx.db.query(
-      `INSERT INTO plannen.event_memories (event_id, user_id, source, external_id, media_url, media_type, taken_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO plannen.event_memories
+         (event_id, user_id, source, external_id, media_url, storage_key, media_type, taken_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING id`,
       [
         eventId,
@@ -235,6 +236,7 @@ export async function handle(req: Request, ctx: HandlerCtx): Promise<Response> {
         'google_photos',
         item.id,
         publicUrl,
+        storageKey,
         pickMediaType(contentType, item.mediaFile?.filename),
         item.createTime ?? null,
       ],
