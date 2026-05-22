@@ -146,7 +146,7 @@ describe('progress helpers', () => {
     expect(pendingSteps(['a', 'b', 'c'], new Set(['b']))).toEqual(['a', 'c']);
   });
 
-  it('STEPS includes all 11 stages in order', () => {
+  it('STEPS includes all 12 stages in order', () => {
     expect(STEPS).toEqual([
       'preflight',
       'prompt-supabase',
@@ -155,6 +155,7 @@ describe('progress helpers', () => {
       'deploy-functions',
       'prompt-vercel',
       'link-vercel',
+      'configure-storage',
       'push-env-vercel',
       'first-deploy',
       'wire-auth',
