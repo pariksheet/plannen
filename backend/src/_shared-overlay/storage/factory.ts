@@ -7,6 +7,7 @@
 
 import type { StorageAdapter } from './adapter.js'
 import { createLocalFsAdapter } from './localFs.js'
+import { createSupabaseAdapter } from './supabase.js'
 import { resolve, join } from 'node:path'
 import { homedir } from 'node:os'
 
@@ -29,7 +30,17 @@ export function getStorage(): StorageAdapter {
       cached = createLocalFsAdapter({ photosRoot, originBaseUrl })
       return cached
     }
-    case 'supabase':
+    case 'supabase': {
+      const supabaseUrl = process.env.SUPABASE_URL
+      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+      if (!supabaseUrl || !serviceRoleKey) {
+        throw new Error(
+          'storage(supabase): SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required',
+        )
+      }
+      cached = createSupabaseAdapter({ supabaseUrl, serviceRoleKey })
+      return cached
+    }
     case 's3':
       throw new Error(`storage: backend "${choice}" not yet wired (factory stub)`)
     default:

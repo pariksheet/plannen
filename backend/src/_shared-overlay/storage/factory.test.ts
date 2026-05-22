@@ -32,4 +32,21 @@ describe('getStorage', () => {
       delete process.env.PLANNEN_PHOTOS_ROOT
     }
   })
+
+  it('returns a supabase adapter when PLANNEN_STORAGE_BACKEND=supabase', () => {
+    process.env.PLANNEN_STORAGE_BACKEND = 'supabase'
+    process.env.SUPABASE_URL = 'https://abc.supabase.co'
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'svc-key'
+    try {
+      expect(getStorage()).toBeDefined()
+    } finally {
+      delete process.env.SUPABASE_URL
+      delete process.env.SUPABASE_SERVICE_ROLE_KEY
+    }
+  })
+
+  it('refuses supabase when credentials are missing', () => {
+    process.env.PLANNEN_STORAGE_BACKEND = 'supabase'
+    expect(() => getStorage()).toThrow(/SUPABASE_URL/)
+  })
 })
