@@ -26,6 +26,7 @@ import { briefings } from './routes/api/briefings.js'
 import { mailboxIgnoreRules } from './routes/api/mailbox-ignore-rules.js'
 import { eventProvenance } from './routes/api/event-provenance.js'
 import { push } from './routes/api/push.js'
+import { photos } from './routes/api/photos.js'
 import { eventPhotos } from './routes/storage/eventPhotos.js'
 import { agentTest } from './routes/functions/agentTest.js'
 import { agentDiscover } from './routes/functions/agentDiscover.js'
@@ -98,6 +99,7 @@ app.route('/api/briefings', briefings)
 app.route('/api/mailbox-ignore-rules', mailboxIgnoreRules)
 app.route('/api/event-provenance', eventProvenance)
 app.route('/api/push', push)
+app.route('/api/photos', photos)
 app.route('/storage/v1/object', eventPhotos)
 
 // /functions/v1/* — pure handlers extracted from `supabase/functions/<name>`.

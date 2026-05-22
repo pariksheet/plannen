@@ -25,6 +25,7 @@ import { briefings } from './routes/api/briefings.js'
 import { mailboxIgnoreRules } from './routes/api/mailbox-ignore-rules.js'
 import { eventProvenance } from './routes/api/event-provenance.js'
 import { push } from './routes/api/push.js'
+import { photos } from './routes/api/photos.js'
 import { eventPhotos } from './routes/storage/eventPhotos.js'
 import { agentTest } from './routes/functions/agentTest.js'
 import { agentDiscover } from './routes/functions/agentDiscover.js'
@@ -69,6 +70,7 @@ export function buildApp(user: { userId: string; userEmail: string }) {
   app.route('/api/mailbox-ignore-rules', mailboxIgnoreRules)
   app.route('/api/event-provenance', eventProvenance)
   app.route('/api/push', push)
+  app.route('/api/photos', photos)
   app.route('/storage/v1/object', eventPhotos)
   app.route('/functions/v1/agent-test', agentTest)
   app.route('/functions/v1/agent-discover', agentDiscover)
