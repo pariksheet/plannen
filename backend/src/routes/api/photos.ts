@@ -43,7 +43,7 @@ async function assertEventOwned(userId: string, eventId: string): Promise<void> 
       `SELECT 1 FROM plannen.events WHERE id = $1 AND created_by = $2`,
       [eventId, userId],
     )
-    if (r.rowCount === 0) throw new HttpError(403, 'FORBIDDEN', 'event not owned by caller')
+    if (r.rows.length === 0) throw new HttpError(403, 'FORBIDDEN', 'event not owned by caller')
   })
 }
 
@@ -56,7 +56,7 @@ async function assertKeyOwned(userId: string, key: string): Promise<void> {
       `SELECT 1 FROM plannen.event_memories WHERE storage_key = $1 AND user_id = $2 LIMIT 1`,
       [key, userId],
     )
-    if (r.rowCount === 0) throw new HttpError(403, 'FORBIDDEN', 'key not registered to caller')
+    if (r.rows.length === 0) throw new HttpError(403, 'FORBIDDEN', 'key not registered to caller')
   })
 }
 
