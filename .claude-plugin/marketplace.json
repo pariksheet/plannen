@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "plannen",
+  "description": "Plannen Claude Code plugin marketplace.",
+  "owner": {
+    "name": "Pari",
+    "url": "https://github.com/pariksheet/plannen"
+  },
+  "plugins": [
+    {
+      "name": "plannen",
+      "description": "Family event planning, watches, stories, and photo organisation for the Plannen app.",
+      "source": "./plugin",
+      "homepage": "https://github.com/pariksheet/plannen",
+      "license": "AGPL-3.0-only"
+    }
+  ]
+}

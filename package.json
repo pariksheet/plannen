@@ -1,0 +1,74 @@
+{
+  "name": "plannen",
+  "private": true,
+  "version": "0.8.4",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "bin": {
+    "plannen": "./bin/plannen.mjs"
+  },
+  "author": {
+    "name": "Pari",
+    "url": "https://github.com/pariksheet"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pariksheet/plannen.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pariksheet/plannen/issues"
+  },
+  "homepage": "https://github.com/pariksheet/plannen#readme",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b tsconfig.build.json && vite build",
+    "plannen": "node ./bin/plannen.mjs",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:cli": "vitest --config cli/vitest.config.mjs run --passWithNoTests",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "citty": "^0.2.2",
+    "date-fns": "^4.1.0",
+    "heic-to": "^1.5.2",
+    "lucide-react": "^0.460.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^6.28.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.60.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@typescript-eslint/eslint-plugin": "^8.59.4",
+    "@typescript-eslint/parser": "^8.59.4",
+    "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/coverage-v8": "^4.1.5",
+    "autoprefixer": "^10.4.20",
+    "dotenv": "^17.4.2",
+    "embedded-postgres": "^18.3.0-beta.17",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.6.0",
+    "jsdom": "^29.1.1",
+    "pg": "^8.20.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.15",
+    "typescript": "~5.6.2",
+    "vite": "^6.0.1",
+    "vite-plugin-pwa": "^1.3.0",
+    "vitest": "^4.1.5",
+    "web-push": "^3.6.7",
+    "workbox-window": "^7.4.1"
+  }
+}

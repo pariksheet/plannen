@@ -1,0 +1,33 @@
+{
+  "name": "@plannen/backend",
+  "version": "0.3.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "prepare-shared": "node ./scripts/prepare-shared.mjs",
+    "build": "node ./scripts/build.mjs",
+    "start": "node dist/index.js",
+    "dev": "npm run prepare-shared && tsx src/index.ts",
+    "test": "npm run prepare-shared && vitest run",
+    "test:watch": "npm run prepare-shared && vitest"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^1.0.0",
+    "@hono/node-server": "^1.13.0",
+    "ai": "^4.0.0",
+    "hono": "^4.6.0",
+    "jose": "^5.9.0",
+    "pg": "^8.13.0",
+    "web-push": "^3.6.7",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/pg": "^8.11.0",
+    "@types/web-push": "^3.6.4",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
+  }
+}

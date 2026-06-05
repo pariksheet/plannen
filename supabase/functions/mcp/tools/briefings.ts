@@ -1,0 +1,205 @@
+import type { ToolDefinition, ToolHandler, ToolModule } from '../types.ts'
+import { isPracticeDueOn, remainingThisWeek, weekBoundaryStart } from '../../_shared/practices.ts'
+
+// ── Tool definitions (verbatim from mcp/src/index.ts:2422-2455) ───────────────
+
+const definitions: ToolDefinition[] = [
+  {
+    name: 'get_briefing_context',
+    description: 'Composite snapshot for composing the daily briefing — events today + tomorrow, recent past events, your circle, practices due today (with weekly remaining counts), and locations. One round-trip. Use this before composing a /plannen-today briefing.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'ISO date; defaults to today.' },
+      },
+    },
+  },
+  {
+    name: 'save_daily_briefing',
+    description: 'Persist the composed daily briefing. Upserts on (user_id, briefing_date) — a second save on the same date overwrites. Content is markdown.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        briefing_date: { type: 'string' },
+        content_md: { type: 'string' },
+        summary: { type: 'string' },
+        source: { type: 'string', enum: ['claude_code', 'claude_desktop', 'web', 'cron'] },
+      },
+      required: ['briefing_date', 'content_md', 'source'],
+    },
+  },
+  {
+    name: 'get_daily_briefing',
+    description: 'Fetch the persisted briefing for a date (default today). Returns null if none exists.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'ISO date; defaults to today.' },
+      },
+    },
+  },
+]
+
+// ── Handlers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Composite read for the daily briefing. `args.date` is a UTC calendar date
+ * (`YYYY-MM-DD`); pass `new Date().toISOString().slice(0, 10)` from the
+ * caller. A locale-derived date string may resolve to the wrong day for users
+ * far from UTC.
+ */
+const getBriefingContext: ToolHandler = async (args, ctx) => {
+  const id = ctx.userId
+  const typedArgs = args as { date?: string }
+  const today = typedArgs.date ?? new Date().toISOString().slice(0, 10)
+  const tomorrow = new Date(`${today}T00:00:00Z`)
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1)
+  const tomorrowStr = tomorrow.toISOString().slice(0, 10)
+  const sevenDaysAgo = new Date(`${today}T00:00:00Z`)
+  sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 7)
+  const sevenDaysAgoStr = sevenDaysAgo.toISOString().slice(0, 10)
+  const wkStart = weekBoundaryStart(today)
+
+  const [userRow, circleRow, primaryCircleUsersRow, eventsTodayRow, eventsTomorrowRow, recentPastRow, practicesRow, completionsRow, locationsRow] =
+    await Promise.all([
+      ctx.client.query(
+        `SELECT u.id, u.full_name, u.preferred_language, up.timezone, up.primary_circle_group_ids
+         FROM plannen.users u
+         LEFT JOIN plannen.user_profiles up ON up.user_id = u.id
+         WHERE u.id = $1`,
+        [id],
+      ),
+      ctx.client.query(
+        `SELECT id, name, relation, dob, gender, goals, interests
+         FROM plannen.family_members WHERE user_id = $1 ORDER BY created_at ASC`,
+        [id],
+      ),
+      ctx.client.query(
+        `SELECT DISTINCT u.id, u.full_name, u.email
+           FROM plannen.user_profiles up
+           JOIN plannen.friend_group_members fgm
+             ON fgm.group_id = ANY(up.primary_circle_group_ids)
+           JOIN plannen.users u ON u.id = fgm.user_id
+          WHERE up.user_id = $1
+            AND u.id <> $1`,
+        [id],
+      ),
+      ctx.client.query(
+        `SELECT id, title, start_date, end_date, location, event_kind, hashtags
+         FROM plannen.events
+         WHERE created_by = $1 AND start_date::date = $2::date
+           AND event_status <> 'cancelled'
+         ORDER BY start_date ASC`,
+        [id, today],
+      ),
+      ctx.client.query(
+        `SELECT id, title, start_date, end_date, location, event_kind, hashtags
+         FROM plannen.events
+         WHERE created_by = $1 AND start_date::date = $2::date
+           AND event_status <> 'cancelled'
+         ORDER BY start_date ASC`,
+        [id, tomorrowStr],
+      ),
+      ctx.client.query(
+        `SELECT id, title, start_date, location, event_kind
+         FROM plannen.events
+         WHERE created_by = $1
+           AND start_date::date BETWEEN $2::date AND ($3::date - INTERVAL '1 day')::date
+           AND event_status <> 'cancelled'
+         ORDER BY start_date DESC LIMIT 10`,
+        [id, sevenDaysAgoStr, today],
+      ),
+      ctx.client.query(
+        `SELECT id, family_member_id, name, category, frequency_type, target_count,
+                days_of_week, preferred_time_of_day, active
+         FROM plannen.practices WHERE user_id = $1 AND active = true`,
+        [id],
+      ),
+      ctx.client.query(
+        `SELECT practice_id, completed_on::text
+         FROM plannen.practice_completions
+         WHERE user_id = $1 AND completed_on >= $2::date`,
+        [id, wkStart],
+      ),
+      ctx.client.query(
+        `SELECT id, label, city, country, is_default
+         FROM plannen.user_locations WHERE user_id = $1`,
+        [id],
+      ),
+    ])
+
+  type CRow = { practice_id: string; completed_on: string }
+  const allCompletions = completionsRow.rows as CRow[]
+  const practicesDue = (practicesRow.rows as Parameters<typeof isPracticeDueOn>[0][])
+    .filter((p) => isPracticeDueOn(p, today, allCompletions))
+    .map((p) => {
+      const inWeek = allCompletions.filter((c) => c.practice_id === p.id).length
+      return {
+        ...p,
+        completions_this_week: inWeek,
+        remaining_this_week: remainingThisWeek(p, today, allCompletions),
+      }
+    })
+
+  const weekday = new Date(`${today}T00:00:00Z`).toLocaleDateString('en-US', {
+    weekday: 'long', timeZone: 'UTC',
+  })
+
+  return {
+    date: today,
+    weekday,
+    user: userRow.rows[0] ?? { id },
+    circle: circleRow.rows,
+    primary_circle_users: primaryCircleUsersRow.rows,
+    events_today: eventsTodayRow.rows,
+    events_tomorrow: eventsTomorrowRow.rows,
+    recent_past_events: recentPastRow.rows,
+    practices_due_today: practicesDue,
+    locations: locationsRow.rows,
+  }
+}
+
+const saveDailyBriefing: ToolHandler = async (args, ctx) => {
+  const typedArgs = args as {
+    briefing_date: string
+    content_md: string
+    summary?: string | null
+    source: 'claude_code' | 'claude_desktop' | 'web' | 'cron'
+  }
+  const { rows } = await ctx.client.query(
+    `INSERT INTO plannen.daily_briefings
+       (user_id, briefing_date, content_md, summary, source)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (user_id, briefing_date) DO UPDATE
+       SET content_md = EXCLUDED.content_md,
+           summary = EXCLUDED.summary,
+           source = EXCLUDED.source,
+           generated_at = now()
+     RETURNING *`,
+    [ctx.userId, typedArgs.briefing_date, typedArgs.content_md, typedArgs.summary ?? null, typedArgs.source],
+  )
+  return rows[0]
+}
+
+const getDailyBriefing: ToolHandler = async (args, ctx) => {
+  const typedArgs = args as { date?: string }
+  const date = typedArgs.date ?? new Date().toISOString().slice(0, 10)
+  const { rows } = await ctx.client.query(
+    `SELECT id, briefing_date::text, content_md, summary, source, generated_at
+     FROM plannen.daily_briefings
+     WHERE user_id = $1 AND briefing_date = $2::date`,
+    [ctx.userId, date],
+  )
+  return rows[0] ?? null
+}
+
+// ── Module ────────────────────────────────────────────────────────────────────
+
+export const briefingsModule: ToolModule = {
+  definitions,
+  dispatch: {
+    get_briefing_context: getBriefingContext,
+    save_daily_briefing: saveDailyBriefing,
+    get_daily_briefing: getDailyBriefing,
+  },
+}

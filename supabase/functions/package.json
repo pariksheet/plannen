@@ -1,0 +1,16 @@
+{
+  "name": "@plannen/edge-functions",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "jose": "^5.10.0",
+    "pg": "^8.20.0",
+    "vitest": "^2.0.0",
+    "zod": "^3.23.0"
+  }
+}

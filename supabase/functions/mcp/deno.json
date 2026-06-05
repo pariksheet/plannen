@@ -1,0 +1,11 @@
+{
+  "imports": {
+    "@modelcontextprotocol/sdk/server/index.js": "npm:@modelcontextprotocol/sdk@1.29.0/server/index.js",
+    "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js": "npm:@modelcontextprotocol/sdk@1.29.0/server/webStandardStreamableHttp.js",
+    "@modelcontextprotocol/sdk/types.js": "npm:@modelcontextprotocol/sdk@1.29.0/types.js",
+    "pg": "npm:pg@8",
+    "zod": "npm:zod@3"
+  },
+  "lint": { "rules": { "tags": ["recommended"] } },
+  "fmt": { "options": { "useTabs": false, "indentWidth": 2, "singleQuote": true, "semiColons": false } }
+}

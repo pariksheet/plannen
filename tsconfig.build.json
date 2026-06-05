@@ -1,0 +1,16 @@
+{
+  // Production build config. The root tsconfig includes `tests` (and co-located
+  // `*.test.tsx` under src) so editors/local runs type-check them — but the
+  // jest-dom matcher augmentation lives in tests/setup.ts, which `.vercelignore`
+  // strips from the build context. Type-checking test files here would then fail
+  // on `toBeInTheDocument` etc. Tests aren't shipped runtime code and run under
+  // vitest, so the build excludes them entirely.
+  "extends": "./tsconfig.json",
+  "exclude": [
+    "tests",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx"
+  ]
+}

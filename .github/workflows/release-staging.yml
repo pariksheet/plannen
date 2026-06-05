@@ -1,0 +1,107 @@
+name: Release to staging
+
+# Auto-deploy every merge to main to the staging Supabase + Vercel projects.
+# Spec: docs/superpowers/specs/2026-05-17-plannen-cli-and-cicd-design.md §6
+#
+# Concurrency drops in-flight runs when a newer main lands (staging always
+# tracks the tip). Failures leave staging in a partial state — fix forward,
+# no auto-rollback. Single-user, blast radius = staging only.
+
+on:
+  # Auto-trigger on push to main is disabled until the staging Supabase +
+  # Vercel projects are provisioned and the STAGING_* secrets are uploaded.
+  # Re-enable by uncommenting the `push` block below.
+  # push:
+  #   branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-staging
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  release-staging:
+    name: Deploy main to staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      # Materialize the staging profile from secrets, no on-disk ~/.plannen.
+      PLANNEN_PROFILE_FROM_ENV: '1'
+      PLANNEN_PROFILE: staging
+      PLANNEN_TIER: '2'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install supabase + vercel CLIs
+        run: npm install -g supabase@latest vercel@latest
+
+      - name: Apply pending migrations to staging
+        # Note: supabase db push --linked refuses if the remote has versions
+        # the local tree doesn't, which is the parity guard the spec asks
+        # for. When PR4 ships `plannen db migrate`, this step swaps to it.
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.STAGING_SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.STAGING_SUPABASE_DB_PASSWORD }}
+        run: |
+          supabase link --project-ref "${{ secrets.STAGING_SUPABASE_PROJECT_REF }}"
+          supabase db push --linked
+
+      - name: Deploy edge functions to staging
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.STAGING_SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.STAGING_SUPABASE_PROJECT_REF }}
+          PLANNEN_USER_EMAIL: ${{ secrets.STAGING_PLANNEN_USER_EMAIL }}
+          MCP_BEARER_TOKEN: ${{ secrets.STAGING_MCP_BEARER_TOKEN }}
+          GOOGLE_CLIENT_ID: ${{ secrets.STAGING_GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.STAGING_GOOGLE_CLIENT_SECRET }}
+          ANTHROPIC_API_KEY: ${{ secrets.STAGING_ANTHROPIC_API_KEY }}
+        run: node scripts/lib/cloud-deploy.mjs
+
+      - name: Vercel deploy --prod (staging project)
+        id: vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.STAGING_VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.STAGING_VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.STAGING_VERCEL_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          OUT=$(vercel --prod --yes --token "$VERCEL_TOKEN" 2>&1 | tee /dev/stderr)
+          URL=$(printf '%s\n' "$OUT" | grep -Eo 'https://[a-zA-Z0-9.-]+\.vercel\.app' | head -1)
+          if [ -z "$URL" ]; then
+            echo "Could not parse deployment URL from vercel output." >&2
+            exit 1
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke check /api/health
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 30 "${{ steps.vercel.outputs.url }}/api/health" | tee /tmp/health.json
+          # /api/health returns { ok: true, ... } on success
+          grep -q '"ok":true' /tmp/health.json
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Staging release"
+            echo
+            echo "- Commit: \`${{ github.sha }}\`"
+            echo "- URL: ${{ steps.vercel.outputs.url || 'n/a (failed before deploy)' }}"
+            echo "- Status: ${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"

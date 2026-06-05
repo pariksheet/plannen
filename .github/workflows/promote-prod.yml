@@ -1,0 +1,92 @@
+name: Promote staging → prod
+
+# Manual-trigger only. Runs the same `plannen promote` code path as the
+# developer shell, with both profiles materialized from secrets.
+# Spec: docs/superpowers/specs/2026-05-17-plannen-cli-and-cicd-design.md §6
+#
+# The `prod-promote` GitHub Environment is configured separately in the
+# repo settings to require manual approval, restrict deploy branches to
+# main, and limit to the repo owner. GitHub holds the run until you click
+# Approve before mounting prod secrets — even after you click Run workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Commit SHA to promote (default: current main HEAD)'
+        required: false
+
+concurrency:
+  group: promote-prod
+  cancel-in-progress: false  # never cancel a promote mid-flight
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    name: Promote to prod
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: prod-promote
+
+    env:
+      PLANNEN_PROFILE_FROM_ENV: '1'
+      PLANNEN_TIER: '2'
+
+      # Staging side — read-only, used for the migration parity check.
+      STAGING_SUPABASE_PROJECT_REF: ${{ secrets.STAGING_SUPABASE_PROJECT_REF }}
+      STAGING_SUPABASE_ACCESS_TOKEN: ${{ secrets.STAGING_SUPABASE_ACCESS_TOKEN }}
+
+      # Prod side — all the keys plannen promote needs to push.
+      PROD_SUPABASE_PROJECT_REF: ${{ secrets.PROD_SUPABASE_PROJECT_REF }}
+      PROD_SUPABASE_ACCESS_TOKEN: ${{ secrets.PROD_SUPABASE_ACCESS_TOKEN }}
+      PROD_SUPABASE_DB_PASSWORD: ${{ secrets.PROD_SUPABASE_DB_PASSWORD }}
+      PROD_VERCEL_TOKEN: ${{ secrets.PROD_VERCEL_TOKEN }}
+      PROD_VERCEL_ORG_ID: ${{ secrets.PROD_VERCEL_ORG_ID }}
+      PROD_VERCEL_PROJECT_ID: ${{ secrets.PROD_VERCEL_PROJECT_ID }}
+      PROD_PLANNEN_USER_EMAIL: ${{ secrets.PROD_PLANNEN_USER_EMAIL }}
+      PROD_MCP_BEARER_TOKEN: ${{ secrets.PROD_MCP_BEARER_TOKEN }}
+      PROD_GOOGLE_CLIENT_ID: ${{ secrets.PROD_GOOGLE_CLIENT_ID }}
+      PROD_GOOGLE_CLIENT_SECRET: ${{ secrets.PROD_GOOGLE_CLIENT_SECRET }}
+      PROD_ANTHROPIC_API_KEY: ${{ secrets.PROD_ANTHROPIC_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha || github.sha }}
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install supabase + vercel CLIs
+        run: npm install -g supabase@latest vercel@latest
+
+      - name: Promote to prod
+        id: promote
+        run: |
+          set -euo pipefail
+          # plannen promote streams its progress to stdout. Tee it for the
+          # job log + grep the deployment URL out for the summary.
+          npx plannen promote --non-interactive 2>&1 | tee /tmp/promote.log
+          URL=$(grep -Eo 'https://[a-zA-Z0-9.-]+\.vercel\.app' /tmp/promote.log | tail -1 || true)
+          echo "url=${URL:-unknown}" >> "$GITHUB_OUTPUT"
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### Production promote"
+            echo
+            echo "- Commit: \`${{ inputs.sha || github.sha }}\`"
+            echo "- URL: ${{ steps.promote.outputs.url || 'n/a (promote failed)' }}"
+            echo "- Status: ${{ job.status }}"
+            echo "- Triggered by: @${{ github.actor }}"
+          } >> "$GITHUB_STEP_SUMMARY"
