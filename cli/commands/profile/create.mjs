@@ -2,6 +2,7 @@ import { defineCommand } from 'citty';
 import {
   VALID_MODES,
   composeEnv,
+  dataPathsFor,
   getProfileEnvPath,
   modeToTier,
   nextPortOffset,
@@ -40,6 +41,7 @@ export async function invokeProfileCreate(rawArgs, ctx = {}) {
   writeEnvFile(getProfileEnvPath(name, env), {
     PLANNEN_TIER: modeToTier(mode),
     ...portsFor(mode, portOffset),
+    ...dataPathsFor(name, mode, env),
   });
   return { manifest, envPath: getProfileEnvPath(name, env) };
 }

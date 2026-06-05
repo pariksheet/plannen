@@ -397,7 +397,10 @@ export async function invokeInit(rawArgs, ctx = {}) {
   if (tier === '0') {
     logImpl.step('4. Starting embedded Postgres (Tier 0)');
     mkdirSync(path.join(os.homedir(), '.plannen'), { recursive: true });
-    const pgPidPath = path.join(os.homedir(), '.plannen', 'pg.pid');
+    // Per-profile pid/log paths when the profile seeds them (#7).
+    const pgPidPath = composed.PLANNEN_PG_PID ?? path.join(os.homedir(), '.plannen', 'pg.pid');
+    const pgLogPath = composed.PLANNEN_PG_LOG ?? path.join(os.homedir(), '.plannen', 'pg.log');
+    mkdirSync(path.dirname(pgPidPath), { recursive: true });
     // A foreign listener on our port (colima/Docker forward, another stack)
     // answers connects meant for the embedded pg and corrupts migrations with
     // confusing auth errors. Identify it and refuse up front (#14).
@@ -429,11 +432,11 @@ export async function invokeInit(rawArgs, ctx = {}) {
       spawnBg(
         'node',
         [path.join(repoRoot, 'scripts/lib/plannen-pg.mjs'), 'init'],
-        { cwd: repoRoot, logPath: path.join(os.homedir(), '.plannen', 'pg.log'), env: { ...process.env, ...composed } },
+        { cwd: repoRoot, logPath: pgLogPath, env: { ...process.env, ...composed } },
       );
       const up = await wait('127.0.0.1', pgPort, 15);
       if (!up) {
-        logImpl.err(`embedded Postgres did not come up on ${pgPort} — tail ${os.homedir()}/.plannen/pg.log`);
+        logImpl.err(`embedded Postgres did not come up on ${pgPort} — tail ${pgLogPath}`);
         return 1;
       }
     }

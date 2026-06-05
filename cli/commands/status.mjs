@@ -53,11 +53,21 @@ function unsetProc(name, hint) {
 }
 
 function processesFor(tier, env) {
+  // Per-profile port offsets (#7); LOCAL holds the offset-0 defaults.
+  const port = (name, fallback) => Number(env[name] ?? fallback);
   if (tier === '0') {
-    return [localProc('pg', LOCAL.pg, 'postgresql'), localProc('backend', LOCAL.backend), localProc('web', LOCAL.web)];
+    return [
+      localProc('pg', port('PLANNEN_PG_PORT', LOCAL.pg), 'postgresql'),
+      localProc('backend', port('PLANNEN_BACKEND_PORT', LOCAL.backend)),
+      localProc('web', port('PLANNEN_WEB_PORT', LOCAL.web)),
+    ];
   }
   if (tier === '1') {
-    return [localProc('supabase', LOCAL.supabase), localProc('pg', LOCAL.pg, 'postgresql'), localProc('web', LOCAL.web)];
+    return [
+      localProc('supabase', port('PLANNEN_SUPABASE_API_PORT', LOCAL.supabase)),
+      localProc('pg', port('PLANNEN_PG_PORT', LOCAL.pg), 'postgresql'),
+      localProc('web', port('PLANNEN_WEB_PORT', LOCAL.web)),
+    ];
   }
   // tier 2 — read URLs from .env. pg is omitted because it's part of the
   // managed Supabase surface, not a user-controlled process.

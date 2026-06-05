@@ -2,6 +2,7 @@ import { existsSync, lstatSync, readFileSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import {
   VALID_MODES,
+  dataPathsFor,
   getProfileEnvPath,
   modeToTier,
   nextPortOffset,
@@ -60,6 +61,7 @@ export function ensureProfile({ name = 'default', mode = 'local_pg', env = proce
     ...migratedVars,
     PLANNEN_TIER: modeToTier(mode),
     ...portsFor(mode, portOffset),
+    ...dataPathsFor(name, mode, env),
   };
   delete seed.PLANNEN_PROFILE;
   writeEnvFile(getProfileEnvPath(name, env), seed);

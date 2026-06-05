@@ -8,8 +8,34 @@ import { join } from 'node:path';
  * "Plannen is running" signal.
  */
 export function getPgPidFile(env = process.env) {
+  if (env.PLANNEN_PG_PID) return env.PLANNEN_PG_PID;
   const home = env.HOME ?? homedir();
   return join(home, '.plannen', 'pg.pid');
+}
+
+/** Backend pid file — per-profile when seeded (#7), legacy global otherwise. */
+export function getBackendPidFile(env = process.env) {
+  if (env.PLANNEN_BACKEND_PID) return env.PLANNEN_BACKEND_PID;
+  const home = env.HOME ?? homedir();
+  return join(home, '.plannen', 'backend.pid');
+}
+
+/** True if the pid recorded in `pidFile` is alive. */
+function pidFileAlive(pidFile) {
+  if (!existsSync(pidFile)) return false;
+  const pid = Number(readFileSync(pidFile, 'utf8').trim());
+  if (!Number.isFinite(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True if the Plannen backend this env owns is still alive. */
+export function isBackendRunning(env = process.env) {
+  return pidFileAlive(getBackendPidFile(env));
 }
 
 /**

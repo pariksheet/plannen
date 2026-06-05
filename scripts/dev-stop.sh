@@ -11,7 +11,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_DIR"
 
-PID_FILE=.plannen/dev.pid
+PID_FILE="${PLANNEN_DEV_PID:-.plannen/dev.pid}"
 
 if [ ! -f "$PID_FILE" ]; then
   ok "npm run dev is not running (no PID file)"

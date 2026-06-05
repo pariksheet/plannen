@@ -70,3 +70,27 @@ describe('profile create', () => {
     await expect(invokeProfileCreate({ mode: 'local_pg' }, { env: env(), now })).rejects.toThrow(/name/i);
   });
 });
+
+describe('profile create — per-profile data paths (#7)', () => {
+  it('seeds pgdata/photos/pid/log paths inside the profile dir for local_pg', async () => {
+    const { invokeProfileCreate } = await import('../commands/profile/create.mjs');
+    const { getProfileDir, getProfileEnvPath, readEnvFile } = await import('../lib/profiles.mjs');
+    await invokeProfileCreate({ name: 'iso', mode: 'local_pg' }, { env: env(), now: () => '2026-06-05T00:00:00Z' });
+    const vars = readEnvFile(getProfileEnvPath('iso', env()));
+    const dir = getProfileDir('iso', env());
+    expect(vars.PLANNEN_PG_DATA).toBe(`${dir}/pgdata`);
+    expect(vars.PLANNEN_PG_PID).toBe(`${dir}/pg.pid`);
+    expect(vars.PLANNEN_PHOTOS_ROOT).toBe(`${dir}/photos`);
+    expect(vars.PLANNEN_BACKEND_PID).toBe(`${dir}/backend.pid`);
+    expect(vars.PLANNEN_DEV_PID).toBe(`${dir}/dev.pid`);
+  });
+
+  it('does not seed data paths for cloud_sb', async () => {
+    const { invokeProfileCreate } = await import('../commands/profile/create.mjs');
+    const { getProfileEnvPath, readEnvFile } = await import('../lib/profiles.mjs');
+    await invokeProfileCreate({ name: 'cloudy', mode: 'cloud_sb' }, { env: env(), now: () => '2026-06-05T00:00:00Z' });
+    const vars = readEnvFile(getProfileEnvPath('cloudy', env()));
+    expect(vars.PLANNEN_PG_DATA).toBeUndefined();
+    expect(vars.PLANNEN_BACKEND_PID).toBeUndefined();
+  });
+});

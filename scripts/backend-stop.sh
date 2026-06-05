@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Stop the Plannen backend. Idempotent: missing pid file is success.
 set -euo pipefail
-PID="$HOME/.plannen/backend.pid"
+PID="${PLANNEN_BACKEND_PID:-$HOME/.plannen/backend.pid}"
 if [[ ! -f "$PID" ]]; then
   echo "backend-stop: no pid file; nothing to stop"
   exit 0

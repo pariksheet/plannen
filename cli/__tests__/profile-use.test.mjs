@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, existsSync, lstatSync, readlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, lstatSync, readlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -78,5 +78,30 @@ describe('profile use', () => {
     await expect(
       invokeProfileUse({}, { env: env(), repoRoot: tmpRepo, isProfileRunning: () => false }),
     ).rejects.toThrow(/name/i);
+  });
+});
+
+describe('profile use — per-profile running probe (#7)', () => {
+  it("blocks the switch when the previous profile's own backend pid is alive", async () => {
+    const { getProfileDir } = await import('../lib/profiles.mjs');
+    await invokeProfileCreate({ name: 'a', mode: 'local_pg' }, { env: env(), now });
+    await invokeProfileCreate({ name: 'b', mode: 'local_pg' }, { env: env(), now });
+    setActive('a', env());
+    // Simulate profile a's backend running: its per-profile pid file holds a
+    // live pid (ours). No injection — exercises the real composed-env probe.
+    const aDir = getProfileDir('a', env());
+    mkdirSync(aDir, { recursive: true });
+    writeFileSync(path.join(aDir, 'backend.pid'), String(process.pid));
+    await expect(invokeProfileUse({ name: 'b' }, { env: env(), repoRoot: tmpRepo }))
+      .rejects.toThrow(/still running/);
+  });
+
+  it("allows the switch when the previous profile's pid files are dead or absent", async () => {
+    await invokeProfileCreate({ name: 'a', mode: 'local_pg' }, { env: env(), now });
+    await invokeProfileCreate({ name: 'b', mode: 'local_pg' }, { env: env(), now });
+    setActive('a', env());
+    const code = await invokeProfileUse({ name: 'b' }, { env: env(), repoRoot: tmpRepo });
+    expect(code).toBe(0);
+    expect(resolveActiveProfile(env())).toBe('b');
   });
 });

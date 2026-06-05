@@ -5,9 +5,10 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 BACKEND_DIR="$REPO/backend"
-LOG="$HOME/.plannen/backend.log"
-PID="$HOME/.plannen/backend.pid"
-mkdir -p "$HOME/.plannen"
+# Per-profile pid/log (#7); legacy global defaults keep old installs working.
+LOG="${PLANNEN_BACKEND_LOG:-$HOME/.plannen/backend.log}"
+PID="${PLANNEN_BACKEND_PID:-$HOME/.plannen/backend.pid}"
+mkdir -p "$HOME/.plannen" "$(dirname "$PID")" "$(dirname "$LOG")"
 
 # Load env so PLANNEN_USER_EMAIL / DATABASE_URL / PLANNEN_BACKEND_PORT propagate.
 # Caller-provided values win over the repo .env symlink — the symlink tracks

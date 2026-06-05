@@ -235,6 +235,31 @@ export function modeToTier(mode) {
   return { local_pg: '0', local_sb: '1', cloud_sb: '2' }[mode];
 }
 
+/**
+ * Per-profile data/pid/log paths for a local_pg profile (#7). Seeding these
+ * into the profile env gives every Tier 0 profile its own pgdata, photos,
+ * pid and log files, so two profiles can run simultaneously without sharing
+ * state. Other modes return {} — Tier 1 state lives in Docker volumes.
+ *
+ * Pre-existing profile envs lack these keys; every consumer falls back to
+ * the legacy global paths (~/.plannen/pgdata etc.), so old installs keep
+ * their data exactly where it is.
+ */
+export function dataPathsFor(name, mode, env = process.env) {
+  if (mode !== 'local_pg') return {};
+  const dir = getProfileDir(name, env);
+  return {
+    PLANNEN_PG_DATA: path.join(dir, 'pgdata'),
+    PLANNEN_PG_PID: path.join(dir, 'pg.pid'),
+    PLANNEN_PG_LOG: path.join(dir, 'pg.log'),
+    PLANNEN_PHOTOS_ROOT: path.join(dir, 'photos'),
+    PLANNEN_BACKEND_PID: path.join(dir, 'backend.pid'),
+    PLANNEN_BACKEND_LOG: path.join(dir, 'backend.log'),
+    PLANNEN_DEV_PID: path.join(dir, 'dev.pid'),
+    PLANNEN_DEV_LOG: path.join(dir, 'dev.log'),
+  };
+}
+
 export function tierToMode(tier) {
   return { '0': 'local_pg', '1': 'local_sb', '2': 'cloud_sb' }[String(tier)];
 }

@@ -8,7 +8,8 @@ import { join } from 'node:path'
 import { portOwner, describePortSquatter } from './port-owner.mjs'
 
 const DATA_DIR = process.env.PLANNEN_PG_DATA ?? join(homedir(), '.plannen', 'pgdata')
-const PID_FILE = join(homedir(), '.plannen', 'pg.pid')
+// Per-profile pid path (#7); legacy global default keeps old installs working.
+const PID_FILE = process.env.PLANNEN_PG_PID ?? join(homedir(), '.plannen', 'pg.pid')
 const PORT = Number(process.env.PLANNEN_PG_PORT ?? 54322)
 const USER = 'plannen'
 const PASSWORD = 'plannen'

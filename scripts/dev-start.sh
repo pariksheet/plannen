@@ -13,8 +13,11 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_DIR"
 mkdir -p .plannen
 
-PID_FILE=.plannen/dev.pid
-LOG_FILE=.plannen/dev.log
+# Per-profile pid/log/port (#7); repo-local defaults keep old installs working.
+PID_FILE="${PLANNEN_DEV_PID:-.plannen/dev.pid}"
+LOG_FILE="${PLANNEN_DEV_LOG:-.plannen/dev.log}"
+WEB_PORT="${PLANNEN_WEB_PORT:-4321}"
+mkdir -p "$(dirname "$PID_FILE")" "$(dirname "$LOG_FILE")"
 
 if pid_alive "$PID_FILE"; then
   ok "npm run dev already running (PID $(cat "$PID_FILE"))"
@@ -33,10 +36,10 @@ nohup npm run dev >> "$LOG_FILE" 2>&1 &
 DEV_PID=$!
 echo "$DEV_PID" > "$PID_FILE"
 
-# Brief liveness check — give Vite ~3s to bind 4321 / fail fast.
+# Brief liveness check — give Vite ~3s to bind the web port / fail fast.
 sleep 3
 if pid_alive "$PID_FILE"; then
-  ok "npm run dev started (PID $DEV_PID) — http://localhost:4321"
+  ok "npm run dev started (PID $DEV_PID) — http://localhost:${WEB_PORT}"
   dim "Logs:  tail -f $LOG_FILE"
   dim "Stop:  bash scripts/dev-stop.sh"
 else
