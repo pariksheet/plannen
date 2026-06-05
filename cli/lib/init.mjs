@@ -45,7 +45,7 @@ import {
   warn,
 } from './init-helpers.mjs';
 import { ensureProfile as defaultEnsureProfile } from './ensure-profile.mjs';
-import { composeEnv, profileExists, readManifest, resolveActiveProfile } from './profiles.mjs';
+import { composeEnv, getProfileEnvPath, profileExists, readManifest, resolveActiveProfile } from './profiles.mjs';
 import { ensureVapidKeys } from './ensure-vapid.mjs';
 import { buildPoolerUrl } from '../../scripts/lib/cloud-db-url.mjs';
 import * as supabaseMgmt from '../../scripts/lib/supabase-mgmt.mjs';
@@ -225,8 +225,22 @@ export async function invokeInit(rawArgs, ctx = {}) {
   // the first-install / no-profile case. Mirrors how up/down/status resolve.
   const profileName = rawArgs.profile ?? resolveActiveProfile(baseEnv) ?? 'default';
   const canonicalMode = TO_CANONICAL[mode];
-  ensure({ name: profileName, mode: canonicalMode, env: baseEnv, repoRoot });
+  const ensured = ensure({ name: profileName, mode: canonicalMode, env: baseEnv, repoRoot });
   const composed = composeEnv(profileName, {}, baseEnv);
+  // Honor the profile's port assignments (offsets) for every Tier 0 process.
+  // Hardcoded ports here caused cross-profile bleed (#13).
+  const pgPort = Number(composed.PLANNEN_PG_PORT ?? 54322);
+  const backendPort = String(composed.PLANNEN_BACKEND_PORT ?? '54323');
+  // Write env changes to the profile's own file, never through the repo .env
+  // symlink — the symlink tracks the *active* profile, which may differ (#13).
+  const profileEnvFile = getProfileEnvPath(profileName, baseEnv);
+  if (ensured && ensured.symlinkSkipped) {
+    const active = resolveActiveProfile(baseEnv);
+    logImpl.warn(
+      `profile '${profileName}' is not the active profile ('${active}') — .env stays pointed at '${active}'. ` +
+      `Run 'npx plannen profile use ${profileName}' to switch.`,
+    );
+  }
   // PRE_TIER captures the tier as observed before any .bak restore; used by
   // dev-server restart logic.
   const preTier = oldTier;
@@ -248,8 +262,8 @@ export async function invokeInit(rawArgs, ctx = {}) {
     tierChange = '2->1';
     const envBak = path.join(repoRoot, '.env.tier1.bak');
     if (existsSync(envBak)) {
-      copyFileSync(envBak, envFile);
-      logImpl.ok('restored .env from .env.tier1.bak (Tier 2 → Tier 1)');
+      copyFileSync(envBak, profileEnvFile);
+      logImpl.ok('restored profile env from .env.tier1.bak (Tier 2 → Tier 1)');
     }
     const pluginJsonBak = path.join(repoRoot, 'plugin/.claude-plugin/plugin.json.tier1.bak');
     if (existsSync(pluginJsonBak)) {
@@ -261,7 +275,7 @@ export async function invokeInit(rawArgs, ctx = {}) {
     logImpl.dim('  cloud project still exists; not synced back. Re-run --mode=cloud_sb to return.');
     // Re-read OLD_TIER from restored .env so the rest of init behaves as if
     // we'd never been on Tier 2.
-    oldTier = existsSync(envFile) ? (envGet(envFile, 'PLANNEN_TIER') ?? '') : '';
+    oldTier = existsSync(profileEnvFile) ? (envGet(profileEnvFile, 'PLANNEN_TIER') ?? '') : '';
   }
 
   const snapshotDir = path.join(repoRoot, '.plannen', 'snapshots');
@@ -312,7 +326,7 @@ export async function invokeInit(rawArgs, ctx = {}) {
 
   // ── 2. Email cascade ───────────────────────────────────────────────────────
   logImpl.step('2. Identifying your Plannen user');
-  const existingEmail = envGet(envFile, 'PLANNEN_USER_EMAIL');
+  const existingEmail = envGet(profileEnvFile, 'PLANNEN_USER_EMAIL');
   const gitEmailRes = sspawn('git', ['config', 'user.email']);
   const gitEmail = ((gitEmailRes.stdout ?? '').trim()) || '';
 
@@ -367,12 +381,12 @@ export async function invokeInit(rawArgs, ctx = {}) {
         spawn: cspawn, sspawn, prompt, mgmt, fetch: fetchImpl, log: logImpl,
         write: ctx.writeRaw ?? ((s) => process.stdout.write(s)),
       },
-      env: { repoRoot, envFile, exampleFile, email, tierChange },
+      env: { repoRoot, envFile: profileEnvFile, exampleFile, email, tierChange },
     });
   }
 
   // ── 4. DB + migrations + user row ──────────────────────────────────────────
-  const databaseUrlTier0 = 'postgres://plannen:plannen@127.0.0.1:54322/plannen';
+  const databaseUrlTier0 = `postgres://plannen:plannen@127.0.0.1:${pgPort}/plannen`;
   let userUuid = '';
   let supabaseUrlForNode = '';
   let serviceRoleForNode = '';
@@ -384,21 +398,31 @@ export async function invokeInit(rawArgs, ctx = {}) {
     if (pidAlive(pgPidPath)) {
       const pid = readFileSync(pgPidPath, 'utf8').trim();
       logImpl.dim(`embedded Postgres already running (pid ${pid})`);
+      // The pid file is global — the running instance may belong to a profile
+      // on a different port offset. Refuse to migrate the wrong DB (#13).
+      const up = await wait('127.0.0.1', pgPort, 5);
+      if (!up) {
+        logImpl.err(
+          `embedded Postgres (pid ${pid}) is not listening on this profile's port ${pgPort} — ` +
+          `it likely belongs to another profile. Stop it ('npx plannen down') or init the profile that owns it.`,
+        );
+        return 1;
+      }
     } else {
       // `init` is the idempotent entry — initdb's on first run, then keeps pg
       // and supervisor alive. Background it; record the pid for pg-stop.sh.
       spawnBg(
         'node',
         [path.join(repoRoot, 'scripts/lib/plannen-pg.mjs'), 'init'],
-        { cwd: repoRoot, logPath: path.join(os.homedir(), '.plannen', 'pg.log') },
+        { cwd: repoRoot, logPath: path.join(os.homedir(), '.plannen', 'pg.log'), env: { ...process.env, ...composed } },
       );
-      const up = await wait('127.0.0.1', 54322, 15);
+      const up = await wait('127.0.0.1', pgPort, 15);
       if (!up) {
-        logImpl.err(`embedded Postgres did not come up on 54322 — tail ${os.homedir()}/.plannen/pg.log`);
+        logImpl.err(`embedded Postgres did not come up on ${pgPort} — tail ${os.homedir()}/.plannen/pg.log`);
         return 1;
       }
     }
-    logImpl.ok('embedded Postgres on 54322');
+    logImpl.ok(`embedded Postgres on ${pgPort}`);
 
     logImpl.step('5. Applying migrations (Tier 0 overlay + main)');
     {
@@ -453,10 +477,10 @@ export async function invokeInit(rawArgs, ctx = {}) {
       mkdirSync(snapshotDir, { recursive: true });
       // Tier 0 PG might already be stopped; bring it up on its native port for
       // the dump. pg-start.sh is idempotent.
-      if (!(await probePort('127.0.0.1', 54322))) {
-        const c = await spawn('bash', [path.join(repoRoot, 'scripts/pg-start.sh')], { cwd: repoRoot });
+      if (!(await probePort('127.0.0.1', pgPort))) {
+        const c = await spawn('bash', [path.join(repoRoot, 'scripts/pg-start.sh')], { cwd: repoRoot, env: { ...process.env, ...composed } });
         if (c !== 0) { logImpl.err(`pg-start failed (exit ${c})`); return c; }
-        await wait('127.0.0.1', 54322, 8);
+        await wait('127.0.0.1', pgPort, 8);
       }
       {
         const c = await spawn(
@@ -491,8 +515,8 @@ export async function invokeInit(rawArgs, ctx = {}) {
     logImpl.step(`6. Resolving auth.users row for ${email}`);
     supabaseUrlForNode = envGet(exampleFile, 'SUPABASE_URL') ?? '';
     serviceRoleForNode = envGet(exampleFile, 'SUPABASE_SERVICE_ROLE_KEY') ?? '';
-    const existingUrl = envGet(envFile, 'SUPABASE_URL');
-    const existingKey = envGet(envFile, 'SUPABASE_SERVICE_ROLE_KEY');
+    const existingUrl = envGet(profileEnvFile, 'SUPABASE_URL');
+    const existingKey = envGet(profileEnvFile, 'SUPABASE_SERVICE_ROLE_KEY');
     if (existingUrl) supabaseUrlForNode = existingUrl;
     if (existingKey) serviceRoleForNode = existingKey;
 
@@ -569,28 +593,31 @@ export async function invokeInit(rawArgs, ctx = {}) {
     }
   }
 
-  // ── 7. Write .env ──────────────────────────────────────────────────────────
-  logImpl.step('7. Writing .env');
-  mergeEnv(exampleFile, envFile);
-  envSet(envFile, 'PLANNEN_USER_EMAIL', email);
-  envSet(envFile, 'PLANNEN_TIER', tier);
+  // ── 7. Write profile env ───────────────────────────────────────────────────
+  // Always write to the profile's own env file — when the profile is active,
+  // the repo .env symlink resolves to the same file; when it isn't, writing
+  // through .env would corrupt the active profile's env (#13).
+  logImpl.step('7. Writing profile env');
+  mergeEnv(exampleFile, profileEnvFile);
+  envSet(profileEnvFile, 'PLANNEN_USER_EMAIL', email);
+  envSet(profileEnvFile, 'PLANNEN_TIER', tier);
   if (tier === '0') {
-    envSet(envFile, 'DATABASE_URL', databaseUrlTier0);
-    envSet(envFile, 'PLANNEN_BACKEND_PORT', '54323');
-    envSet(envFile, 'BACKEND_URL', 'http://127.0.0.1:54323');
-    envSet(envFile, 'VITE_PLANNEN_TIER', '0');
-    envSet(envFile, 'VITE_PLANNEN_BACKEND_MODE', 'plannen-api');
+    envSet(profileEnvFile, 'DATABASE_URL', databaseUrlTier0);
+    envSet(profileEnvFile, 'PLANNEN_BACKEND_PORT', backendPort);
+    envSet(profileEnvFile, 'BACKEND_URL', `http://127.0.0.1:${backendPort}`);
+    envSet(profileEnvFile, 'VITE_PLANNEN_TIER', '0');
+    envSet(profileEnvFile, 'VITE_PLANNEN_BACKEND_MODE', 'plannen-api');
   } else {
-    envSet(envFile, 'DATABASE_URL', 'postgres://postgres:postgres@127.0.0.1:54322/postgres');
-    envSet(envFile, 'VITE_PLANNEN_TIER', '1');
-    envSet(envFile, 'VITE_PLANNEN_BACKEND_MODE', 'supabase');
+    envSet(profileEnvFile, 'DATABASE_URL', 'postgres://postgres:postgres@127.0.0.1:54322/postgres');
+    envSet(profileEnvFile, 'VITE_PLANNEN_TIER', '1');
+    envSet(profileEnvFile, 'VITE_PLANNEN_BACKEND_MODE', 'supabase');
   }
-  logImpl.ok(`${path.relative(repoRoot, envFile)} updated (existing values preserved)`);
+  logImpl.ok(`profile env for '${profileName}' updated (existing values preserved)`);
 
   // Generate VAPID keys for Web Push (PWA). Idempotent — only writes if missing.
   // Push works out-of-the-box on Tier 0/1; Tier 2 needs the same keys mirrored
   // into Vercel env (printed in step 16 there).
-  await ensureVapidKeys({ envFile, email, log: logImpl });
+  await ensureVapidKeys({ envFile: profileEnvFile, email, log: logImpl });
 
   // Keep the active profile's manifest.mode aligned with PLANNEN_TIER. Best-
   // effort — silent no-op when the profile system isn't engaged.
@@ -633,7 +660,12 @@ export async function invokeInit(rawArgs, ctx = {}) {
     }
     logImpl.ok('backend built');
     {
-      const c = await spawn('bash', [path.join(repoRoot, 'scripts/backend-start.sh')], { cwd: repoRoot, env: { ...process.env, ...composed } });
+      const c = await spawn('bash', [path.join(repoRoot, 'scripts/backend-start.sh')], {
+        cwd: repoRoot,
+        // PLANNEN_ENV_PATH: the backend rewrites PLANNEN_USER_EMAIL there on
+        // web signup — must be this profile's env, not the .env symlink (#13).
+        env: { ...process.env, ...composed, PLANNEN_ENV_PATH: profileEnvFile },
+      });
       if (c !== 0) logImpl.warn(`backend-start returned ${c}`);
     }
   }

@@ -38,6 +38,9 @@ jobs:
       - name: Test CLI
         run: npm run test:cli
 
+      - name: MCP tool parity (local stdio vs cloud edge)
+        run: node scripts/check-mcp-parity.mjs
+
       - name: Build web
         run: npm run build
 

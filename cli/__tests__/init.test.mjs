@@ -247,3 +247,44 @@ describe('invokeInit', () => {
     expect(readManifest('staging', env()).mode).toBe('cloud_sb');
   });
 });
+
+describe('invokeInit — profile isolation (#13)', () => {
+  it('Tier 0 honours the profile port offset instead of hardcoded 54322/54323', async () => {
+    // First install: 'default' becomes the active profile at offset 0.
+    const { ctx } = makeCtx();
+    await invokeInit({ mode: 'local_pg', email: 'me@example.com', 'non-interactive': true }, ctx);
+    // Side profile gets the next free offset — every port must follow it.
+    const { ctx: ctx2 } = makeCtx();
+    const code = await invokeInit({ mode: 'local_pg', profile: 'side', email: 'me@example.com', 'non-interactive': true }, ctx2);
+    expect(code).toBe(0);
+    const sideEnvText = readFileSync(getProfileEnvPath('side', env()), 'utf8');
+    const pgPort = Number(sideEnvText.match(/PLANNEN_PG_PORT=(\d+)/)[1]);
+    const backendPort = sideEnvText.match(/PLANNEN_BACKEND_PORT=(\d+)/)[1];
+    expect(pgPort).not.toBe(54322);
+    expect(backendPort).not.toBe('54323');
+    expect(ctx2.waitForPort).toHaveBeenCalledWith('127.0.0.1', pgPort, expect.any(Number));
+    expect(sideEnvText).toContain(`DATABASE_URL=postgres://plannen:plannen@127.0.0.1:${pgPort}/plannen`);
+    expect(sideEnvText).toContain(`BACKEND_URL=http://127.0.0.1:${backendPort}`);
+  });
+
+  it('does not repoint .env (nor touch the active env) when --profile targets a non-active profile', async () => {
+    const { ctx } = makeCtx();
+    await invokeInit({ mode: 'local_pg', email: 'me@example.com', 'non-interactive': true }, ctx);
+    const repoEnv = path.join(tmpRepo, '.env');
+    const linkBefore = readlinkSync(repoEnv);
+    const defaultEnvBefore = readFileSync(getProfileEnvPath('default', env()), 'utf8');
+    const warns = [];
+    const { ctx: ctx2 } = makeCtx({
+      log: { step: () => {}, ok: () => {}, warn: (s) => warns.push(s), err: () => {}, dim: () => {} },
+    });
+    const code = await invokeInit({ mode: 'local_pg', profile: 'side', email: 'side@example.com', 'non-interactive': true }, ctx2);
+    expect(code).toBe(0);
+    // Symlink untouched, active profile env byte-identical.
+    expect(readlinkSync(repoEnv)).toBe(linkBefore);
+    expect(readFileSync(getProfileEnvPath('default', env()), 'utf8')).toBe(defaultEnvBefore);
+    // User told how to switch.
+    expect(warns.join('\n')).toContain('profile use side');
+    // Side profile got its own settings, written directly to its env file.
+    expect(readFileSync(getProfileEnvPath('side', env()), 'utf8')).toContain('PLANNEN_USER_EMAIL=side@example.com');
+  });
+});

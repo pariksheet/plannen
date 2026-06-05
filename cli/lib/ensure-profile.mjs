@@ -18,14 +18,17 @@ import {
 } from './profiles.mjs';
 
 /**
- * Make sure a profile named `name` exists, the active pointer is set to it,
- * and <repoRoot>/.env is a symlink to its env file. Migrates any pre-existing
- * regular `.env` file into the profile's env file and backs the original up
- * to `.env.legacy-backup`.
+ * Make sure a profile named `name` exists. When `name` is (or becomes) the
+ * active profile, also point <repoRoot>/.env at its env file. When a
+ * *different* profile is active, the symlink is left alone — `.env` tracks
+ * the active profile, and ensuring a side profile (e.g. `init --profile x`)
+ * must not hijack it (#13). Callers detect that via `symlinkSkipped: true`.
+ * Migrates any pre-existing regular `.env` file into the profile's env file
+ * and backs the original up to `.env.legacy-backup`.
  *
  * Idempotent: running it on already-migrated state is a no-op.
  *
- * @returns {{created: boolean, migratedKeys: string[], backedUp: boolean}}
+ * @returns {{created: boolean, migratedKeys: string[], backedUp: boolean, symlinkSkipped?: boolean}}
  */
 export function ensureProfile({ name = 'default', mode = 'local_pg', env = process.env, repoRoot, now = () => new Date().toISOString() } = {}) {
   if (!repoRoot) throw new Error('ensureProfile: repoRoot is required');
@@ -61,9 +64,19 @@ export function ensureProfile({ name = 'default', mode = 'local_pg', env = proce
   delete seed.PLANNEN_PROFILE;
   writeEnvFile(getProfileEnvPath(name, env), seed);
 
+  const activeAtCreate = resolveActiveProfile(env);
+  if (activeAtCreate && activeAtCreate !== name) {
+    // A different profile is active — don't touch its .env symlink (#13).
+    return {
+      created: true,
+      migratedKeys: Object.keys(migratedVars),
+      backedUp: false,
+      symlinkSkipped: true,
+    };
+  }
   const backedUp = backupRegularEnv(repoEnv, repoEnvStat);
   swapEnvSymlink(name, repoRoot, env);
-  if (!resolveActiveProfile(env)) {
+  if (!activeAtCreate) {
     setActive(name, env);
   }
   return {
@@ -79,6 +92,11 @@ function ensureSymlink(name, repoRoot, repoEnv, repoEnvStat, env) {
   if (currentTarget === desired) {
     if (!resolveActiveProfile(env)) setActive(name, env);
     return { created: false, migratedKeys: [], backedUp: false };
+  }
+  const active = resolveActiveProfile(env);
+  if (active && active !== name) {
+    // A different profile is active — leave .env tracking it (#13).
+    return { created: false, migratedKeys: [], backedUp: false, symlinkSkipped: true };
   }
   let backedUp = false;
   if (repoEnvStat && !repoEnvStat.isSymbolicLink()) {

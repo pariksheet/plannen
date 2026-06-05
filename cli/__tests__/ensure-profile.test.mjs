@@ -117,3 +117,24 @@ describe('ensureProfile — idempotency', () => {
     expect(merged.PLANNEN_TIER).toBe('0');
   });
 });
+
+describe('ensureProfile — non-active target (#13)', () => {
+  it('creates the profile but leaves .env on the active profile (create path)', () => {
+    ensureProfile({ env: env(), repoRoot: tmpRepo, now }); // 'default' becomes active
+    const result = ensureProfile({ env: env(), repoRoot: tmpRepo, name: 'side', mode: 'local_pg', now });
+    expect(result.created).toBe(true);
+    expect(result.symlinkSkipped).toBe(true);
+    expect(profileExists('side', env())).toBe(true);
+    expect(readlinkSync(dotenvPath())).toBe(getProfileEnvPath('default', env()));
+    expect(resolveActiveProfile(env())).toBe('default');
+  });
+
+  it('leaves .env alone when re-ensuring an existing non-active profile', () => {
+    ensureProfile({ env: env(), repoRoot: tmpRepo, now });
+    ensureProfile({ env: env(), repoRoot: tmpRepo, name: 'side', mode: 'local_pg', now });
+    const result = ensureProfile({ env: env(), repoRoot: tmpRepo, name: 'side', mode: 'local_pg', now });
+    expect(result.created).toBe(false);
+    expect(result.symlinkSkipped).toBe(true);
+    expect(readlinkSync(dotenvPath())).toBe(getProfileEnvPath('default', env()));
+  });
+});
