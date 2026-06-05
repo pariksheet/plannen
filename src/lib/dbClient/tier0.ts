@@ -1,8 +1,9 @@
 // Tier 0 (Plannen API) dbClient implementation. Talks to the local Hono
 // backend through the Vite proxy. Maps each domain method to a REST route
-// under /api/*, storage uploads to /storage/v1/object/event-photos/*, and
-// edge functions to /functions/v1/*.
+// under /api/*, storage uploads to /api/photos/*, and edge functions to
+// /functions/v1/*.
 
+import { storageClient } from '../storageClient'
 import type {
   AgentTaskRow,
   DailyBriefingRow,
@@ -94,16 +95,17 @@ export const tier0: DbClient = {
     create: (i) => api<MemoryRow>('/api/memories', { method: 'POST', body: JSON.stringify(i) }),
     update: (id, p) => api<MemoryRow>(`/api/memories/${id}`, { method: 'PATCH', body: JSON.stringify(p) }),
     delete: async (id) => { await api(`/api/memories/${id}`, { method: 'DELETE' }) },
-    uploadFile: async ({ userId, filename, blob, contentType }) => {
-      const path = `${userId}/${filename}`
-      const res = await fetch(`/storage/v1/object/event-photos/${path}`, {
-        method: 'PUT',
-        body: blob,
-        headers: { 'Content-Type': contentType },
-      })
-      const body = await res.json().catch(() => ({ error: { message: 'Non-JSON response' } }))
-      if (!res.ok) throw new Error(body?.error?.message ?? 'Upload failed')
-      return { key: body?.data?.Key ?? `event-photos/${path}`, publicUrl: `/storage/v1/object/public/event-photos/${path}` }
+    uploadFile: async ({ userId, filename, blob, contentType: _ct }) => {
+      // The eventId is encoded into the legacy filename ("covers/<ts>.jpg")
+      // for non-event uploads like event covers. We approximate by passing a
+      // placeholder eventId of the caller's id so the canonical key is
+      // <userId>/<userId>/<uuid>.<ext>. For real memory uploads the caller
+      // already constructs an eventId — those paths should migrate to the
+      // new (eventId, filename) shape over time.
+      // TODO(adapter-v2): replace uploadFile shim with explicit { eventId, blob }
+      const eventId = userId   // placeholder; covers don't have an event
+      const { key, signedUrl } = await storageClient.upload({ eventId, filename, blob })
+      return { key, publicUrl: signedUrl }
     },
   },
 

@@ -17,6 +17,7 @@ import { backupCommand } from './commands/backup.mjs';
 import { functionsCommand } from './commands/functions/index.mjs';
 import { tokenCommand } from './commands/token/index.mjs';
 import { mailboxCommand } from './commands/mailbox/index.mjs';
+import { storageCommand } from './commands/storage/index.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = path.resolve(path.dirname(__filename), '..');
@@ -47,6 +48,7 @@ const main = defineCommand({
     functions: functionsCommand,
     token: tokenCommand,
     mailbox: mailboxCommand,
+    storage: storageCommand,
   },
 });
 

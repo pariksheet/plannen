@@ -40,6 +40,7 @@ export const STEPS = [
   'deploy-functions',    // edge functions + secrets
   'prompt-vercel',       // user creates Vercel project in dashboard, gives us name
   'link-vercel',         // vercel link --yes --project <name>
+  'configure-storage',   // choose photo storage backend (supabase or s3-compatible)
   'push-env-vercel',     // VITE_* + PLANNEN_* into Vercel env (production target)
   'first-deploy',        // vercel --prod, capture URL
   'wire-auth',           // Site URL + redirect allow-list via Management API
@@ -190,6 +191,55 @@ export async function invokeProvision(rawArgs, ctx = {}) {
       case 'link-vercel':
         linkVercel(cur, { cli, link, log });
         break;
+      case 'configure-storage': {
+        log('  configure storage backend');
+        const envPath = getProfileEnvPath(cur.profileName, baseEnv);
+        const current = readEnvFile(envPath);
+        if (current.PLANNEN_STORAGE_BACKEND && current.PLANNEN_STORAGE_BACKEND !== 'supabase') {
+          log(`     PLANNEN_STORAGE_BACKEND=${current.PLANNEN_STORAGE_BACKEND} already set — skipping prompt`);
+          break;
+        }
+        log('  Photo storage backend:');
+        log('    1) Supabase Storage (default, $0.09/GB egress)');
+        log('    2) S3-compatible (R2/Tigris/B2/MinIO — zero egress on R2)');
+        const backendChoice = (await prompt('  choice [1]: ')).trim() || '1';
+        if (backendChoice !== '2') {
+          withProfileEnv(cur.profileName, baseEnv, cur.repoRoot, () => ({
+            PLANNEN_STORAGE_BACKEND: 'supabase',
+          }));
+          log('     PLANNEN_STORAGE_BACKEND=supabase written');
+          break;
+        }
+        const s3Endpoint = (await prompt('  S3 endpoint URL (e.g. https://<acc>.r2.cloudflarestorage.com): ')).trim();
+        const s3Region = (await prompt('  S3 region [auto]: ')).trim() || 'auto';
+        const s3Bucket = (await prompt('  Bucket name [plannen-photos]: ')).trim() || 'plannen-photos';
+        const s3AccessKeyId = (await prompt('  Access key id: ')).trim();
+        const s3SecretAccessKey = (await prompt('  Secret access key: ')).trim();
+        const s3PublicBaseUrl = (await prompt('  Public base URL (custom domain or https://pub-<hash>.r2.dev): ')).trim();
+        const pathStyleChoice = (await prompt('  Force path-style URLs? 1=false (R2/Tigris/B2)  2=true (MinIO) [1]: ')).trim() || '1';
+        const s3ForcePathStyle = pathStyleChoice === '2' ? 'true' : 'false';
+        const s3Vars = {
+          PLANNEN_STORAGE_BACKEND: 's3',
+          S3_ENDPOINT: s3Endpoint,
+          S3_REGION: s3Region,
+          S3_BUCKET: s3Bucket,
+          S3_ACCESS_KEY_ID: s3AccessKeyId,
+          S3_SECRET_ACCESS_KEY: s3SecretAccessKey,
+          S3_PUBLIC_BASE_URL: s3PublicBaseUrl,
+          S3_FORCE_PATH_STYLE: s3ForcePathStyle,
+        };
+        withProfileEnv(cur.profileName, baseEnv, cur.repoRoot, () => s3Vars);
+        await (await import('../../lib/storage-smoke.mjs')).smokeS3({
+          S3_ENDPOINT: s3Endpoint,
+          S3_REGION: s3Region,
+          S3_BUCKET: s3Bucket,
+          S3_ACCESS_KEY_ID: s3AccessKeyId,
+          S3_SECRET_ACCESS_KEY: s3SecretAccessKey,
+          S3_FORCE_PATH_STYLE: s3ForcePathStyle,
+        });
+        log('     ✓ S3 credentials verified');
+        break;
+      }
       case 'push-env-vercel':
       case 'first-deploy':
         // Both delegate to vercelRun (it pushes then deploys); split for progress

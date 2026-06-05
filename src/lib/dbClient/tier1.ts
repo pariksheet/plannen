@@ -4,6 +4,7 @@
 // envelopes can be reconstructed in service passthroughs when needed.
 
 import { supabase } from '../supabase'
+import { storageClient } from '../storageClient'
 import type {
   AgentTaskRow,
   DailyBriefingRow,
@@ -149,12 +150,17 @@ export const tier1: DbClient = {
       const { error } = await supabase.from('event_memories').delete().eq('id', id)
       if (error) throw new Error(error.message)
     },
-    uploadFile: async ({ userId, filename, blob, contentType }) => {
-      const path = `${userId}/${filename}`
-      const { error } = await supabase.storage.from('event-photos').upload(path, blob, { contentType, upsert: false })
-      if (error) throw new Error(error.message)
-      const { data } = supabase.storage.from('event-photos').getPublicUrl(path)
-      return { key: `event-photos/${path}`, publicUrl: data.publicUrl }
+    uploadFile: async ({ userId, filename, blob, contentType: _ct }) => {
+      // The eventId is encoded into the legacy filename ("covers/<ts>.jpg")
+      // for non-event uploads like event covers. We approximate by passing a
+      // placeholder eventId of the caller's id so the canonical key is
+      // <userId>/<userId>/<uuid>.<ext>. For real memory uploads the caller
+      // already constructs an eventId — those paths should migrate to the
+      // new (eventId, filename) shape over time.
+      // TODO(adapter-v2): replace uploadFile shim with explicit { eventId, blob }
+      const eventId = userId   // placeholder; covers don't have an event
+      const { key, signedUrl } = await storageClient.upload({ eventId, filename, blob })
+      return { key, publicUrl: signedUrl }
     },
   },
 

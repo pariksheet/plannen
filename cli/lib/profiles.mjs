@@ -231,6 +231,26 @@ export function portsFor(mode, portOffset) {
   return { PLANNEN_WEB_PORT: String(4321 + o) };
 }
 
+/**
+ * Return the default PLANNEN_STORAGE_BACKEND env var for a given mode and
+ * optional explicit storage choice. Tier 0 (`local_pg`) is always `local-fs`.
+ * Tier 1/2 default to `supabase`; `--storage s3` forces `s3` on Tier 1/2.
+ * Combining `--storage s3` with `local_pg` is refused with a clear error.
+ */
+export function storageBackendDefaultsForMode(mode, storageChoice) {
+  // storageChoice may be 'local-fs' | 'supabase' | 's3' | undefined.
+  if (storageChoice === 's3' && mode === 'local_pg') {
+    throw new Error(
+      "profile create: --storage=s3 is not allowed with --mode=local_pg.\n" +
+      "Tier 0 is single-user local mode and keeps photos under ~/.plannen/photos.\n" +
+      "Use --mode=local_sb or --mode=cloud_sb for an S3-backed deployment.",
+    );
+  }
+  if (mode === 'local_pg') return { PLANNEN_STORAGE_BACKEND: 'local-fs' };
+  if (storageChoice === 's3') return { PLANNEN_STORAGE_BACKEND: 's3' };
+  return { PLANNEN_STORAGE_BACKEND: 'supabase' };
+}
+
 export function modeToTier(mode) {
   return { local_pg: '0', local_sb: '1', cloud_sb: '2' }[mode];
 }

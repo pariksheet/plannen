@@ -1,25 +1,35 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+// Integration test for the Node-side picker-session-poll handler.
+// Runs with the real local-fs storage adapter so that upload + signedUrl
+// are exercised against the filesystem rather than a mock.
+// Lives in the overlay so prepare-shared copies it into backend/src/_shared/
+// where the backend vitest project picks it up.
 
-vi.mock('../googleOAuth.ts', () => ({
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, afterAll } from 'vitest'
+import { mkdtempSync, rmSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+vi.mock('../googleOAuth.js', () => ({
   refreshGoogleAccessToken: vi.fn(async () => ({ access_token: 'fresh', expires_in: 3600 })),
 }))
 
-// Mock the storage adapter so this test file runs in both the
-// supabase/functions vitest project (no real factory on disk) and
-// the backend vitest project (after prepare-shared stages the overlay).
-// The overlay test at backend/src/_shared-overlay/handlers/picker-session-poll.test.ts
-// exercises the real local-fs adapter end-to-end.
-vi.mock('../storage/factory.ts', () => ({
-  getStorage: () => ({
-    upload: vi.fn(async () => undefined),
-    signedUrl: vi.fn(async (_key: string) => `http://storage.mock/event-photos/${_key}`),
-    delete: vi.fn(async () => true),
-    head: vi.fn(async () => null),
-  }),
-  _resetStorageForTests: vi.fn(),
-}))
+import { handle } from './picker-session-poll.js'
+import { _resetStorageForTests } from '../storage/factory.js'
 
-import { handle } from './picker-session-poll.ts'
+let photosRoot: string
+
+beforeAll(() => {
+  photosRoot = mkdtempSync(join(tmpdir(), 'plannen-picker-'))
+  process.env.PLANNEN_PHOTOS_ROOT = photosRoot
+  process.env.PLANNEN_STORAGE_BACKEND = 'local-fs'
+  _resetStorageForTests()
+})
+
+afterAll(() => {
+  rmSync(photosRoot, { recursive: true, force: true })
+  delete process.env.PLANNEN_PHOTOS_ROOT
+  delete process.env.PLANNEN_STORAGE_BACKEND
+})
 
 function mockCtx(handler: (sql: string, params: unknown[]) => any) {
   return {
@@ -31,6 +41,7 @@ function mockCtx(handler: (sql: string, params: unknown[]) => any) {
 beforeEach(() => {
   process.env.GOOGLE_CLIENT_ID = 'cid'
   process.env.GOOGLE_CLIENT_SECRET = 'csec'
+  _resetStorageForTests()
 })
 
 afterEach(() => {
@@ -39,7 +50,7 @@ afterEach(() => {
   delete process.env.GOOGLE_CLIENT_SECRET
 })
 
-describe('picker-session-poll handler', () => {
+describe('picker-session-poll handler (Node/local-fs integration)', () => {
   it('returns 200 on OPTIONS', async () => {
     const req = new Request('http://x/', { method: 'OPTIONS' })
     const res = await handle(req, mockCtx(() => ({ rows: [], rowCount: 0 })))
@@ -94,7 +105,7 @@ describe('picker-session-poll handler', () => {
     expect(body.status).toBe('pending')
   })
 
-  it('downloads, uploads via storage adapter, inserts memory row with storage_key on success', async () => {
+  it('downloads, uploads via local-fs adapter, inserts memory row with storage_key', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) => {
@@ -156,11 +167,18 @@ describe('picker-session-poll handler', () => {
     expect(body.attached).toHaveLength(1)
     expect(body.attached[0].memory_id).toBe('mem-1')
     expect(inserts).toHaveLength(1)
-    // storage_key (index 5) and media_url (index 4) are both populated
+
+    // storage_key is the 6th param (index 5) in the INSERT — bare canonical key.
     const insertParams = inserts[0] as unknown[]
     expect(typeof insertParams[5]).toBe('string')
     expect(insertParams[5]).toMatch(/^u1\/e1\/g1\.jpg$/)
+
+    // media_url is the 5th param (index 4) — a signed URL from the adapter.
     expect(typeof insertParams[4]).toBe('string')
     expect(insertParams[4]).toContain('u1/e1/g1.jpg')
+
+    // The file should exist on disk under photosRoot/event-photos/<key>.
+    const storedPath = join(photosRoot, 'event-photos', 'u1', 'e1', 'g1.jpg')
+    expect(existsSync(storedPath)).toBe(true)
   })
 })
