@@ -332,3 +332,34 @@ describe('invokeInit — seed restore is non-fatal (#16)', () => {
     expect(warns.join('\n')).toContain('supabase/seed.sql');
   });
 });
+
+describe('invokeInit — watermarked seed replay (#16)', () => {
+  it('bounds migrations to the seed watermark, then migrates to head after the restore step', async () => {
+    mkdirSync(path.join(tmpRepo, 'supabase'), { recursive: true });
+    writeFileSync(
+      path.join(tmpRepo, 'supabase', 'seed.sql'),
+      '-- Local DB export\n-- plannen:watermark 20260522100000_event_memories_storage_key\nINSERT INTO x VALUES (1);\n',
+    );
+    const { ctx, calls } = makeCtx();
+    const code = await invokeInit({ mode: 'local_pg', email: 'me@example.com', 'non-interactive': true }, ctx);
+    expect(code).toBe(0);
+    const migrateCalls = calls.spawn.filter((c) => (c.args ?? []).some((a) => String(a).includes('migrate.mjs')));
+    expect(migrateCalls.length).toBe(2);
+    // First run is bounded to the watermark…
+    expect(migrateCalls[0].args).toContain('--to');
+    expect(migrateCalls[0].args).toContain('20260522100000_event_memories_storage_key');
+    // …second run (post-restore) is unbounded.
+    expect(migrateCalls[1].args.some((a) => a === '--to')).toBe(false);
+  });
+
+  it('runs a single unbounded migrate when the seed has no watermark', async () => {
+    mkdirSync(path.join(tmpRepo, 'supabase'), { recursive: true });
+    writeFileSync(path.join(tmpRepo, 'supabase', 'seed.sql'), '-- legacy dump\nINSERT INTO x VALUES (1);\n');
+    const { ctx, calls } = makeCtx();
+    const code = await invokeInit({ mode: 'local_pg', email: 'me@example.com', 'non-interactive': true }, ctx);
+    expect(code).toBe(0);
+    const migrateCalls = calls.spawn.filter((c) => (c.args ?? []).some((a) => String(a).includes('migrate.mjs')));
+    expect(migrateCalls.length).toBe(1);
+    expect(migrateCalls[0].args.some((a) => a === '--to')).toBe(false);
+  });
+});

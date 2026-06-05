@@ -133,9 +133,16 @@ else
   STORAGE_CONTAINER="supabase_storage_plannen"
 
   echo "Tier 1 — exporting local Supabase to $SQL_OUT ..."
+  # Schema watermark for replay-aware restore (#16).
+  WATERMARK=$(docker exec "$DB_CONTAINER" psql -U postgres -tAc \
+    "SELECT version FROM plannen.schema_migrations WHERE version NOT LIKE '00000000000000\\_%' ORDER BY version DESC LIMIT 1" \
+    postgres 2>/dev/null || true)
   {
     echo "-- Local DB export (Tier 1) $(date -u +%Y-%m-%d)"
     echo "-- Restore (Tier 1): supabase db reset (auto-loads this file)"
+    if [ -n "$WATERMARK" ]; then
+      echo "-- plannen:watermark $WATERMARK"
+    fi
     echo ""
     echo "SET session_replication_role = replica;"
     echo ""

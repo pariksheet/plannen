@@ -11,8 +11,11 @@
 // Each migration (Tier 0/1) runs in its own transaction. Successes are
 // recorded in plannen.schema_migrations(version, applied_at).
 //
-// Usage: node scripts/lib/migrate.mjs
+// Usage: node scripts/lib/migrate.mjs [--to <version>]
 // Reads DATABASE_URL and PLANNEN_TIER from env (or repo-root .env if present).
+// --to bounds the run: migrations sorting after <version> are deferred. Used
+// by the seed-restore replay flow (#16) — apply up to the dump's watermark,
+// load the dump, then run again unbounded.
 
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join, basename } from 'node:path'
@@ -20,6 +23,15 @@ import { fileURLToPath } from 'node:url'
 import pg from 'pg'
 
 import { runMigrateTier2 } from '../../cli/lib/migrate-tier2.mjs'
+import { withinBound } from './seed-watermark.mjs'
+
+// --to <version>: upper bound for this run (see header comment).
+const toIdx = process.argv.indexOf('--to')
+const BOUND = toIdx !== -1 ? process.argv[toIdx + 1] : null
+if (toIdx !== -1 && !BOUND) {
+  console.error('--to requires a migration version argument')
+  process.exit(1)
+}
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url))
 
@@ -86,9 +98,11 @@ const { rows: applied } = await client.query('SELECT version FROM plannen.schema
 const seen = new Set(applied.map((r) => r.version))
 
 let count = 0
+let deferred = 0
 for (const dir of MIGRATIONS_DIRS) {
   for (const { version, file } of listSql(dir)) {
     if (seen.has(version)) continue
+    if (!withinBound(version, BOUND)) { deferred++; continue }
     const sql = readFileSync(file, 'utf8')
     process.stdout.write(`applying ${version}... `)
     try {
@@ -106,5 +120,5 @@ for (const dir of MIGRATIONS_DIRS) {
   }
 }
 
-console.log(`done. applied ${count} migration(s).`)
+console.log(`done. applied ${count} migration(s).${deferred ? ` deferred ${deferred} past --to ${BOUND}.` : ''}`)
 await client.end()

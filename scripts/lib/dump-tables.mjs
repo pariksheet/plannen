@@ -11,6 +11,8 @@
 
 import pg from 'pg'
 
+import { latestAppliedVersion, watermarkHeader } from './seed-watermark.mjs'
+
 const TABLES = [
   'auth.users',
   'plannen.users',
@@ -86,6 +88,13 @@ async function getColumns(schema, table) {
 
 console.log(`-- Local DB export (Tier 0, Node dumper) ${new Date().toISOString().slice(0, 10)}`)
 console.log('-- Restore (Tier 0): node scripts/lib/restore-seed.mjs supabase/seed.sql')
+// Stamp the source DB's schema version so restore paths can replay correctly:
+// migrate up to this version, load the dump, then migrate forward (#16).
+{
+  const watermark = await latestAppliedVersion(client)
+  if (watermark) console.log(watermarkHeader(watermark))
+  else process.stderr.write('warn: no migration tracking table found — dump written without a watermark\n')
+}
 console.log('')
 console.log('SET session_replication_role = replica;')
 console.log('')

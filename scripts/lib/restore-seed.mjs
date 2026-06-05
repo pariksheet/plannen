@@ -18,6 +18,8 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
 
+import { readSeedWatermark, versionsNewerThan } from './seed-watermark.mjs'
+
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url))
 
 try {
@@ -40,6 +42,33 @@ const seed = readFileSync(seedPath, 'utf8')
 
 const client = new pg.Client({ connectionString: DATABASE_URL })
 await client.connect()
+
+// Watermark check (#16): a data-only dump applies cleanly only to the schema
+// it was exported from. Refuse when this DB has already migrated past it —
+// the replay flow (init: migrate --to <watermark> → restore → migrate) is the
+// supported path for restoring an old dump.
+{
+  const watermark = readSeedWatermark(seed)
+  if (watermark) {
+    let appliedVersions = []
+    try {
+      const { rows } = await client.query('SELECT version FROM plannen.schema_migrations')
+      appliedVersions = rows.map((r) => r.version)
+    } catch { /* tracking table absent — nothing applied yet */ }
+    const newer = versionsNewerThan(appliedVersions, watermark)
+    if (newer.length) {
+      console.error(`seed was exported at migration ${watermark}, but this DB has ${newer.length} newer migration(s) applied (latest: ${newer.at(-1)}).`)
+      console.error('A data-only dump cannot load into a newer schema. Restore it on a fresh DB instead:')
+      console.error('  node scripts/lib/migrate.mjs --to ' + watermark)
+      console.error(`  node scripts/lib/restore-seed.mjs ${seedPath}`)
+      console.error('  node scripts/lib/migrate.mjs')
+      console.error("(npx plannen init runs this replay automatically on a fresh DB when the seed is watermarked.)")
+      process.exit(2)
+    }
+  } else {
+    console.log('note: seed has no migration watermark (pre-#16 dump) — applying as-is.')
+  }
+}
 
 console.log('1/4 wiping existing plannen.* and auth.users data...')
 await client.query(`

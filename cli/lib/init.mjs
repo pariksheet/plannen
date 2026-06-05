@@ -49,6 +49,7 @@ import { composeEnv, getProfileEnvPath, profileExists, readManifest, resolveActi
 import { ensureVapidKeys } from './ensure-vapid.mjs';
 import { buildPoolerUrl } from '../../scripts/lib/cloud-db-url.mjs';
 import { portOwner as defaultPortOwner, describePortSquatter } from '../../scripts/lib/port-owner.mjs';
+import { readSeedWatermark } from '../../scripts/lib/seed-watermark.mjs';
 import * as supabaseMgmt from '../../scripts/lib/supabase-mgmt.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -438,19 +439,27 @@ export async function invokeInit(rawArgs, ctx = {}) {
     }
     logImpl.ok(`embedded Postgres on ${pgPort}`);
 
+    // Replay-aware migration bound (#16): a data-only seed dump applies
+    // cleanly only to the schema it was exported from. When a watermarked
+    // seed might be restored, migrate up to the watermark first; the
+    // remaining migrations run after the restore (step 5d).
+    const seedSql = path.join(repoRoot, 'supabase/seed.sql');
+    const seedPhotos = path.join(repoRoot, 'supabase/seed-photos.tar.gz');
+    const seedWatermark = existsSync(seedSql)
+      ? readSeedWatermark(readFileSync(seedSql, 'utf8'))
+      : null;
+
     logImpl.step('5. Applying migrations (Tier 0 overlay + main)');
     {
+      const args = [path.join(repoRoot, 'scripts/lib/migrate.mjs')];
+      if (seedWatermark) args.push('--to', seedWatermark);
       const c = await spawn(
-        'node', [path.join(repoRoot, 'scripts/lib/migrate.mjs')],
+        'node', args,
         { cwd: repoRoot, env: { ...process.env, ...composed, DATABASE_URL: databaseUrlTier0, PLANNEN_TIER: '0' } },
       );
       if (c !== 0) { logImpl.err(`migrations failed (exit ${c})`); return c; }
     }
-    logImpl.ok('migrations applied');
-
-    // Auto-restore seed (and photos) on a fresh DB.
-    const seedSql = path.join(repoRoot, 'supabase/seed.sql');
-    const seedPhotos = path.join(repoRoot, 'supabase/seed-photos.tar.gz');
+    logImpl.ok(seedWatermark ? `migrations applied up to seed watermark ${seedWatermark}` : 'migrations applied');
     if (existsSync(seedSql)) {
       // Count plannen.users to decide whether to restore. Use a tiny inline JS
       // probe via spawnSync so we don't pull pg directly into this module.
@@ -485,6 +494,19 @@ export async function invokeInit(rawArgs, ctx = {}) {
       } else {
         logImpl.dim(`DB already has ${count} plannen.users row(s) — skipping seed restore`);
       }
+    }
+
+    // 5d. Replay tail (#16): apply the migrations deferred past the seed
+    // watermark, migrating the freshly-restored data forward to head. Runs
+    // regardless of restore outcome so the schema always ends at head.
+    if (seedWatermark) {
+      logImpl.step('5d. Applying migrations beyond the seed watermark');
+      const c = await spawn(
+        'node', [path.join(repoRoot, 'scripts/lib/migrate.mjs')],
+        { cwd: repoRoot, env: { ...process.env, ...composed, DATABASE_URL: databaseUrlTier0, PLANNEN_TIER: '0' } },
+      );
+      if (c !== 0) { logImpl.err(`post-restore migrations failed (exit ${c})`); return c; }
+      logImpl.ok('schema at head');
     }
 
     logImpl.step(`6. Inserting Plannen user row for ${email}`);
