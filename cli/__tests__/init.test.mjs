@@ -304,3 +304,31 @@ describe('invokeInit — port squatter detection (#14)', () => {
     expect(out).toContain('colima/Docker port-forward');
   });
 });
+
+describe('invokeInit — seed restore is non-fatal (#16)', () => {
+  it('warns and continues when supabase/seed.sql no longer applies', async () => {
+    mkdirSync(path.join(tmpRepo, 'supabase'), { recursive: true });
+    writeFileSync(path.join(tmpRepo, 'supabase', 'seed.sql'), '-- stale dump\n');
+    const warns = [];
+    const { ctx } = makeCtx({
+      log: { step: () => {}, ok: () => {}, warn: (s) => warns.push(s), err: () => {}, dim: () => {} },
+    });
+    // Empty DB (count 0) so the restore path triggers; restore-seed.mjs fails.
+    const innerSync = ctx.spawnSync;
+    ctx.spawnSync = vi.fn((cmd, args, opts) => {
+      if (cmd === 'node' && args?.[0] === '-e' && /SELECT count/.test(args[1] ?? '')) {
+        return { status: 0, stdout: '0', stderr: '' };
+      }
+      return innerSync(cmd, args, opts);
+    });
+    const innerSpawn = ctx.spawn;
+    ctx.spawn = vi.fn(async (cmd, args, opts) => {
+      if ((args ?? []).some((a) => String(a).includes('restore-seed.mjs'))) return 1;
+      return innerSpawn(cmd, args, opts);
+    });
+    const code = await invokeInit({ mode: 'local_pg', email: 'me@example.com', 'non-interactive': true }, ctx);
+    expect(code).toBe(0); // init completes despite the failed optional restore
+    expect(warns.join('\n')).toContain('seed restore failed');
+    expect(warns.join('\n')).toContain('supabase/seed.sql');
+  });
+});

@@ -461,16 +461,26 @@ export async function invokeInit(rawArgs, ctx = {}) {
           'node', [path.join(repoRoot, 'scripts/lib/restore-seed.mjs'), seedSql],
           { cwd: repoRoot, env: { ...process.env, ...composed, DATABASE_URL: databaseUrlTier0 } },
         );
-        if (c !== 0) { logImpl.err(`seed restore failed (exit ${c})`); return c; }
-        logImpl.ok('seed restored');
-        if (existsSync(seedPhotos)) {
-          logImpl.step('5c. Restoring photos from supabase/seed-photos.tar.gz');
-          const c2 = await spawn(
-            'node', [path.join(repoRoot, 'scripts/lib/restore-photos.mjs'), seedPhotos],
-            { cwd: repoRoot, env: { ...process.env, ...composed } },
+        if (c !== 0) {
+          // The seed is an optional convenience restore — a pg_dump taken at
+          // export time. After schema migrations it can stop applying cleanly
+          // (e.g. dropped columns). The DB was empty, so continuing with a
+          // fresh one loses nothing; the dump stays on disk untouched.
+          logImpl.warn(
+            `seed restore failed (exit ${c}) — likely a backup from an older schema. ` +
+            `Continuing with an empty DB; your data is still in ${path.relative(repoRoot, seedSql)}.`,
           );
-          if (c2 !== 0) { logImpl.err(`photos restore failed (exit ${c2})`); return c2; }
-          logImpl.ok('photos restored');
+        } else {
+          logImpl.ok('seed restored');
+          if (existsSync(seedPhotos)) {
+            logImpl.step('5c. Restoring photos from supabase/seed-photos.tar.gz');
+            const c2 = await spawn(
+              'node', [path.join(repoRoot, 'scripts/lib/restore-photos.mjs'), seedPhotos],
+              { cwd: repoRoot, env: { ...process.env, ...composed } },
+            );
+            if (c2 !== 0) { logImpl.err(`photos restore failed (exit ${c2})`); return c2; }
+            logImpl.ok('photos restored');
+          }
         }
       } else {
         logImpl.dim(`DB already has ${count} plannen.users row(s) — skipping seed restore`);
