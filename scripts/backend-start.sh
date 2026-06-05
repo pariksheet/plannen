@@ -32,6 +32,15 @@ if [[ -f "$PID" ]] && kill -0 "$(cat "$PID")" 2>/dev/null; then
   exit 0
 fi
 
+# Foreign listener on our port? Warn with the owner's name — wildcard forwards
+# (e.g. Supabase Studio via colima) can coexist with our loopback bind but make
+# failures confusing (#14). The /health probe below stays the arbiter.
+PORT="${PLANNEN_BACKEND_PORT:-54323}"
+SQUATTER="$(lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null | awk 'NR==2 {print $1" (pid "$2")"}')"
+if [[ -n "$SQUATTER" ]]; then
+  echo "backend-start: WARNING — port ${PORT} already has a listener: ${SQUATTER}. If startup fails or /health misbehaves, stop it or use a profile with a different port offset." >&2
+fi
+
 # Build on first run (or after a clean).
 if [[ ! -f "$BACKEND_DIR/dist/index.js" ]]; then
   echo "backend-start: dist missing, building…"
@@ -44,7 +53,6 @@ echo $! > "$PID"
 disown
 sleep 1
 
-PORT="${PLANNEN_BACKEND_PORT:-54323}"
 if curl -fsS "http://127.0.0.1:${PORT}/health" > /dev/null; then
   echo "backend-start: started (pid $(cat "$PID")), port $PORT, log: $LOG"
 else

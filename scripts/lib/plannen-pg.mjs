@@ -5,6 +5,7 @@ import EmbeddedPostgres from 'embedded-postgres'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { portOwner, describePortSquatter } from './port-owner.mjs'
 
 const DATA_DIR = process.env.PLANNEN_PG_DATA ?? join(homedir(), '.plannen', 'pgdata')
 const PID_FILE = join(homedir(), '.plannen', 'pg.pid')
@@ -23,7 +24,19 @@ function newServer() {
   })
 }
 
+// Refuse to start when something else already listens on our port — a
+// foreign listener (colima/Docker forward, another profile's pg) answers
+// connects meant for us and produces confusing failures like 28P01 (#14).
+function guardPortFree() {
+  const owner = portOwner(PORT)
+  if (owner) {
+    console.error(describePortSquatter(PORT, owner))
+    process.exit(1)
+  }
+}
+
 async function init() {
+  guardPortFree()
   mkdirSync(join(homedir(), '.plannen'), { recursive: true })
   if (existsSync(join(DATA_DIR, 'PG_VERSION'))) {
     console.log(`pgdata already initialised at ${DATA_DIR}`)
@@ -46,6 +59,7 @@ async function init() {
 }
 
 async function start() {
+  guardPortFree()
   const pg = newServer()
   await pg.start()
   writeFileSync(PID_FILE, String(process.pid))

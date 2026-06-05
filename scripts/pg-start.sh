@@ -12,12 +12,17 @@ if [[ -f "$HOME/.plannen/pg.pid" ]] && kill -0 "$(cat "$HOME/.plannen/pg.pid")" 
   exit 0
 fi
 
+# The alive check above failed, so any remaining pid file is stale — remove it
+# so a failed start below can't masquerade as success.
+rm -f "$HOME/.plannen/pg.pid"
+
 nohup node "$HERE/lib/plannen-pg.mjs" start >> "$LOG" 2>&1 &
 disown
 sleep 2
 if [[ -f "$HOME/.plannen/pg.pid" ]]; then
   echo "pg-start: spawned (pid $(cat "$HOME/.plannen/pg.pid")), log: $LOG"
 else
-  echo "pg-start: failed to write pid; tail $LOG"
+  echo "pg-start: failed to start; recent log:"
+  tail -3 "$LOG" 2>/dev/null || true
   exit 1
 fi

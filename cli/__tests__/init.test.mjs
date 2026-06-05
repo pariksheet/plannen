@@ -84,6 +84,7 @@ function makeCtx(overrides = {}) {
       return ''; // default-accept
     }),
     waitForPort: vi.fn(async () => true),
+    portOwner: vi.fn(() => null), // no squatters by default — keep machine state out of tests
     log: { step: () => {}, ok: () => {}, warn: () => {}, err: () => {}, dim: () => {} },
     ensureProfile: undefined, // use real one
     ...overrides,
@@ -286,5 +287,20 @@ describe('invokeInit — profile isolation (#13)', () => {
     expect(warns.join('\n')).toContain('profile use side');
     // Side profile got its own settings, written directly to its env file.
     expect(readFileSync(getProfileEnvPath('side', env()), 'utf8')).toContain('PLANNEN_USER_EMAIL=side@example.com');
+  });
+});
+
+describe('invokeInit — port squatter detection (#14)', () => {
+  it('Tier 0 refuses when a foreign process holds the pg port, naming it', async () => {
+    const errs = [];
+    const { ctx } = makeCtx({
+      portOwner: vi.fn(() => ({ pid: 4650, command: 'ssh' })),
+      log: { step: () => {}, ok: () => {}, warn: () => {}, err: (s) => errs.push(s), dim: () => {} },
+    });
+    const code = await invokeInit({ mode: 'local_pg', email: 'me@example.com', 'non-interactive': true }, ctx);
+    expect(code).toBe(1);
+    const out = errs.join('\n');
+    expect(out).toContain('ssh (pid 4650)');
+    expect(out).toContain('colima/Docker port-forward');
   });
 });

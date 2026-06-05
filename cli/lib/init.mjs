@@ -48,6 +48,7 @@ import { ensureProfile as defaultEnsureProfile } from './ensure-profile.mjs';
 import { composeEnv, getProfileEnvPath, profileExists, readManifest, resolveActiveProfile } from './profiles.mjs';
 import { ensureVapidKeys } from './ensure-vapid.mjs';
 import { buildPoolerUrl } from '../../scripts/lib/cloud-db-url.mjs';
+import { portOwner as defaultPortOwner, describePortSquatter } from '../../scripts/lib/port-owner.mjs';
 import * as supabaseMgmt from '../../scripts/lib/supabase-mgmt.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -190,6 +191,7 @@ export async function invokeInit(rawArgs, ctx = {}) {
   const prompt = ctx.prompt ?? defaultPrompt;
   const ensure = ctx.ensureProfile ?? defaultEnsureProfile;
   const wait = ctx.waitForPort ?? waitForPort;
+  const whoHoldsPort = ctx.portOwner ?? defaultPortOwner;
   const fetchImpl = ctx.fetch ?? globalThis.fetch;
   const mgmt = ctx.supabaseMgmtImpl ?? supabaseMgmt;
   const logImpl = makeLog(ctx.log);
@@ -395,9 +397,17 @@ export async function invokeInit(rawArgs, ctx = {}) {
     logImpl.step('4. Starting embedded Postgres (Tier 0)');
     mkdirSync(path.join(os.homedir(), '.plannen'), { recursive: true });
     const pgPidPath = path.join(os.homedir(), '.plannen', 'pg.pid');
+    // A foreign listener on our port (colima/Docker forward, another stack)
+    // answers connects meant for the embedded pg and corrupts migrations with
+    // confusing auth errors. Identify it and refuse up front (#14).
+    const squatter = whoHoldsPort(pgPort);
     if (pidAlive(pgPidPath)) {
       const pid = readFileSync(pgPidPath, 'utf8').trim();
       logImpl.dim(`embedded Postgres already running (pid ${pid})`);
+      if (squatter && !/postgres/i.test(squatter.command)) {
+        logImpl.err(describePortSquatter(pgPort, squatter));
+        return 1;
+      }
       // The pid file is global — the running instance may belong to a profile
       // on a different port offset. Refuse to migrate the wrong DB (#13).
       const up = await wait('127.0.0.1', pgPort, 5);
@@ -409,6 +419,10 @@ export async function invokeInit(rawArgs, ctx = {}) {
         return 1;
       }
     } else {
+      if (squatter) {
+        logImpl.err(describePortSquatter(pgPort, squatter));
+        return 1;
+      }
       // `init` is the idempotent entry — initdb's on first run, then keeps pg
       // and supervisor alive. Background it; record the pid for pg-stop.sh.
       spawnBg(
