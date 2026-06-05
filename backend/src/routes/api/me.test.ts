@@ -47,3 +47,52 @@ describe('GET /api/me', () => {
     })
   })
 })
+
+describe('POST /api/me (LN-01 guards, #10)', () => {
+  const switchEmail = 'me-switch-test@plannen.local'
+  const savedTier = process.env.PLANNEN_TIER
+
+  afterAll(async () => {
+    process.env.PLANNEN_TIER = savedTier
+    const c = await pool.connect()
+    try {
+      await c.query('DELETE FROM plannen.users WHERE email = $1', [switchEmail])
+      await c.query('DELETE FROM auth.users WHERE email = $1', [switchEmail])
+    } finally {
+      c.release()
+    }
+  })
+
+  it('returns 404 on non-zero tiers — the route must not exist in cloud deployments', async () => {
+    process.env.PLANNEN_TIER = '2'
+    const res = await app.request('/api/me', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: switchEmail }),
+    })
+    expect(res.status).toBe(404)
+  })
+
+  it('switches identity on tier 0', async () => {
+    process.env.PLANNEN_TIER = '0'
+    const res = await app.request('/api/me', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: switchEmail }),
+    })
+    expect(res.status).toBe(200)
+    const json = await res.json()
+    expect(json.data.email).toBe(switchEmail)
+    expect(json.data.userId).toBeTruthy()
+  })
+
+  it('rejects an invalid email on tier 0', async () => {
+    process.env.PLANNEN_TIER = '0'
+    const res = await app.request('/api/me', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'not-an-email' }),
+    })
+    expect(res.status).toBe(400)
+  })
+})

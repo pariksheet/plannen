@@ -1,9 +1,12 @@
 import { Hono } from 'hono'
+import { getConnInfo } from '@hono/node-server/conninfo'
 import { withUserContext } from '../../db.js'
 import { signupOrSwitch } from '../../auth.js'
 import { setIdentity } from '../../_shared/identity.js'
 import { updateEnvFile } from '../../_shared/rewriteEnv.js'
 import type { AppVariables } from '../../types.js'
+
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
 
 export const me = new Hono<{ Variables: AppVariables }>()
 
@@ -33,6 +36,23 @@ me.get('/', async (c) => {
 // current process picks up the change immediately), then returns the resolved
 // user in the same shape as GET /.
 me.post('/', async (c) => {
+  // LN-01 (#10): identity switching is a Tier-0-only, local-console feature —
+  // it swaps the active identity and rewrites the backend's env file.
+  // Tier guard: on any cloud/multi-user tier this route does not exist.
+  // Read fresh per request, matching how the identity itself is resolved.
+  if ((process.env.PLANNEN_TIER ?? '0') !== '0') {
+    return c.json({ error: 'not found' }, 404)
+  }
+  // Loopback guard: refuse callers that reached us over a non-loopback socket
+  // (misconfigured proxy, HOST override). In-process test requests have no
+  // socket info — the tier guard above still applies there.
+  try {
+    const addr = getConnInfo(c).remote.address
+    if (addr && !LOOPBACK.has(addr)) {
+      return c.json({ error: 'forbidden' }, 403)
+    }
+  } catch { /* no conninfo (non-socket request) */ }
+
   let body: unknown
   try {
     body = await c.req.json()
