@@ -8,7 +8,7 @@ import {
 import type { PracticeRow, PracticeCompletionRow } from '../lib/dbClient/types'
 import { CalendarGrid } from './CalendarGrid'
 import { EventCard } from './EventCard'
-import { buildWeekAgenda, eventDateLocal, ymd } from '../utils/weekAgenda'
+import { buildWeekAgenda, eventDateLocal, weekDays, ymd } from '../utils/weekAgenda'
 import { defaultCity } from '../utils/homeCity'
 
 export interface ScheduleOverviewProps {
@@ -28,10 +28,7 @@ function todayIso(): string {
 }
 
 function weekStartIso(): string {
-  const d = new Date()
-  const dow = d.getDay() || 7
-  d.setDate(d.getDate() - (dow - 1))
-  return ymd(d)
+  return ymd(weekDays(new Date())[0])
 }
 
 function timeOf(event: Event): string {
@@ -251,6 +248,7 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
                     <li key={e.id}>
                       <button
                         type="button"
+                        aria-expanded={selectedId === e.id}
                         onClick={() => toggle(e.id)}
                         className={`w-full text-left text-base hover:text-indigo-700 flex items-baseline gap-2 ${
                           done ? 'line-through text-gray-400'
@@ -258,7 +256,7 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
                               : 'text-gray-800'
                         }`}
                       >
-                        <span className="text-gray-500 w-12 shrink-0">
+                        <span className="text-gray-500 w-12 shrink-0 text-xs leading-6">
                           {state === 'now' ? '→' : (timeOf(e) || (isReminder ? '' : 'all-day'))}
                         </span>
                         <span className={isReminder ? 'italic text-gray-600' : ''}>
@@ -354,6 +352,7 @@ function ThisMonthCard({ events, preferredVisitDates, ...actions }: ThisMonthCar
   const monthList = buildMonthList(events)
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  useEffect(() => { setSelectedId(null) }, [selectedDay])
   const toggle = (id: string) => setSelectedId((cur) => (cur === id ? null : id))
   const dayEvents = selectedDay ? eventsOnDate(events, selectedDay) : []
   return (
@@ -392,19 +391,23 @@ function ThisMonthCard({ events, preferredVisitDates, ...actions }: ThisMonthCar
                 <div className="text-base text-gray-500">Nothing on this day.</div>
               ) : (
                 <ul className="space-y-0.5">
-                  {dayEvents.map((e) => (
-                    <li key={e.id}>
-                      <button
-                        type="button"
-                        onClick={() => toggle(e.id)}
-                        className="block w-full text-left text-base font-semibold text-gray-900 hover:text-indigo-700"
-                      >
-                        {timeOf(e) && <span className="text-gray-500 mr-2 font-normal">{timeOf(e)}</span>}
-                        {e.title}
-                      </button>
-                      {selectedId === e.id && <QuickEventCard event={e} {...actions} />}
-                    </li>
-                  ))}
+                  {dayEvents.map((e) => {
+                    const time = timeOf(e)
+                    return (
+                      <li key={e.id}>
+                        <button
+                          type="button"
+                          aria-expanded={selectedId === e.id}
+                          onClick={() => toggle(e.id)}
+                          className="block w-full text-left text-base font-semibold text-gray-900 hover:text-indigo-700"
+                        >
+                          {time && <span className="text-gray-500 mr-2 font-normal">{time}</span>}
+                          {e.title}
+                        </button>
+                        {selectedId === e.id && <QuickEventCard event={e} {...actions} />}
+                      </li>
+                    )
+                  })}
                 </ul>
               )}
             </div>
@@ -420,6 +423,7 @@ function ThisMonthCard({ events, preferredVisitDates, ...actions }: ThisMonthCar
                   <li key={entry.key} className="break-inside-avoid">
                     <button
                       type="button"
+                      aria-expanded={selectedId === entry.firstEvent.id}
                       onClick={() => toggle(entry.firstEvent.id)}
                       className="block w-full text-left text-base font-semibold text-gray-900 hover:text-indigo-700"
                     >
