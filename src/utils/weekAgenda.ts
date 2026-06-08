@@ -2,7 +2,8 @@ import { Event } from '../types/event'
 
 export interface DayBucket {
   dateKey: string   // "YYYY-MM-DD" local day
-  weekday: string   // localized short label, e.g. "Wed"
+  /** Display-only, locale-dependent label (e.g. "Wed"). Do not branch on its content. */
+  weekday: string
   dayNum: number    // 10
   isToday: boolean
   isPast: boolean    // whole day before today
@@ -60,7 +61,7 @@ export function buildWeekAgenda(events: Event[], now: Date): DayBucket[] {
     const dateKey = ymd(d)
     const isToday = dateKey === todayKey
     const evs = (byDay.get(dateKey) ?? []).slice()
-      .sort((a, b) => a.start_date.localeCompare(b.start_date))
+      .sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime())
     if (evs.length === 0 && !isToday) continue
     buckets.push({
       dateKey,

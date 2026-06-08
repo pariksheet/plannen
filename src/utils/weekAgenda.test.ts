@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildWeekAgenda, ymd } from './weekAgenda'
+import { buildWeekAgenda, ymd, weekDays, eventDateLocal } from './weekAgenda'
 import { Event } from '../types/event'
 
 function ev(overrides: Partial<Event>): Event {
@@ -24,6 +24,7 @@ describe('buildWeekAgenda', () => {
     expect(buckets[0].isToday).toBe(true)
     expect(buckets[0].dateKey).toBe(ymd(NOW))
     expect(buckets[0].events).toHaveLength(0)
+    expect(buckets[0].isPast).toBe(false)
   })
 
   it('buckets events onto their local day and sorts within a day', () => {
@@ -46,11 +47,36 @@ describe('buildWeekAgenda', () => {
 
   it('excludes recurrence parents and out-of-week events', () => {
     const buckets = buildWeekAgenda([
-      ev({ id: 'p', title: 'Parent', recurrence_rule: 'WEEKLY', start_date: '2026-06-10' } as Partial<Event>),
+      ev({ id: 'p', title: 'Parent', recurrence_rule: { frequency: 'weekly' } as unknown as Event['recurrence_rule'], start_date: '2026-06-10' }),
       ev({ id: 'far', title: 'Far', start_date: '2026-07-01' }),
     ], NOW)
     const all = buckets.flatMap((d) => d.events.map((e) => e.id))
     expect(all).not.toContain('p')
     expect(all).not.toContain('far')
+  })
+})
+
+describe('weekDays', () => {
+  it('when now is a Sunday, week starts Monday and ends Sunday', () => {
+    const sunday = new Date('2026-06-14T09:00:00')
+    const days = weekDays(sunday)
+    expect(days[0].ymd ?? ymd(days[0])).toBe('2026-06-08')
+    expect(ymd(days[0])).toBe('2026-06-08')
+    expect(ymd(days[6])).toBe('2026-06-14')
+  })
+
+  it('when now is a Monday, week starts that Monday', () => {
+    const monday = new Date('2026-06-08T09:00:00')
+    const days = weekDays(monday)
+    expect(ymd(days[0])).toBe('2026-06-08')
+  })
+})
+
+describe('eventDateLocal', () => {
+  it('resolves a timestamp to the local date (timezone-robust)', () => {
+    const timestamp = '2026-06-10T08:00:00'
+    const expected = ymd(new Date(timestamp))
+    const result = eventDateLocal(ev({ start_date: timestamp }))
+    expect(result).toBe(expected)
   })
 })
