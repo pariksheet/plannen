@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Event } from '../types/event'
 import { getTodayWeather, TodayWeather } from '../services/weatherService'
+import { getLocations } from '../services/profileService'
 import {
   listPractices, completionsThisWeek, markPracticeDone, unmarkPracticeDone,
 } from '../services/practiceService'
 import type { PracticeRow, PracticeCompletionRow } from '../lib/dbClient/types'
 import { CalendarGrid } from './CalendarGrid'
-import { EventDetailsModal } from './EventDetailsModal'
+import { EventCard } from './EventCard'
+import { buildWeekAgenda, eventDateLocal, overlappingIds, weekDays, ymd } from '../utils/weekAgenda'
+import { defaultCity } from '../utils/homeCity'
 
 export interface ScheduleOverviewProps {
   events: Event[]
@@ -20,49 +23,12 @@ export interface ScheduleOverviewProps {
 const sketchHand = "font-['Caveat'] tracking-tight"
 const sketchBody = "font-['Kalam']"
 
-function ymd(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
 function todayIso(): string {
   return ymd(new Date())
 }
 
 function weekStartIso(): string {
-  const d = new Date()
-  const dow = d.getDay() || 7
-  d.setDate(d.getDate() - (dow - 1))
-  return ymd(d)
-}
-
-// A date-only ISO ("2026-05-28") is taken as-is.
-// A timestamp ("2026-05-28T11:00:00Z") is converted to the user's local date.
-function eventDateLocal(event: Event): string {
-  if (event.start_date.length <= 10) return event.start_date.slice(0, 10)
-  const d = new Date(event.start_date)
-  if (Number.isNaN(d.getTime())) return event.start_date.slice(0, 10)
-  return ymd(d)
-}
-
-const TODAY_ACTIVE_STATUSES: ReadonlySet<Event['event_status']> = new Set(['going', 'planned'])
-
-function isTodayStrict(event: Event): boolean {
-  if (event.recurrence_rule) return false
-  if (!TODAY_ACTIVE_STATUSES.has(event.event_status)) return false
-  return eventDateLocal(event) === todayIso()
-}
-
-function weekDays(): Date[] {
-  const now = new Date()
-  const dow = now.getDay() || 7
-  const monday = new Date(now)
-  monday.setDate(now.getDate() - (dow - 1))
-  monday.setHours(0, 0, 0, 0)
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(monday)
-    d.setDate(monday.getDate() + i)
-    return d
-  })
+  return ymd(weekDays(new Date())[0])
 }
 
 function timeOf(event: Event): string {
@@ -72,8 +38,7 @@ function timeOf(event: Event): string {
   return t.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
-// Re-renders the caller once a minute so "happening now" / "past" stay live
-// without a manual refresh.
+// Re-renders the caller once a minute so "happening now" / "past" stay live.
 function useNow(intervalMs = 60_000): Date {
   const [now, setNow] = useState(() => new Date())
   useEffect(() => {
@@ -83,66 +48,51 @@ function useNow(intervalMs = 60_000): Date {
   return now
 }
 
-const DEFAULT_DURATION_MS = 2 * 60 * 60 * 1000  // assume 2h when no end_date
+const DEFAULT_DURATION_MS = 2 * 60 * 60 * 1000
 
 type EventTimeState = 'past' | 'now' | 'upcoming'
 
-// Where `event` sits relative to `now`. Events with a start time use a real
-// end_date when present, else a 2h window. Date-only events (no clock time)
-// are treated as all-day — "happening now" for the whole of today.
+// Where `event` sits relative to `now`. Timed events use end_date or a 2h
+// window; date-only events are "now" all day.
 function eventTimeState(event: Event, now: Date): EventTimeState {
   const hasTime = event.start_date.length > 10
   const start = hasTime ? new Date(event.start_date) : null
   let end: Date | null = null
   if (event.end_date) end = new Date(event.end_date)
   else if (start) end = new Date(start.getTime() + DEFAULT_DURATION_MS)
-
   if (start && end) {
     if (now >= end) return 'past'
     if (now >= start) return 'now'
     return 'upcoming'
   }
   if (!start && end) return now >= end ? 'past' : 'now'
-  return 'now'  // date-only event today — active all day
+  return 'now'
 }
 
 export function ScheduleOverview(props: ScheduleOverviewProps) {
   // Cancelled events don't belong on a schedule — filter once for every card.
   const events = props.events.filter((e) => e.event_status !== 'cancelled')
-  // Clicking an entry opens the details card (like the timeline view); its
-  // Edit button hands off to props.onEdit for the actual edit form.
-  const [focusedEvent, setFocusedEvent] = useState<Event | null>(null)
-  const [rsvpVersion, setRsvpVersion] = useState(0)
   return (
     <div className="space-y-4 w-full min-w-0">
       <HeaderStrip />
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <RoutinesCard />
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <TodayCard events={events} onSelect={setFocusedEvent} />
-        <ThisWeekCard events={events} onSelect={setFocusedEvent} />
-      </div>
-      <ThisMonthCard
+      <WeekCard
         events={events}
-        preferredVisitDates={props.preferredVisitDates}
+        onEdit={props.onEdit}
         onDelete={props.onDelete}
         onShareSuccess={props.onShareSuccess}
         onHashtagClick={props.onHashtagClick}
-        onSelect={setFocusedEvent}
       />
-      {focusedEvent && (
-        <EventDetailsModal
-          event={focusedEvent}
-          isOpen={!!focusedEvent}
-          onClose={() => setFocusedEvent(null)}
-          onEdit={props.onEdit}
-          showRSVP
-          showMemories
-          rsvpVersion={rsvpVersion}
-          onRsvpVersionChange={() => setRsvpVersion((v) => v + 1)}
-        />
-      )}
+      <ThisMonthCard
+        events={events}
+        preferredVisitDates={props.preferredVisitDates}
+        onEdit={props.onEdit}
+        onDelete={props.onDelete}
+        onShareSuccess={props.onShareSuccess}
+        onHashtagClick={props.onHashtagClick}
+      />
     </div>
   )
 }
@@ -155,9 +105,9 @@ function HeaderStrip() {
   })
   useEffect(() => {
     let cancelled = false
-    void getTodayWeather('Brussels').then((w) => {
-      if (!cancelled) setWeather(w)
-    })
+    void getLocations()
+      .then(({ data }) => getTodayWeather(defaultCity(data ?? [])))
+      .then((w) => { if (!cancelled) setWeather(w) })
     return () => { cancelled = true }
   }, [])
   return (
@@ -225,15 +175,8 @@ function RoutinesCard() {
           return (
             <li key={p.id}>
               <label className="flex items-center gap-2 cursor-pointer text-base">
-                <input
-                  type="checkbox"
-                  checked={done}
-                  onChange={() => void toggle(p)}
-                  className="h-4 w-4"
-                />
-                <span className={done ? 'line-through text-gray-400' : 'text-gray-800'}>
-                  {label}
-                </span>
+                <input type="checkbox" checked={done} onChange={() => void toggle(p)} className="h-4 w-4" />
+                <span className={done ? 'line-through text-gray-400' : 'text-gray-800'}>{label}</span>
               </label>
             </li>
           )
@@ -246,135 +189,121 @@ function RoutinesCard() {
   )
 }
 
-function TodayCard({ events, onSelect }: { events: Event[]; onSelect: (e: Event) => void }) {
-  const now = useNow()
-  const todays = events
-    .filter(isTodayStrict)
-    .slice()
-    .sort((a, b) => a.start_date.localeCompare(b.start_date))
+interface ActionProps {
+  onEdit: (event: Event) => void
+  onDelete: (id: string) => void
+  onShareSuccess: () => void
+  onHashtagClick: (tag: string) => void
+}
+
+// The reused timeline card, revealed inline when a schedule row is clicked.
+function QuickEventCard({ event, ...actions }: { event: Event } & ActionProps) {
   return (
-    <section className={`rounded-xl border-2 border-yellow-300/70 bg-yellow-100/60 p-4 ${sketchBody}`}>
-      <h3 className={`${sketchHand} text-3xl text-gray-900 mb-2`}>Today</h3>
-      {todays.length === 0 ? (
-        <div className="text-base text-gray-500">Nothing scheduled — enjoy the day.</div>
-      ) : (
-        <ul className="space-y-1">
-          {todays.map((e) => {
-            const state = eventTimeState(e, now)
-            const done = state === 'past'
+    <div data-testid="quick-event-card" className="mt-1 mb-2">
+      <EventCard
+        event={event}
+        viewMode="compact"
+        showActions
+        showRSVP
+        onEdit={actions.onEdit}
+        onDelete={actions.onDelete}
+        onShareSuccess={actions.onShareSuccess}
+        onHashtagClick={actions.onHashtagClick}
+      />
+    </div>
+  )
+}
+
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd']
+  const v = n % 100
+  return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`
+}
+
+// "Mon 8th Jun" from a local date-only key.
+function dayLabel(dateKey: string): string {
+  const d = new Date(`${dateKey}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return dateKey
+  const wd = d.toLocaleDateString(undefined, { weekday: 'short' })
+  const mon = d.toLocaleDateString(undefined, { month: 'short' })
+  return `${wd} ${ordinal(d.getDate())} ${mon}`
+}
+
+type WeekRow =
+  | { kind: 'empty'; key: string }
+  | { kind: 'event'; key: string; event: Event; isToday: boolean; isPast: boolean; clash: boolean }
+
+function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
+  const now = useNow()
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const buckets = buildWeekAgenda(events, now)
+  const toggle = (id: string) => setSelectedId((cur) => (cur === id ? null : id))
+  // Flatten the day buckets into one ordered list of rows so they fill two
+  // columns (denser than stacked day-blocks). Today is always represented — as
+  // a placeholder row when it has no events. Time clashes are detected per day.
+  const rows = buckets.flatMap<WeekRow>((b) => {
+    if (b.events.length === 0) return [{ kind: 'empty', key: b.dateKey }]
+    const clashes = overlappingIds(b.events)
+    return b.events.map((e) => ({
+      kind: 'event', key: e.id, event: e, isToday: b.isToday, isPast: b.isPast,
+      clash: clashes.has(e.id),
+    }))
+  })
+  return (
+    <section data-testid="week-card" className={`rounded-xl border-2 border-emerald-200/70 bg-emerald-50/60 p-4 ${sketchBody}`}>
+      <h3 className={`${sketchHand} text-3xl text-gray-900 mb-2`}>This week</h3>
+      <ul className="md:columns-2 gap-x-6">
+        {rows.map((row) => {
+          if (row.kind === 'empty') {
             return (
-              <li key={e.id} className="flex items-center gap-2">
-                <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
-                  {state === 'now' ? (
-                    <span className="text-indigo-600 font-bold" title="Happening now">→</span>
-                  ) : (
-                    <input
-                      type="checkbox"
-                      checked={done}
-                      readOnly
-                      tabIndex={-1}
-                      className="h-4 w-4 pointer-events-none"
-                    />
-                  )}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onSelect(e)}
-                  className={`flex-1 text-left text-base hover:text-indigo-700 ${
+              <li key={row.key} className="break-inside-avoid mb-1 text-base text-gray-500 rounded bg-yellow-100/60 px-1.5 py-0.5">
+                {dayLabel(row.key)} · nothing scheduled
+              </li>
+            )
+          }
+          const e = row.event
+          const isReminder = e.event_kind === 'reminder'
+          const state = row.isToday ? eventTimeState(e, now) : null
+          const done = state === 'past'
+          const t = timeOf(e)
+          const label = `${dayLabel(eventDateLocal(e))}${t ? ` ${t}` : ''}`
+          return (
+            <li key={row.key} className={`break-inside-avoid mb-1 ${row.isPast ? 'opacity-60' : ''}`}>
+              <button
+                type="button"
+                aria-expanded={selectedId === e.id}
+                onClick={() => toggle(e.id)}
+                className={`w-full text-left text-base leading-6 hover:text-indigo-700 rounded px-1.5 ${
+                  row.isToday ? 'bg-yellow-100/60' : ''
+                }`}
+              >
+                <span className="text-gray-500 text-sm whitespace-nowrap mr-2">{label}</span>
+                <span
+                  className={`${
                     done ? 'line-through text-gray-400'
                       : state === 'now' ? 'font-semibold text-gray-900'
                         : 'text-gray-800'
-                  }`}
+                  } ${isReminder ? 'italic text-gray-600' : ''}`}
                 >
-                  <span className={done ? 'text-gray-400 mr-2' : 'text-gray-500 mr-2'}>{timeOf(e)}</span>
+                  {state === 'now' && <span className="text-indigo-600 font-bold mr-1">→</span>}
                   {e.title}
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      )}
-    </section>
-  )
-}
-
-// Group events that recur into a single line: same parent_event_id, or same
-// title across multiple days, collapses into "Title — Mon, Wed, Fri".
-interface WeekListEntry {
-  key: string
-  title: string
-  days: string[]            // localised short day labels for chip
-  time: string              // time of first occurrence (empty for date-only events)
-  firstEvent: Event         // for click-to-edit
-}
-
-function buildWeekList(events: Event[], days: Date[]): WeekListEntry[] {
-  const weekStart = ymd(days[0])
-  const weekEnd = ymd(days[days.length - 1])
-  const today = todayIso()
-  const inWeek = events.filter((e) => {
-    if (e.recurrence_rule) return false  // skip abstract recurring parent
-    const ed = eventDateLocal(e)
-    if (ed < weekStart || ed > weekEnd) return false
-    // Past reminders add noise to the week view — keep only upcoming ones.
-    if (e.event_kind === 'reminder' && ed < today) return false
-    return true
-  })
-  const groups = new Map<string, WeekListEntry>()
-  for (const e of inWeek) {
-    const groupKey = e.parent_event_id ?? `t:${e.title.toLowerCase()}`
-    const dayLabel = new Date(e.start_date).toLocaleDateString(undefined, { weekday: 'short' })
-    const existing = groups.get(groupKey)
-    if (existing) {
-      if (!existing.days.includes(dayLabel)) existing.days.push(dayLabel)
-    } else {
-      groups.set(groupKey, {
-        key: groupKey,
-        title: e.title,
-        days: [dayLabel],
-        time: timeOf(e),
-        firstEvent: e,
-      })
-    }
-  }
-  // Sort by earliest start_date of each group's first event
-  return Array.from(groups.values()).sort((a, b) =>
-    a.firstEvent.start_date.localeCompare(b.firstEvent.start_date)
-  )
-}
-
-function ThisWeekCard({ events, onSelect }: { events: Event[]; onSelect: (e: Event) => void }) {
-  const days = weekDays()
-  const entries = buildWeekList(events, days)
-  const today = todayIso()
-  return (
-    <section className={`rounded-xl border-2 border-emerald-200/70 bg-emerald-50/60 p-4 ${sketchBody}`}>
-      <h3 className={`${sketchHand} text-3xl text-gray-900 mb-2`}>This week</h3>
-      {entries.length === 0 ? (
-        <div className="text-base text-gray-500">Nothing on this week.</div>
-      ) : (
-        <ul className="space-y-1">
-          {entries.map((entry) => {
-            const upcoming = eventDateLocal(entry.firstEvent) >= today
-            return (
-              <li key={entry.key}>
-                <button
-                  type="button"
-                  onClick={() => onSelect(entry.firstEvent)}
-                  className={`w-full text-left text-base hover:text-indigo-700 ${
-                    upcoming ? 'font-semibold text-gray-900' : 'text-gray-400'
-                  }`}
-                >
-                  <span className={upcoming ? 'text-gray-500 mr-2' : 'text-gray-400 mr-2'}>
-                    {entry.days.join(', ')}{entry.time ? ` ${entry.time}` : ''}
-                  </span>
-                  {entry.title}
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      )}
+                  {isReminder && (
+                    <span className="ml-1.5 text-[11px] not-italic bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-full px-1.5 py-0.5">
+                      reminder
+                    </span>
+                  )}
+                  {row.clash && (
+                    <span className="ml-1.5 text-[11px] not-italic whitespace-nowrap bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-1.5 py-0.5">
+                      ⚠ overlaps
+                    </span>
+                  )}
+                </span>
+              </button>
+              {selectedId === e.id && <QuickEventCard event={e} {...actions} />}
+            </li>
+          )
+        })}
+      </ul>
     </section>
   )
 }
@@ -385,40 +314,32 @@ function isInCurrentMonth(iso: string | null): boolean {
   return iso.slice(0, 7) === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 }
 
-// What appears in the month sidebar: upcoming events of the current month, but
-// not reminders (per user feedback — too much noise). Recurring parents are
-// skipped too; their child sessions carry the dates.
+// Month sidebar: all non-reminder events of the current month (past and
+// upcoming). Reminders are deliberately excluded here (noise) — they still
+// show on the calendar grid and on day-click; the week card carries them too.
 function isInMonthList(event: Event): boolean {
   if (event.event_kind === 'reminder') return false
   if (event.recurrence_rule) return false
-  if (!isInCurrentMonth(event.start_date)) return false
-  return eventDateLocal(event) >= todayIso()
+  return isInCurrentMonth(event.start_date)
 }
 
-// Group a series (same parent_event_id or same title) into one row in the
-// month list — matches the week-list grouping pattern. Returns the first
-// upcoming occurrence as the row anchor.
 interface MonthListEntry {
   key: string
   title: string
-  firstEvent: Event   // anchors the date + click target
-  count: number       // 1 = single event, N = series with N upcoming occurrences
+  firstEvent: Event
+  count: number
 }
 
 function buildMonthList(events: Event[]): MonthListEntry[] {
   const groups = new Map<string, MonthListEntry>()
-  // Sort ascending so firstEvent is the earliest upcoming occurrence per group.
   const sorted = events.filter(isInMonthList).slice().sort(
     (a, b) => a.start_date.localeCompare(b.start_date)
   )
   for (const e of sorted) {
     const groupKey = e.parent_event_id ?? `t:${e.title.toLowerCase()}`
     const existing = groups.get(groupKey)
-    if (existing) {
-      existing.count += 1
-    } else {
-      groups.set(groupKey, { key: groupKey, title: e.title, firstEvent: e, count: 1 })
-    }
+    if (existing) existing.count += 1
+    else groups.set(groupKey, { key: groupKey, title: e.title, firstEvent: e, count: 1 })
   }
   return Array.from(groups.values()).sort((a, b) =>
     a.firstEvent.start_date.localeCompare(b.firstEvent.start_date)
@@ -431,9 +352,6 @@ function formatShortDate(iso: string): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-// Events occurring on a specific local date (date-only key "YYYY-MM-DD"),
-// including multi-day events whose range covers it. Recurring parents are
-// skipped — their child sessions carry the actual dates.
 function eventsOnDate(events: Event[], dateKey: string): Event[] {
   return events
     .filter((e) => {
@@ -452,18 +370,18 @@ function formatLongDate(dateKey: string): string {
   return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
 }
 
-interface ThisMonthCardProps {
+interface ThisMonthCardProps extends ActionProps {
   events: Event[]
   preferredVisitDates: Record<string, string | null>
-  onDelete: (id: string) => void
-  onShareSuccess: () => void
-  onHashtagClick: (tag: string) => void
-  onSelect: (event: Event) => void
 }
 
-function ThisMonthCard({ events, preferredVisitDates, onDelete, onShareSuccess, onHashtagClick, onSelect }: ThisMonthCardProps) {
+function ThisMonthCard({ events, preferredVisitDates, ...actions }: ThisMonthCardProps) {
   const monthList = buildMonthList(events)
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Switching days clears any open reveal so a stale card can't carry over.
+  const chooseDay = (day: string | null) => { setSelectedDay(day); setSelectedId(null) }
+  const toggle = (id: string) => setSelectedId((cur) => (cur === id ? null : id))
   const dayEvents = selectedDay ? eventsOnDate(events, selectedDay) : []
   return (
     <section className={`rounded-xl border-2 border-violet-200/70 bg-violet-50/50 p-4 ${sketchBody}`}>
@@ -473,11 +391,11 @@ function ThisMonthCard({ events, preferredVisitDates, onDelete, onShareSuccess, 
           <CalendarGrid
             events={events}
             preferredVisitDates={preferredVisitDates}
-            onDelete={onDelete}
-            onShareSuccess={onShareSuccess}
-            onDataChange={onShareSuccess}
-            onHashtagClick={onHashtagClick}
-            onDateSelect={(d) => setSelectedDay(ymd(d))}
+            onDelete={actions.onDelete}
+            onShareSuccess={actions.onShareSuccess}
+            onDataChange={actions.onShareSuccess}
+            onHashtagClick={actions.onHashtagClick}
+            onDateSelect={(d) => chooseDay(ymd(d))}
             showActions={false}
             showSidebar={false}
             compact
@@ -490,7 +408,7 @@ function ThisMonthCard({ events, preferredVisitDates, onDelete, onShareSuccess, 
                 <h4 className={`${sketchHand} text-2xl text-gray-900`}>{formatLongDate(selectedDay)}</h4>
                 <button
                   type="button"
-                  onClick={() => setSelectedDay(null)}
+                  onClick={() => chooseDay(null)}
                   aria-label="Back to upcoming list"
                   className="inline-flex items-center justify-center h-7 w-7 rounded-full text-gray-500 hover:bg-violet-100 hover:text-gray-700"
                 >
@@ -507,12 +425,14 @@ function ThisMonthCard({ events, preferredVisitDates, onDelete, onShareSuccess, 
                       <li key={e.id}>
                         <button
                           type="button"
-                          onClick={() => onSelect(e)}
+                          aria-expanded={selectedId === e.id}
+                          onClick={() => toggle(e.id)}
                           className="block w-full text-left text-base font-semibold text-gray-900 hover:text-indigo-700"
                         >
                           {time && <span className="text-gray-500 mr-2 font-normal">{time}</span>}
                           {e.title}
                         </button>
+                        {selectedId === e.id && <QuickEventCard event={e} {...actions} />}
                       </li>
                     )
                   })}
@@ -522,24 +442,35 @@ function ThisMonthCard({ events, preferredVisitDates, onDelete, onShareSuccess, 
           ) : monthList.length === 0 ? (
             <div className="text-base text-gray-500">Nothing upcoming this month.</div>
           ) : (
-            // CSS columns (not grid) so entries fill the left column by date first, then the right.
-            <ul className="md:columns-2 gap-x-4 space-y-0.5">
+            <ul data-testid="month-list" className="md:columns-2 gap-x-4 space-y-0.5">
               {monthList.map((entry) => {
                 const time = timeOf(entry.firstEvent)
                 const dateLabel = formatShortDate(entry.firstEvent.start_date)
                 const suffix = entry.count > 1 ? ` ×${entry.count}` : ''
+                const dayKey = eventDateLocal(entry.firstEvent)
+                const isPast = dayKey < todayIso()
+                const isToday = dayKey === todayIso()
                 return (
-                  <li key={entry.key} className="break-inside-avoid">
+                  <li key={entry.key} className={`break-inside-avoid ${isPast ? 'opacity-60' : ''}`}>
                     <button
                       type="button"
-                      onClick={() => onSelect(entry.firstEvent)}
-                      className="block w-full text-left text-base font-semibold text-gray-900 hover:text-indigo-700"
+                      aria-expanded={selectedId === entry.firstEvent.id}
+                      onClick={() => toggle(entry.firstEvent.id)}
+                      className={`block w-full text-left text-base font-semibold text-gray-900 hover:text-indigo-700 rounded px-1.5 ${
+                        isToday ? 'bg-yellow-100/60' : ''
+                      }`}
                     >
                       <span className="text-gray-500 mr-2 font-normal">
                         {dateLabel}{time ? ` ${time}` : ''}
                       </span>
                       {entry.title}{suffix && <span className="text-gray-500 font-normal">{suffix}</span>}
+                      {isToday && (
+                        <span className="ml-1.5 text-[11px] font-normal whitespace-nowrap bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-1.5 py-0.5">
+                          today
+                        </span>
+                      )}
                     </button>
+                    {selectedId === entry.firstEvent.id && <QuickEventCard event={entry.firstEvent} {...actions} />}
                   </li>
                 )
               })}
