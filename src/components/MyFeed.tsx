@@ -300,17 +300,17 @@ export function MyFeed() {
             </button>
             <button
               type="button"
-              onClick={() => setViewMode('compact')}
-              className={`px-3 py-1 text-xs font-medium rounded ${viewMode === 'compact' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
-            >
-              Timeline
-            </button>
-            <button
-              type="button"
               onClick={() => setViewMode('calendar')}
               className={`px-3 py-1 text-xs font-medium rounded ${viewMode === 'calendar' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
             >
               Calendar
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('compact')}
+              className={`px-3 py-1 text-xs font-medium rounded ${viewMode === 'compact' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+            >
+              Timeline
             </button>
           </div>
         </div>
