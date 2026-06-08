@@ -74,3 +74,29 @@ export function buildWeekAgenda(events: Event[], now: Date): DayBucket[] {
   }
   return buckets
 }
+
+const DEFAULT_DURATION_MS = 2 * 60 * 60 * 1000 // assume 2h when no end_date
+
+// Ids of timed events whose clock ranges intersect another timed event in the
+// same list. Date-only (all-day) events never count as clashing, and back-to-
+// back events that merely touch (a.end === b.start) do not overlap.
+export function overlappingIds(events: Event[]): Set<string> {
+  const timed = events
+    .filter((e) => e.start_date.length > 10)
+    .map((e) => {
+      const start = new Date(e.start_date).getTime()
+      const end = e.end_date ? new Date(e.end_date).getTime() : start + DEFAULT_DURATION_MS
+      return { id: e.id, start, end: Math.max(end, start) }
+    })
+    .filter((x) => Number.isFinite(x.start))
+  const clash = new Set<string>()
+  for (let i = 0; i < timed.length; i++) {
+    for (let j = i + 1; j < timed.length; j++) {
+      if (timed[i].start < timed[j].end && timed[j].start < timed[i].end) {
+        clash.add(timed[i].id)
+        clash.add(timed[j].id)
+      }
+    }
+  }
+  return clash
+}

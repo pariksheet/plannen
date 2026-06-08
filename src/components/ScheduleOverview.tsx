@@ -8,7 +8,7 @@ import {
 import type { PracticeRow, PracticeCompletionRow } from '../lib/dbClient/types'
 import { CalendarGrid } from './CalendarGrid'
 import { EventCard } from './EventCard'
-import { buildWeekAgenda, eventDateLocal, weekDays, ymd } from '../utils/weekAgenda'
+import { buildWeekAgenda, eventDateLocal, overlappingIds, weekDays, ymd } from '../utils/weekAgenda'
 import { defaultCity } from '../utils/homeCity'
 
 export interface ScheduleOverviewProps {
@@ -231,7 +231,7 @@ function dayLabel(dateKey: string): string {
 
 type WeekRow =
   | { kind: 'empty'; key: string }
-  | { kind: 'event'; key: string; event: Event; isToday: boolean; isPast: boolean }
+  | { kind: 'event'; key: string; event: Event; isToday: boolean; isPast: boolean; clash: boolean }
 
 function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
   const now = useNow()
@@ -240,14 +240,15 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
   const toggle = (id: string) => setSelectedId((cur) => (cur === id ? null : id))
   // Flatten the day buckets into one ordered list of rows so they fill two
   // columns (denser than stacked day-blocks). Today is always represented — as
-  // a placeholder row when it has no events.
-  const rows = buckets.flatMap<WeekRow>((b) =>
-    b.events.length === 0
-      ? [{ kind: 'empty', key: b.dateKey }]
-      : b.events.map((e) => ({
-          kind: 'event', key: e.id, event: e, isToday: b.isToday, isPast: b.isPast,
-        }))
-  )
+  // a placeholder row when it has no events. Time clashes are detected per day.
+  const rows = buckets.flatMap<WeekRow>((b) => {
+    if (b.events.length === 0) return [{ kind: 'empty', key: b.dateKey }]
+    const clashes = overlappingIds(b.events)
+    return b.events.map((e) => ({
+      kind: 'event', key: e.id, event: e, isToday: b.isToday, isPast: b.isPast,
+      clash: clashes.has(e.id),
+    }))
+  })
   return (
     <section data-testid="week-card" className={`rounded-xl border-2 border-emerald-200/70 bg-emerald-50/60 p-4 ${sketchBody}`}>
       <h3 className={`${sketchHand} text-3xl text-gray-900 mb-2`}>This week</h3>
@@ -289,6 +290,11 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
                   {isReminder && (
                     <span className="ml-1.5 text-[11px] not-italic bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-full px-1.5 py-0.5">
                       reminder
+                    </span>
+                  )}
+                  {row.clash && (
+                    <span className="ml-1.5 text-[11px] not-italic whitespace-nowrap bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-1.5 py-0.5">
+                      ⚠ overlaps
                     </span>
                   )}
                 </span>

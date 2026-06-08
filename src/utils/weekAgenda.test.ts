@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildWeekAgenda, ymd, weekDays, eventDateLocal } from './weekAgenda'
+import { buildWeekAgenda, overlappingIds, ymd, weekDays, eventDateLocal } from './weekAgenda'
 import { Event } from '../types/event'
 
 function ev(overrides: Partial<Event>): Event {
@@ -53,6 +53,40 @@ describe('buildWeekAgenda', () => {
     const all = buckets.flatMap((d) => d.events.map((e) => e.id))
     expect(all).not.toContain('p')
     expect(all).not.toContain('far')
+  })
+})
+
+describe('overlappingIds', () => {
+  it('flags both events whose timed ranges intersect', () => {
+    const ids = overlappingIds([
+      ev({ id: 'a', start_date: '2026-06-10T11:00:00', end_date: '2026-06-10T12:00:00' }),
+      ev({ id: 'b', start_date: '2026-06-10T11:30:00', end_date: '2026-06-10T12:30:00' }),
+    ])
+    expect(ids).toEqual(new Set(['a', 'b']))
+  })
+
+  it('does not flag back-to-back events that only touch', () => {
+    const ids = overlappingIds([
+      ev({ id: 'a', start_date: '2026-06-10T11:00:00', end_date: '2026-06-10T12:00:00' }),
+      ev({ id: 'b', start_date: '2026-06-10T12:00:00', end_date: '2026-06-10T13:00:00' }),
+    ])
+    expect(ids.size).toBe(0)
+  })
+
+  it('uses a 2h default window when end_date is missing', () => {
+    const ids = overlappingIds([
+      ev({ id: 'a', start_date: '2026-06-10T11:00:00', end_date: null }), // 11:00–13:00
+      ev({ id: 'b', start_date: '2026-06-10T12:30:00', end_date: null }),
+    ])
+    expect(ids).toEqual(new Set(['a', 'b']))
+  })
+
+  it('ignores all-day (date-only) events', () => {
+    const ids = overlappingIds([
+      ev({ id: 'allday', start_date: '2026-06-10' }),
+      ev({ id: 't', start_date: '2026-06-10T11:00:00', end_date: '2026-06-10T12:00:00' }),
+    ])
+    expect(ids.size).toBe(0)
   })
 })
 

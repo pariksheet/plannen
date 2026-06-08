@@ -164,6 +164,16 @@ describe('ScheduleOverview', () => {
     expect(screen.queryByText('Cancelled today')).not.toBeInTheDocument()
   })
 
+  it('flags overlapping events with an overlaps tag in the week', () => {
+    const day = todayIso()
+    renderOverview([
+      makeEvent({ id: 'o1', title: 'Check with Pidpa', start_date: `${day}T11:00:00`, end_date: `${day}T12:00:00` }),
+      makeEvent({ id: 'o2', title: 'Dentist', start_date: `${day}T11:30:00`, end_date: `${day}T12:30:00` }),
+    ])
+    const week = screen.getByTestId('week-card')
+    expect(within(week).getAllByText(/overlaps/)).toHaveLength(2)
+  })
+
   it('clicking a row reveals the reused EventCard, whose Edit enters edit mode', async () => {
     const user = userEvent.setup()
     const onEdit = vi.fn()
