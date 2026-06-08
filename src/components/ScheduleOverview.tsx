@@ -314,13 +314,13 @@ function isInCurrentMonth(iso: string | null): boolean {
   return iso.slice(0, 7) === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 }
 
-// Month sidebar: upcoming non-reminder events of the current month. Reminders
-// are deliberately excluded here (noise) — the week card carries them instead.
+// Month sidebar: all non-reminder events of the current month (past and
+// upcoming). Reminders are deliberately excluded here (noise) — they still
+// show on the calendar grid and on day-click; the week card carries them too.
 function isInMonthList(event: Event): boolean {
   if (event.event_kind === 'reminder') return false
   if (event.recurrence_rule) return false
-  if (!isInCurrentMonth(event.start_date)) return false
-  return eventDateLocal(event) >= todayIso()
+  return isInCurrentMonth(event.start_date)
 }
 
 interface MonthListEntry {

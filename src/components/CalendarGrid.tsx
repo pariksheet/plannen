@@ -198,6 +198,8 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
             {days.map((day) => {
               const key = toDateKey(day)
               const dayEvents = eventsByDay.get(key) ?? []
+              const hasEvent = dayEvents.some((e) => e.event_kind !== 'reminder')
+              const hasReminder = dayEvents.some((e) => e.event_kind === 'reminder')
               const inMonth = isSameMonth(day, currentMonth)
               const isSelected = isSameDay(day, selectedDate)
               return (
@@ -223,10 +225,16 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
                     </span>
                     {dayEvents.length > 0 && (
                       compact ? (
-                        <span className="h-1.5 w-1.5 rounded-full bg-indigo-600" aria-label={`${dayEvents.length} events`} />
+                        <span className="flex items-center gap-0.5">
+                          {hasEvent && <span className="h-1.5 w-1.5 rounded-full bg-blue-600" aria-label="has events" />}
+                          {hasReminder && <span className="h-1.5 w-1.5 rounded-full bg-green-600" aria-label="has reminders" />}
+                        </span>
                       ) : (
-                        <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-indigo-600 text-white text-[10px] font-semibold">
-                          {dayEvents.length}
+                        <span className="inline-flex items-center gap-1">
+                          {hasReminder && <span className="h-1.5 w-1.5 rounded-full bg-green-600" aria-label="has reminders" />}
+                          <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-blue-600 text-white text-[10px] font-semibold">
+                            {dayEvents.length}
+                          </span>
                         </span>
                       )
                     )}
