@@ -214,27 +214,40 @@ function QuickEventCard({ event, ...actions }: { event: Event } & ActionProps) {
   )
 }
 
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd']
+  const v = n % 100
+  return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`
+}
+
+// "Mon 8th Jun" from a local date-only key.
+function dayLabel(dateKey: string): string {
+  const d = new Date(`${dateKey}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return dateKey
+  const wd = d.toLocaleDateString(undefined, { weekday: 'short' })
+  const mon = d.toLocaleDateString(undefined, { month: 'short' })
+  return `${wd} ${ordinal(d.getDate())} ${mon}`
+}
+
 type WeekRow =
-  | { kind: 'empty'; key: string; weekday: string; dayNum: number }
-  | { kind: 'event'; key: string; event: Event; weekday: string; isToday: boolean; isPast: boolean }
+  | { kind: 'empty'; key: string }
+  | { kind: 'event'; key: string; event: Event; isToday: boolean; isPast: boolean }
 
 function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
   const now = useNow()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const buckets = buildWeekAgenda(events, now)
   const toggle = (id: string) => setSelectedId((cur) => (cur === id ? null : id))
-  // Flatten the day buckets into one ordered list of rows so they can fill two
+  // Flatten the day buckets into one ordered list of rows so they fill two
   // columns (denser than stacked day-blocks). Today is always represented — as
-  // a placeholder row when it has no events. Each row carries its day prefix.
+  // a placeholder row when it has no events.
   const rows = buckets.flatMap<WeekRow>((b) =>
     b.events.length === 0
-      ? [{ kind: 'empty', key: b.dateKey, weekday: b.weekday, dayNum: b.dayNum }]
+      ? [{ kind: 'empty', key: b.dateKey }]
       : b.events.map((e) => ({
-          kind: 'event', key: e.id, event: e,
-          weekday: b.weekday, isToday: b.isToday, isPast: b.isPast,
+          kind: 'event', key: e.id, event: e, isToday: b.isToday, isPast: b.isPast,
         }))
   )
-  const selected = selectedId ? events.find((e) => e.id === selectedId) ?? null : null
   return (
     <section data-testid="week-card" className={`rounded-xl border-2 border-emerald-200/70 bg-emerald-50/60 p-4 ${sketchBody}`}>
       <h3 className={`${sketchHand} text-3xl text-gray-900 mb-2`}>This week</h3>
@@ -243,7 +256,7 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
           if (row.kind === 'empty') {
             return (
               <li key={row.key} className="break-inside-avoid mb-1 text-base text-gray-500 rounded bg-yellow-100/60 px-1.5 py-0.5">
-                {row.weekday} {row.dayNum} · nothing scheduled
+                {dayLabel(row.key)} · nothing scheduled
               </li>
             )
           }
@@ -252,19 +265,18 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
           const state = row.isToday ? eventTimeState(e, now) : null
           const done = state === 'past'
           const t = timeOf(e)
+          const label = `${dayLabel(eventDateLocal(e))}${t ? ` ${t}` : ''}`
           return (
             <li key={row.key} className={`break-inside-avoid mb-1 ${row.isPast ? 'opacity-60' : ''}`}>
               <button
                 type="button"
                 aria-expanded={selectedId === e.id}
                 onClick={() => toggle(e.id)}
-                className={`w-full text-left text-base hover:text-indigo-700 flex items-baseline gap-2 rounded px-1.5 ${
+                className={`w-full text-left text-base leading-6 hover:text-indigo-700 rounded px-1.5 ${
                   row.isToday ? 'bg-yellow-100/60' : ''
                 }`}
               >
-                <span className="text-gray-500 shrink-0 w-[4.25rem] text-xs leading-6">
-                  {row.weekday}{t ? ` ${t}` : ''}
-                </span>
+                <span className="text-gray-500 text-sm whitespace-nowrap mr-2">{label}</span>
                 <span
                   className={`${
                     done ? 'line-through text-gray-400'
@@ -281,11 +293,11 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
                   )}
                 </span>
               </button>
+              {selectedId === e.id && <QuickEventCard event={e} {...actions} />}
             </li>
           )
         })}
       </ul>
-      {selected && <QuickEventCard event={selected} {...actions} />}
     </section>
   )
 }
