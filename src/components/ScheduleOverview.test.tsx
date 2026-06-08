@@ -177,4 +177,18 @@ describe('ScheduleOverview', () => {
     await user.click(within(week).getByText('Edit event'))
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'e9' }))
   })
+
+  it('clicking a month-list entry reveals the reused EventCard there', async () => {
+    const user = userEvent.setup()
+    const today = new Date()
+    const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
+    const day = Math.min(today.getDate() + 1, lastDay)
+    const thisMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
+    const iso = `${thisMonth}-${String(day).padStart(2, '0')}`
+    renderOverview([makeEvent({ id: 'm9', title: 'Camp deadline', start_date: iso })])
+    const monthList = screen.getByTestId('month-list')
+    expect(within(monthList).queryByTestId('quick-event-card')).not.toBeInTheDocument()
+    await user.click(within(monthList).getByText('Camp deadline'))
+    expect(within(monthList).getByTestId('quick-event-card')).toBeInTheDocument()
+  })
 })

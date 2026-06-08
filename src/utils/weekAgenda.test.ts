@@ -60,7 +60,6 @@ describe('weekDays', () => {
   it('when now is a Sunday, week starts Monday and ends Sunday', () => {
     const sunday = new Date('2026-06-14T09:00:00')
     const days = weekDays(sunday)
-    expect(days[0].ymd ?? ymd(days[0])).toBe('2026-06-08')
     expect(ymd(days[0])).toBe('2026-06-08')
     expect(ymd(days[6])).toBe('2026-06-14')
   })
