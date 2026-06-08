@@ -37,6 +37,9 @@ interface CalendarGridProps {
   compact?: boolean
 }
 
+// Max dots rendered per kind in a compact cell before showing a "+" overflow.
+const DOT_CAP = 5
+
 function toDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
@@ -198,8 +201,8 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
             {days.map((day) => {
               const key = toDateKey(day)
               const dayEvents = eventsByDay.get(key) ?? []
-              const hasEvent = dayEvents.some((e) => e.event_kind !== 'reminder')
-              const hasReminder = dayEvents.some((e) => e.event_kind === 'reminder')
+              const eventCount = dayEvents.filter((e) => e.event_kind !== 'reminder').length
+              const reminderCount = dayEvents.filter((e) => e.event_kind === 'reminder').length
               const inMonth = isSameMonth(day, currentMonth)
               const isSelected = isSameDay(day, selectedDate)
               return (
@@ -223,22 +226,34 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
                     <span className={`${compact ? 'text-[10px]' : 'text-xs'} font-medium ${isToday(day) ? 'text-indigo-700' : ''}`}>
                       {format(day, 'd')}
                     </span>
-                    {dayEvents.length > 0 && (
-                      compact ? (
-                        <span className="flex items-center gap-0.5">
-                          {hasEvent && <span className="h-1.5 w-1.5 rounded-full bg-blue-600" aria-label="has events" />}
-                          {hasReminder && <span className="h-1.5 w-1.5 rounded-full bg-green-600" aria-label="has reminders" />}
+                    {!compact && dayEvents.length > 0 && (
+                      <span className="inline-flex items-center gap-1">
+                        {reminderCount > 0 && <span className="h-1.5 w-1.5 rounded-full bg-green-600" aria-label={`${reminderCount} reminders`} />}
+                        <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-blue-600 text-white text-[10px] font-semibold">
+                          {dayEvents.length}
                         </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1">
-                          {hasReminder && <span className="h-1.5 w-1.5 rounded-full bg-green-600" aria-label="has reminders" />}
-                          <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-blue-600 text-white text-[10px] font-semibold">
-                            {dayEvents.length}
-                          </span>
-                        </span>
-                      )
+                      </span>
                     )}
                   </div>
+                  {compact && dayEvents.length > 0 && (
+                    // One dot per item (blue = event, green = reminder), wrapped
+                    // and capped so a busy day can't blow out the cell. The
+                    // aria-label always carries the true counts.
+                    <div
+                      className="mt-0.5 flex flex-wrap items-center gap-0.5"
+                      aria-label={`${eventCount} events, ${reminderCount} reminders`}
+                    >
+                      {Array.from({ length: Math.min(eventCount, DOT_CAP) }).map((_, i) => (
+                        <span key={`e${i}`} className="h-1.5 w-1.5 rounded-full bg-blue-600" />
+                      ))}
+                      {Array.from({ length: Math.min(reminderCount, DOT_CAP) }).map((_, i) => (
+                        <span key={`r${i}`} className="h-1.5 w-1.5 rounded-full bg-green-600" />
+                      ))}
+                      {(eventCount > DOT_CAP || reminderCount > DOT_CAP) && (
+                        <span className="text-[9px] leading-none text-gray-500">+</span>
+                      )}
+                    </div>
+                  )}
                   {!compact && (
                     <div className="mt-1 min-h-[1.25rem] space-y-0.5 overflow-visible">
                       {dayEvents.slice(0, 2).map((event) => (
