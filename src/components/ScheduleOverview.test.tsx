@@ -157,6 +157,13 @@ describe('ScheduleOverview', () => {
     expect(within(monthList).queryByText('Renew passport')).not.toBeInTheDocument()
   })
 
+  it('marks today in the month list', () => {
+    renderOverview([makeEvent({ id: 'mt', title: 'Camp deadline', start_date: todayIso() })])
+    const monthList = screen.getByTestId('month-list')
+    expect(within(monthList).getByText('Camp deadline')).toBeInTheDocument()
+    expect(within(monthList).getByText('today')).toBeInTheDocument()
+  })
+
   it('hides cancelled events', () => {
     renderOverview([
       makeEvent({ id: 'c1', title: 'Cancelled today', start_date: todayIso(), event_status: 'cancelled' }),

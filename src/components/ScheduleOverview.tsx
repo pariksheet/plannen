@@ -447,18 +447,28 @@ function ThisMonthCard({ events, preferredVisitDates, ...actions }: ThisMonthCar
                 const time = timeOf(entry.firstEvent)
                 const dateLabel = formatShortDate(entry.firstEvent.start_date)
                 const suffix = entry.count > 1 ? ` ×${entry.count}` : ''
+                const dayKey = eventDateLocal(entry.firstEvent)
+                const isPast = dayKey < todayIso()
+                const isToday = dayKey === todayIso()
                 return (
-                  <li key={entry.key} className="break-inside-avoid">
+                  <li key={entry.key} className={`break-inside-avoid ${isPast ? 'opacity-60' : ''}`}>
                     <button
                       type="button"
                       aria-expanded={selectedId === entry.firstEvent.id}
                       onClick={() => toggle(entry.firstEvent.id)}
-                      className="block w-full text-left text-base font-semibold text-gray-900 hover:text-indigo-700"
+                      className={`block w-full text-left text-base font-semibold text-gray-900 hover:text-indigo-700 rounded px-1.5 ${
+                        isToday ? 'bg-yellow-100/60' : ''
+                      }`}
                     >
                       <span className="text-gray-500 mr-2 font-normal">
                         {dateLabel}{time ? ` ${time}` : ''}
                       </span>
                       {entry.title}{suffix && <span className="text-gray-500 font-normal">{suffix}</span>}
+                      {isToday && (
+                        <span className="ml-1.5 text-[11px] font-normal whitespace-nowrap bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-1.5 py-0.5">
+                          today
+                        </span>
+                      )}
                     </button>
                     {selectedId === entry.firstEvent.id && <QuickEventCard event={entry.firstEvent} {...actions} />}
                   </li>
