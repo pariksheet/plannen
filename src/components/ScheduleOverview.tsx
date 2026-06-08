@@ -214,69 +214,78 @@ function QuickEventCard({ event, ...actions }: { event: Event } & ActionProps) {
   )
 }
 
+type WeekRow =
+  | { kind: 'empty'; key: string; weekday: string; dayNum: number }
+  | { kind: 'event'; key: string; event: Event; weekday: string; isToday: boolean; isPast: boolean }
+
 function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
   const now = useNow()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const buckets = buildWeekAgenda(events, now)
   const toggle = (id: string) => setSelectedId((cur) => (cur === id ? null : id))
+  // Flatten the day buckets into one ordered list of rows so they can fill two
+  // columns (denser than stacked day-blocks). Today is always represented — as
+  // a placeholder row when it has no events. Each row carries its day prefix.
+  const rows = buckets.flatMap<WeekRow>((b) =>
+    b.events.length === 0
+      ? [{ kind: 'empty', key: b.dateKey, weekday: b.weekday, dayNum: b.dayNum }]
+      : b.events.map((e) => ({
+          kind: 'event', key: e.id, event: e,
+          weekday: b.weekday, isToday: b.isToday, isPast: b.isPast,
+        }))
+  )
+  const selected = selectedId ? events.find((e) => e.id === selectedId) ?? null : null
   return (
     <section data-testid="week-card" className={`rounded-xl border-2 border-emerald-200/70 bg-emerald-50/60 p-4 ${sketchBody}`}>
       <h3 className={`${sketchHand} text-3xl text-gray-900 mb-2`}>This week</h3>
-      <div className="space-y-2">
-        {buckets.map((b) => (
-          <div
-            key={b.dateKey}
-            className={
-              b.isToday
-                ? 'rounded-lg bg-yellow-100/70 border border-dashed border-yellow-500/50 px-2 py-1.5'
-                : b.isPast ? 'opacity-60 px-2' : 'px-2'
-            }
-          >
-            <div className={`text-xs uppercase tracking-wide mb-1 ${b.isToday ? 'text-yellow-800' : 'text-gray-500'}`}>
-              {b.weekday} <span className="text-sm font-bold normal-case tracking-normal">{b.dayNum}</span>
-              {b.isToday && <span className="ml-1 normal-case tracking-normal text-yellow-700">· today</span>}
-            </div>
-            {b.events.length === 0 ? (
-              <div className="text-base text-gray-500">Nothing scheduled — enjoy the day.</div>
-            ) : (
-              <ul className="space-y-0.5">
-                {b.events.map((e) => {
-                  const isReminder = e.event_kind === 'reminder'
-                  const state = b.isToday ? eventTimeState(e, now) : null
-                  const done = state === 'past'
-                  return (
-                    <li key={e.id}>
-                      <button
-                        type="button"
-                        aria-expanded={selectedId === e.id}
-                        onClick={() => toggle(e.id)}
-                        className={`w-full text-left text-base hover:text-indigo-700 flex items-baseline gap-2 ${
-                          done ? 'line-through text-gray-400'
-                            : state === 'now' ? 'font-semibold text-gray-900'
-                              : 'text-gray-800'
-                        }`}
-                      >
-                        <span className="text-gray-500 w-12 shrink-0 text-xs leading-6">
-                          {state === 'now' ? '→' : (timeOf(e) || (isReminder ? '' : 'all-day'))}
-                        </span>
-                        <span className={isReminder ? 'italic text-gray-600' : ''}>
-                          {e.title}
-                          {isReminder && (
-                            <span className="ml-1.5 text-[11px] not-italic bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-full px-1.5 py-0.5">
-                              reminder
-                            </span>
-                          )}
-                        </span>
-                      </button>
-                      {selectedId === e.id && <QuickEventCard event={e} {...actions} />}
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </div>
-        ))}
-      </div>
+      <ul className="md:columns-2 gap-x-6">
+        {rows.map((row) => {
+          if (row.kind === 'empty') {
+            return (
+              <li key={row.key} className="break-inside-avoid mb-1 text-base text-gray-500 rounded bg-yellow-100/60 px-1.5 py-0.5">
+                {row.weekday} {row.dayNum} · nothing scheduled
+              </li>
+            )
+          }
+          const e = row.event
+          const isReminder = e.event_kind === 'reminder'
+          const state = row.isToday ? eventTimeState(e, now) : null
+          const done = state === 'past'
+          const t = timeOf(e)
+          return (
+            <li key={row.key} className={`break-inside-avoid mb-1 ${row.isPast ? 'opacity-60' : ''}`}>
+              <button
+                type="button"
+                aria-expanded={selectedId === e.id}
+                onClick={() => toggle(e.id)}
+                className={`w-full text-left text-base hover:text-indigo-700 flex items-baseline gap-2 rounded px-1.5 ${
+                  row.isToday ? 'bg-yellow-100/60' : ''
+                }`}
+              >
+                <span className="text-gray-500 shrink-0 w-[4.25rem] text-xs leading-6">
+                  {row.weekday}{t ? ` ${t}` : ''}
+                </span>
+                <span
+                  className={`${
+                    done ? 'line-through text-gray-400'
+                      : state === 'now' ? 'font-semibold text-gray-900'
+                        : 'text-gray-800'
+                  } ${isReminder ? 'italic text-gray-600' : ''}`}
+                >
+                  {state === 'now' && <span className="text-indigo-600 font-bold mr-1">→</span>}
+                  {e.title}
+                  {isReminder && (
+                    <span className="ml-1.5 text-[11px] not-italic bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-full px-1.5 py-0.5">
+                      reminder
+                    </span>
+                  )}
+                </span>
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+      {selected && <QuickEventCard event={selected} {...actions} />}
     </section>
   )
 }
