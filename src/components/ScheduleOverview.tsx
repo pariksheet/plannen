@@ -352,7 +352,8 @@ function ThisMonthCard({ events, preferredVisitDates, ...actions }: ThisMonthCar
   const monthList = buildMonthList(events)
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  useEffect(() => { setSelectedId(null) }, [selectedDay])
+  // Switching days clears any open reveal so a stale card can't carry over.
+  const chooseDay = (day: string | null) => { setSelectedDay(day); setSelectedId(null) }
   const toggle = (id: string) => setSelectedId((cur) => (cur === id ? null : id))
   const dayEvents = selectedDay ? eventsOnDate(events, selectedDay) : []
   return (
@@ -367,7 +368,7 @@ function ThisMonthCard({ events, preferredVisitDates, ...actions }: ThisMonthCar
             onShareSuccess={actions.onShareSuccess}
             onDataChange={actions.onShareSuccess}
             onHashtagClick={actions.onHashtagClick}
-            onDateSelect={(d) => setSelectedDay(ymd(d))}
+            onDateSelect={(d) => chooseDay(ymd(d))}
             showActions={false}
             showSidebar={false}
             compact
@@ -380,7 +381,7 @@ function ThisMonthCard({ events, preferredVisitDates, ...actions }: ThisMonthCar
                 <h4 className={`${sketchHand} text-2xl text-gray-900`}>{formatLongDate(selectedDay)}</h4>
                 <button
                   type="button"
-                  onClick={() => setSelectedDay(null)}
+                  onClick={() => chooseDay(null)}
                   aria-label="Back to upcoming list"
                   className="inline-flex items-center justify-center h-7 w-7 rounded-full text-gray-500 hover:bg-violet-100 hover:text-gray-700"
                 >
