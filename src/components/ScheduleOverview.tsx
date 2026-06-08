@@ -220,7 +220,7 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
   const buckets = buildWeekAgenda(events, now)
   const toggle = (id: string) => setSelectedId((cur) => (cur === id ? null : id))
   return (
-    <section className={`rounded-xl border-2 border-emerald-200/70 bg-emerald-50/60 p-4 ${sketchBody}`}>
+    <section data-testid="week-card" className={`rounded-xl border-2 border-emerald-200/70 bg-emerald-50/60 p-4 ${sketchBody}`}>
       <h3 className={`${sketchHand} text-3xl text-gray-900 mb-2`}>This week</h3>
       <div className="space-y-2">
         {buckets.map((b) => (
@@ -414,7 +414,7 @@ function ThisMonthCard({ events, preferredVisitDates, ...actions }: ThisMonthCar
           ) : monthList.length === 0 ? (
             <div className="text-base text-gray-500">Nothing upcoming this month.</div>
           ) : (
-            <ul className="md:columns-2 gap-x-4 space-y-0.5">
+            <ul data-testid="month-list" className="md:columns-2 gap-x-4 space-y-0.5">
               {monthList.map((entry) => {
                 const time = timeOf(entry.firstEvent)
                 const dateLabel = formatShortDate(entry.firstEvent.start_date)
