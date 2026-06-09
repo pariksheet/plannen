@@ -35,6 +35,11 @@ vi.mock('./EventCard', () => ({
 vi.mock('./CalendarGrid', () => ({
   CalendarGrid: () => <div data-testid="calendar-grid" />,
 }))
+vi.mock('../services/eventService', () => ({
+  completeTodo: vi.fn(async () => ({ data: {}, error: null })),
+  uncompleteTodo: vi.fn(async () => ({ data: {}, error: null })),
+  convertEventKind: vi.fn(async () => ({ data: {}, error: null })),
+}))
 
 function renderOverview(events: Event[] = [], onEdit = vi.fn()) {
   return render(
@@ -207,5 +212,17 @@ describe('ScheduleOverview', () => {
     expect(within(monthList).queryByTestId('quick-event-card')).not.toBeInTheDocument()
     await user.click(within(monthList).getByText('Camp deadline'))
     expect(within(monthList).getByTestId('quick-event-card')).toBeInTheDocument()
+  })
+
+  it('renders a checkbox for a todo in the week list', async () => {
+    renderOverview([
+      makeEvent({ id: 't1', title: 'Buy groceries', event_kind: 'todo', start_date: midWeekIso() }),
+    ])
+    const week = screen.getByTestId('week-card')
+    expect(within(week).getByText('Buy groceries')).toBeInTheDocument()
+    expect(within(week).getByText('to-do')).toBeInTheDocument()
+    expect(
+      await screen.findByRole('checkbox', { name: /mark (done|not done)/i })
+    ).toBeInTheDocument()
   })
 })

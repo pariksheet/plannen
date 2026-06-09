@@ -5,6 +5,7 @@ import { getLocations } from '../services/profileService'
 import {
   listPractices, completionsThisWeek, markPracticeDone, unmarkPracticeDone,
 } from '../services/practiceService'
+import { completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
 import type { PracticeRow, PracticeCompletionRow } from '../lib/dbClient/types'
 import { CalendarGrid } from './CalendarGrid'
 import { EventCard } from './EventCard'
@@ -194,6 +195,8 @@ interface ActionProps {
   onDelete: (id: string) => void
   onShareSuccess: () => void
   onHashtagClick: (tag: string) => void
+  onToggleTodo?: (event: Event) => void
+  onConvertKind?: (event: Event, kind: 'reminder' | 'todo') => void
 }
 
 // The reused timeline card, revealed inline when a schedule row is clicked.
@@ -209,6 +212,8 @@ function QuickEventCard({ event, ...actions }: { event: Event } & ActionProps) {
         onDelete={actions.onDelete}
         onShareSuccess={actions.onShareSuccess}
         onHashtagClick={actions.onHashtagClick}
+        onToggleTodo={actions.onToggleTodo}
+        onConvertKind={actions.onConvertKind}
       />
     </div>
   )
@@ -238,6 +243,17 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const buckets = buildWeekAgenda(events, now)
   const toggle = (id: string) => setSelectedId((cur) => (cur === id ? null : id))
+
+  async function toggleTodo(e: Event) {
+    if (e.completed_at) await uncompleteTodo(e.id)
+    else await completeTodo(e.id)
+    actions.onShareSuccess()
+  }
+
+  async function handleConvert(e: Event, kind: 'reminder' | 'todo') {
+    await convertEventKind(e.id, kind)
+    actions.onShareSuccess()
+  }
   // Flatten the day buckets into one ordered list of rows so they fill two
   // columns (denser than stacked day-blocks). Today is always represented — as
   // a placeholder row when it has no events. Time clashes are detected per day.
@@ -263,43 +279,69 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
           }
           const e = row.event
           const isReminder = e.event_kind === 'reminder'
+          const isTodo = e.event_kind === 'todo'
+          const isDone = isTodo && !!e.completed_at
           const state = row.isToday ? eventTimeState(e, now) : null
           const done = state === 'past'
           const t = timeOf(e)
           const label = `${dayLabel(eventDateLocal(e))}${t ? ` ${t}` : ''}`
           return (
             <li key={row.key} className={`break-inside-avoid mb-1 ${row.isPast ? 'opacity-60' : ''}`}>
-              <button
-                type="button"
-                aria-expanded={selectedId === e.id}
-                onClick={() => toggle(e.id)}
-                className={`w-full text-left text-base leading-6 hover:text-indigo-700 rounded px-1.5 ${
-                  row.isToday ? 'bg-yellow-100/60' : ''
-                }`}
-              >
-                <span className="text-gray-500 text-sm whitespace-nowrap mr-2">{label}</span>
-                <span
-                  className={`${
-                    done ? 'line-through text-gray-400'
-                      : state === 'now' ? 'font-semibold text-gray-900'
-                        : 'text-gray-800'
-                  } ${isReminder ? 'italic text-gray-600' : ''}`}
+              <div className={`flex items-center gap-1.5 w-full text-base leading-6 rounded px-1.5 ${
+                row.isToday ? 'bg-yellow-100/60' : ''
+              }`}>
+                {isTodo && (
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-amber-600 shrink-0"
+                    checked={isDone}
+                    onClick={(ev) => ev.stopPropagation()}
+                    onChange={() => void toggleTodo(e)}
+                    aria-label={isDone ? 'Mark not done' : 'Mark done'}
+                  />
+                )}
+                <button
+                  type="button"
+                  aria-expanded={selectedId === e.id}
+                  onClick={() => toggle(e.id)}
+                  className="flex-1 text-left hover:text-indigo-700"
                 >
-                  {state === 'now' && <span className="text-indigo-600 font-bold mr-1">→</span>}
-                  {e.title}
-                  {isReminder && (
-                    <span className="ml-1.5 text-[11px] not-italic bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-full px-1.5 py-0.5">
-                      reminder
-                    </span>
-                  )}
-                  {row.clash && (
-                    <span className="ml-1.5 text-[11px] not-italic whitespace-nowrap bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-1.5 py-0.5">
-                      ⚠ overlaps
-                    </span>
-                  )}
-                </span>
-              </button>
-              {selectedId === e.id && <QuickEventCard event={e} {...actions} />}
+                  <span className="text-gray-500 text-sm whitespace-nowrap mr-2">{label}</span>
+                  <span
+                    className={`${
+                      isDone || done ? 'line-through text-gray-400'
+                        : state === 'now' ? 'font-semibold text-gray-900'
+                          : 'text-gray-800'
+                    } ${isReminder ? 'italic text-gray-600' : ''}`}
+                  >
+                    {state === 'now' && <span className="text-indigo-600 font-bold mr-1">→</span>}
+                    {e.title}
+                    {isReminder && (
+                      <span className="ml-1.5 text-[11px] not-italic bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-full px-1.5 py-0.5">
+                        reminder
+                      </span>
+                    )}
+                    {isTodo && (
+                      <span className="ml-1.5 text-[11px] not-italic bg-amber-50 text-amber-700 border border-amber-100 rounded-full px-1.5 py-0.5">
+                        to-do
+                      </span>
+                    )}
+                    {row.clash && (
+                      <span className="ml-1.5 text-[11px] not-italic whitespace-nowrap bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-1.5 py-0.5">
+                        ⚠ overlaps
+                      </span>
+                    )}
+                  </span>
+                </button>
+              </div>
+              {selectedId === e.id && (
+                <QuickEventCard
+                  event={e}
+                  {...actions}
+                  onToggleTodo={(ev) => void toggleTodo(ev)}
+                  onConvertKind={(ev, k) => void handleConvert(ev, k)}
+                />
+              )}
             </li>
           )
         })}
