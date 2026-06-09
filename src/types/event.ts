@@ -1,6 +1,6 @@
 export type EventType = 'personal' | 'friends' | 'family' | 'group'
 export type EventStatus = 'watching' | 'planned' | 'interested' | 'going' | 'cancelled' | 'past' | 'missed'
-export type EventKind = 'event' | 'reminder' | 'session'
+export type EventKind = 'event' | 'reminder' | 'session' | 'todo'
 export type SharedWithFriends = 'none' | 'all' | 'selected'
 export type EventViewMode = 'detailed' | 'compact' | 'calendar' | 'schedule'
 
@@ -26,6 +26,8 @@ export interface Event {
   my_rsvp_status?: 'going' | 'maybe' | 'not_going' | null
   recurrence_rule?: Record<string, unknown> | null
   parent_event_id?: string | null
+  completed_at?: string | null
+  assigned_to?: string | null
   // Enriched at query time — not DB columns
   parent_title?: string | null
   sessions_summary?: { total: number; past: number; missed: number; next_date: string | null } | null
@@ -54,6 +56,9 @@ export interface EventFormData {
 const VALID_STATUSES: EventStatus[] = ['watching', 'planned', 'interested', 'going', 'cancelled', 'past', 'missed']
 
 export function resolveEventStatus(event: Event): Event {
+  // Completion for todos is tracked via completed_at, never event_status — so
+  // a past, unfinished todo must stay visible, not silently become past/missed.
+  if (event.event_kind === 'todo') return event
   const raw = event.event_status
   const status = typeof raw === 'string' && VALID_STATUSES.includes(raw as EventStatus) ? (raw as EventStatus) : null
   if (!status) return event
@@ -67,4 +72,8 @@ export function resolveEventStatus(event: Event): Event {
   if (start < now && status === 'interested') return { ...event, event_status: 'missed' }
   if (start < now && status === 'going') return { ...event, event_status: 'past' }
   return event
+}
+
+export function isTodoOverdue(event: Event, now: Date = new Date()): boolean {
+  return event.event_kind === 'todo' && !event.completed_at && new Date(event.start_date) < now
 }
