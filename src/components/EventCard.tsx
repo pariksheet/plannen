@@ -299,7 +299,7 @@ export function EventCard({
     (showActions && isOrganizer) ||
     (showActions && !isOrganizer) ||
     (!!onEdit && isOrganizer) ||
-    (isLean && !!onConvertKind)
+    (!!onConvertKind)
   const compactAccentClass: Record<string, string> = {
     personal: 'border-l-violet-500',
     friends: 'border-l-amber-500',
@@ -799,7 +799,7 @@ export function EventCard({
               <p className="text-gray-600 text-xs sm:text-sm mb-2 line-clamp-1">{event.description}</p>
             )}
           </div>
-          {(showActions || onClone || !isLean) && (
+          {(showActions || onClone || !isLean || kebabHasItems) && (
             <div className="flex gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
               {showActions && (
                 <>
@@ -877,7 +877,7 @@ export function EventCard({
                   <Trash2 className="h-4 w-4" />
                 </button>
               )}
-              {!isLean && (
+              {kebabHasItems && (
                 <div className="relative" ref={kebabMenuRef}>
                   <button
                     ref={kebabTriggerRef}
@@ -1029,37 +1029,50 @@ export function EventCard({
           style={{ top: kebabMenuPosition.top, left: kebabMenuPosition.left }}
           onClick={(e) => e.stopPropagation()}
         >
-          <button
-            type="button"
-            onClick={() => {
-              downloadIcs(event, kebabVisitDate ? { visitDate: kebabVisitDate } : undefined)
-              setShowKebabMenu(false)
-            }}
-            className="w-full flex items-center gap-2 px-3 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50"
-          >
-            <Download className="h-4 w-4 text-gray-500" />
-            Download .ics
-          </button>
-          <a
-            href={getGoogleCalendarAddUrl(event, kebabVisitDate ? { visitDate: kebabVisitDate } : undefined)}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => setShowKebabMenu(false)}
-            className="w-full flex items-center gap-2 px-3 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50"
-          >
-            <CalendarPlus className="h-4 w-4 text-gray-500" />
-            Google Calendar
-          </a>
-          <a
-            href={getOutlookCalendarAddUrl(event, kebabVisitDate ? { visitDate: kebabVisitDate } : undefined)}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => setShowKebabMenu(false)}
-            className="w-full flex items-center gap-2 px-3 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50"
-          >
-            <CalendarPlus className="h-4 w-4 text-gray-500" />
-            Outlook
-          </a>
+          {!isLean && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  downloadIcs(event, kebabVisitDate ? { visitDate: kebabVisitDate } : undefined)
+                  setShowKebabMenu(false)
+                }}
+                className="w-full flex items-center gap-2 px-3 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <Download className="h-4 w-4 text-gray-500" />
+                Download .ics
+              </button>
+              <a
+                href={getGoogleCalendarAddUrl(event, kebabVisitDate ? { visitDate: kebabVisitDate } : undefined)}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setShowKebabMenu(false)}
+                className="w-full flex items-center gap-2 px-3 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <CalendarPlus className="h-4 w-4 text-gray-500" />
+                Google Calendar
+              </a>
+              <a
+                href={getOutlookCalendarAddUrl(event, kebabVisitDate ? { visitDate: kebabVisitDate } : undefined)}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setShowKebabMenu(false)}
+                className="w-full flex items-center gap-2 px-3 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <CalendarPlus className="h-4 w-4 text-gray-500" />
+                Outlook
+              </a>
+            </>
+          )}
+          {(isReminder || isTodo) && onConvertKind && (
+            <button
+              type="button"
+              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+              onClick={() => { onConvertKind(event, isTodo ? 'reminder' : 'todo'); setShowKebabMenu(false) }}
+            >
+              {isTodo ? 'Convert to reminder' : 'Convert to to-do'}
+            </button>
+          )}
         </div>,
         document.body
       )}

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { EventCard } from './EventCard'
 import { Event } from '../types/event'
 
@@ -104,5 +104,18 @@ describe('EventCard todo', () => {
   it('does not render RSVP controls for a todo', () => {
     render(<EventCard event={todo} viewMode="compact" showRSVP onToggleTodo={vi.fn()} />)
     expect(screen.queryByText(/going/i)).toBeNull()
+  })
+  it('offers convert in detailed view', () => {
+    const onConvertKind = vi.fn()
+    render(<EventCard event={todo} viewMode="detailed" onToggleTodo={vi.fn()} onConvertKind={onConvertKind} />)
+    const trigger = screen.getByLabelText('Add to calendar')
+    fireEvent.click(trigger)
+    const convertBtn = screen.getByText('Convert to reminder')
+    fireEvent.click(convertBtn)
+    expect(onConvertKind).toHaveBeenCalledWith(todo, 'reminder')
+  })
+  it('does not render a kebab in detailed view when no onConvertKind is given for a lean card', () => {
+    render(<EventCard event={todo} viewMode="detailed" onToggleTodo={vi.fn()} />)
+    expect(screen.queryByLabelText('Add to calendar')).toBeNull()
   })
 })
