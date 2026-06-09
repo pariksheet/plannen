@@ -73,7 +73,8 @@ const definitions: ToolDefinition[] = [
         start_date: { type: 'string', description: 'ISO 8601. Timezone-naive values (e.g. 2026-06-15T10:00:00) are interpreted in your profile timezone; explicit offsets/Z are respected.' },
         end_date: { type: 'string', description: 'ISO 8601 (naive = profile timezone) or omit' },
         location: { type: 'string' },
-        event_kind: { type: 'string', enum: ['event', 'reminder'] },
+        event_kind: { type: 'string', enum: ['event', 'reminder', 'todo'] },
+        assigned_to: { type: 'string', description: 'User UUID to assign a todo to (defaults to creator). Only meaningful for event_kind=todo.' },
         enrollment_url: { type: 'string' },
         hashtags: { type: 'array', items: { type: 'string' }, description: 'Tags without # (max 5)' },
         event_status: {
@@ -120,6 +121,27 @@ const definitions: ToolDefinition[] = [
         },
         enrollment_url: { type: 'string' },
       },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'complete_todo',
+    description: 'Mark a todo (event_kind=todo) as done. Sets completed_at.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Todo (event) UUID' },
+        completed_at: { type: 'string', description: 'ISO 8601 completion time (default: now)' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'uncomplete_todo',
+    description: 'Re-open a completed todo. Clears completed_at.',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'Todo (event) UUID' } },
       required: ['id'],
     },
   },
@@ -228,6 +250,7 @@ const createEvent: ToolHandler = async (args, ctx) => {
     end_date?: string
     location?: string
     event_kind?: string
+    assigned_to?: string
     enrollment_url?: string
     hashtags?: string[]
     event_status?: string
@@ -250,8 +273,8 @@ const createEvent: ToolHandler = async (args, ctx) => {
     `INSERT INTO plannen.events
        (title, description, start_date, end_date, location, event_kind,
         enrollment_url, hashtags, event_type, event_status, created_by,
-        shared_with_friends, recurrence_rule)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'personal', $9, $10, 'none', $11)
+        assigned_to, shared_with_friends, recurrence_rule)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'personal', $9, $10, $11, 'none', $12)
      RETURNING *`,
     [
       a.title,
@@ -259,11 +282,12 @@ const createEvent: ToolHandler = async (args, ctx) => {
       startDate.toISOString(),
       endDate ? endDate.toISOString() : null,
       a.location ?? null,
-      a.event_kind === 'reminder' ? 'reminder' : 'event',
+      a.event_kind === 'reminder' || a.event_kind === 'todo' ? a.event_kind : 'event',
       a.enrollment_url ?? null,
       hashtags,
       event_status,
       ctx.userId,
+      a.event_kind === 'todo' ? (a.assigned_to ?? ctx.userId) : null,
       a.recurrence_rule ?? null,
     ],
   )
@@ -343,6 +367,31 @@ const updateEvent: ToolHandler = async (args, ctx) => {
   return { ...slimEvent(data), source }
 }
 
+const completeTodo: ToolHandler = async (args, ctx) => {
+  const a = args as { id: string; completed_at?: string }
+  const ts = a.completed_at ?? new Date().toISOString()
+  const { rows } = await ctx.client.query(
+    `UPDATE plannen.events SET completed_at = $1, updated_at = now()
+     WHERE id = $2 AND created_by = $3 AND event_kind = 'todo'
+     RETURNING *`,
+    [ts, a.id, ctx.userId],
+  )
+  if (rows.length === 0) throw new Error('todo not found')
+  return slimEvent(rows[0] as Record<string, unknown>)
+}
+
+const uncompleteTodo: ToolHandler = async (args, ctx) => {
+  const a = args as { id: string }
+  const { rows } = await ctx.client.query(
+    `UPDATE plannen.events SET completed_at = NULL, updated_at = now()
+     WHERE id = $1 AND created_by = $2 AND event_kind = 'todo'
+     RETURNING *`,
+    [a.id, ctx.userId],
+  )
+  if (rows.length === 0) throw new Error('todo not found')
+  return slimEvent(rows[0] as Record<string, unknown>)
+}
+
 const rsvpEvent: ToolHandler = async (args, ctx) => {
   const a = args as { event_id: string; status: string }
   await ctx.client.query(
@@ -363,6 +412,8 @@ export const eventsModule: ToolModule = {
     get_event: getEvent,
     create_event: createEvent,
     update_event: updateEvent,
+    complete_todo: completeTodo,
+    uncomplete_todo: uncompleteTodo,
     rsvp_event: rsvpEvent,
   },
 }
