@@ -172,6 +172,8 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
     modalContentRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
   }, [step])
 
+  const isLeanKind = formData.event_kind === 'reminder' || formData.event_kind === 'todo'
+
   const hasValidRange = Boolean(
     formData.event_kind === 'event' &&
     formData.start_date &&
@@ -179,10 +181,10 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
     new Date(formData.start_date).getTime() < new Date(formData.end_date).getTime()
   )
 
-  const effectiveSteps = formData.event_kind === 'reminder' ? 2 : WIZARD_STEPS
+  const effectiveSteps = isLeanKind ? 2 : WIZARD_STEPS
   const canProceedStep1 = () => (formData.title ?? '').trim() !== ''
   const canProceedStep2 = () => (formData.start_date ?? '').trim() !== ''
-  const canSubmitReminderFromStep1 = () => canProceedStep1() && canProceedStep2()
+  const canSubmitLeanFromStep1 = () => canProceedStep1() && canProceedStep2()
 
   const goNext = () => {
     if (step === 1 && !canProceedStep1()) {
@@ -285,7 +287,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (formData.event_kind === 'event' && step < WIZARD_STEPS) {
+    if (!isLeanKind && step < WIZARD_STEPS) {
       goNext()
       return
     }
@@ -298,9 +300,9 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
         ...formData,
         start_date: new Date(formData.start_date).toISOString(),
         end_date: formData.end_date ? new Date(formData.end_date).toISOString() : '',
-        enrollment_url: formData.event_kind === 'reminder' ? '' : formData.enrollment_url,
-        enrollment_deadline: formData.event_kind === 'reminder' ? '' : (formData.enrollment_deadline ? new Date(formData.enrollment_deadline).toISOString() : ''),
-        enrollment_start_date: formData.event_kind === 'reminder' ? '' : (formData.enrollment_start_date ? new Date(formData.enrollment_start_date).toISOString() : ''),
+        enrollment_url: isLeanKind ? '' : formData.enrollment_url,
+        enrollment_deadline: isLeanKind ? '' : (formData.enrollment_deadline ? new Date(formData.enrollment_deadline).toISOString() : ''),
+        enrollment_start_date: isLeanKind ? '' : (formData.enrollment_start_date ? new Date(formData.enrollment_start_date).toISOString() : ''),
         image_url: formData.image_url?.trim() || '',
         shared_with_friends: formData.shared_with_friends,
         shared_with_user_ids: formData.shared_with_user_ids ?? [],
@@ -354,7 +356,9 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
         <div className="sticky top-0 bg-white border-b border-gray-200 px-4 sm:px-6 py-4 z-10">
           <div className="flex justify-between items-center gap-2">
             <h2 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">
-              {event ? (formData.event_kind === 'reminder' ? 'Edit Reminder' : 'Edit Event') : (formData.event_kind === 'reminder' ? 'Create Reminder' : 'Create Event')}
+              {event
+                ? (formData.event_kind === 'reminder' ? 'Edit Reminder' : formData.event_kind === 'todo' ? 'Edit To-do' : 'Edit Event')
+                : (formData.event_kind === 'reminder' ? 'Create Reminder' : formData.event_kind === 'todo' ? 'Create To-do' : 'Create Event')}
             </h2>
             <button
               type="button"
@@ -403,14 +407,27 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               >
                 Reminder
               </button>
+              <button
+                type="button"
+                onClick={() => { setFormData((prev) => ({ ...prev, event_kind: 'todo' })); setStep(1) }}
+                className={`min-h-[44px] flex-1 px-4 py-2.5 rounded-md text-sm font-medium border-2 transition-colors ${
+                  formData.event_kind === 'todo'
+                    ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                }`}
+              >
+                To-do
+              </button>
             </div>
             <p className="text-xs text-gray-500 mt-1">
               {formData.event_kind === 'reminder'
                 ? 'Simple appointment or thing to remember (no URL or RSVP). Reminders stay private.'
-                : 'Event with optional link, RSVP, and sharing. Use Next to set date, sharing, and options.'}
+                : formData.event_kind === 'todo'
+                  ? 'A one-off task you check off when done.'
+                  : 'Event with optional link, RSVP, and sharing. Use Next to set date, sharing, and options.'}
             </p>
           </div>
-          {formData.event_kind === 'reminder' ? (
+          {isLeanKind ? (
           <>
           <div>
             <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
@@ -635,10 +652,14 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
           )}
           {step === 2 && (
           <div className="space-y-6">
-          {formData.event_kind === 'reminder' ? (
+          {isLeanKind ? (
             <div className="p-4 bg-gray-50 border border-gray-200 rounded-md">
-              <p className="text-sm font-medium text-gray-700">You’re all set.</p>
-              <p className="text-xs text-gray-500 mt-1">Click Create to add your reminder.</p>
+              <p className="text-sm font-medium text-gray-700">You&apos;re all set.</p>
+              <p className="text-xs text-gray-500 mt-1">
+                {formData.event_kind === ('todo' as string)
+                  ? 'Click Create to add your to-do.'
+                  : 'Click Create to add your reminder.'}
+              </p>
             </div>
           ) : (
           <>
@@ -732,9 +753,11 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
           )}
           {step === 3 && (
           <div className="space-y-6">
-          {formData.event_kind === 'reminder' ? (
+          {isLeanKind ? (
             <div className="p-4 bg-gray-50 border border-gray-200 rounded-md">
-              <p className="text-sm font-medium text-gray-700">Reminders stay private</p>
+              <p className="text-sm font-medium text-gray-700">
+                {formData.event_kind === 'todo' ? 'To-dos stay private' : 'Reminders stay private'}
+              </p>
               <p className="text-xs text-gray-500 mt-1">They are only visible to you. No sharing options.</p>
             </div>
           ) : isTierZero() ? (
@@ -802,9 +825,9 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
           {step === 4 && (
           <div className="space-y-6">
           <p className="text-sm font-medium text-gray-700">Options</p>
-          {formData.event_kind === 'reminder' && (
+          {isLeanKind && (
             <div className="p-4 bg-gray-50 border border-gray-200 rounded-md">
-              <p className="text-sm text-gray-700">You’re all set. Use the button below to save.</p>
+              <p className="text-sm text-gray-700">You're all set. Use the button below to save.</p>
             </div>
           )}
           {formData.event_kind === 'event' && (
@@ -888,11 +911,11 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
                   Next
                   <ChevronRight className="h-4 w-4" />
                 </button>
-                {formData.event_kind === 'reminder' && step === 1 && !event && (
+                {isLeanKind && step === 1 && !event && (
                   <button
                     ref={createReminderButtonRef}
                     type="submit"
-                    disabled={loading || !canSubmitReminderFromStep1()}
+                    disabled={loading || !canSubmitLeanFromStep1()}
                     className="min-h-[44px] px-4 py-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
                   >
                     {loading ? 'Creating...' : 'Create'}
