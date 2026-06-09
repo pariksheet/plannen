@@ -88,12 +88,17 @@ describe('profile use — per-profile running probe (#7)', () => {
     await invokeProfileCreate({ name: 'b', mode: 'local_pg' }, { env: env(), now });
     setActive('a', env());
     // Simulate profile a's backend running: its per-profile pid file holds a
-    // live pid (ours). No injection — exercises the real composed-env probe.
+    // live pid (ours). A fake pidCommand returns the backend marker so the
+    // identity check confirms it as a Plannen backend process.  This exercises
+    // the real composed-env probe path (Fix A) while keeping Fix B deterministic
+    // — the marker identity check is tested independently in lifecycle-identity.test.mjs.
     const aDir = getProfileDir('a', env());
     mkdirSync(aDir, { recursive: true });
     writeFileSync(path.join(aDir, 'backend.pid'), String(process.pid));
-    await expect(invokeProfileUse({ name: 'b' }, { env: env(), repoRoot: tmpRepo }))
-      .rejects.toThrow(/still running/);
+    const fakePidCommand = (_pid) => 'node /path/to/plannen/backend/dist/index.js';
+    await expect(
+      invokeProfileUse({ name: 'b' }, { env: env(), repoRoot: tmpRepo, _pidCommand: fakePidCommand }),
+    ).rejects.toThrow(/still running/);
   });
 
   it("allows the switch when the previous profile's pid files are dead or absent", async () => {

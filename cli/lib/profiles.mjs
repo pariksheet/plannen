@@ -197,11 +197,20 @@ export function composeEnv(name, overrides = {}, baseEnv = process.env) {
     };
   }
   const profileEnv = readEnvFile(getProfileEnvPath(name, baseEnv));
+  const profileDir = getProfileDir(name, baseEnv);
+  // Seed per-profile pid paths when neither the profile env file nor baseEnv
+  // provides them.  Old profiles created before dataPathsFor was introduced
+  // lack these keys in their env file, causing getPgPidFile / getBackendPidFile
+  // to fall back to the global ~/.plannen/*.pid paths and incorrectly attribute
+  // any running process to every profile (#fix-A).
+  // Precedence: caller override > profileEnv > baseEnv > per-profile default.
   return {
     ...baseEnv,
     ...profileEnv,
     PLANNEN_PROFILE: name,
-    PLANNEN_PROFILE_DIR: getProfileDir(name, baseEnv),
+    PLANNEN_PROFILE_DIR: profileDir,
+    PLANNEN_PG_PID: profileEnv.PLANNEN_PG_PID ?? baseEnv.PLANNEN_PG_PID ?? path.join(profileDir, 'pg.pid'),
+    PLANNEN_BACKEND_PID: profileEnv.PLANNEN_BACKEND_PID ?? baseEnv.PLANNEN_BACKEND_PID ?? path.join(profileDir, 'backend.pid'),
     ...overrides,
   };
 }

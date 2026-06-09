@@ -36,9 +36,12 @@ describe('isPgRunning', () => {
     expect(isPgRunning(env())).toBe(false);
   });
 
-  it('returns true when PID file points at a live process', () => {
+  it('returns true when PID file points at a live process with the pg marker', () => {
     // The test process itself is the easiest live PID to reference.
+    // Inject a fake pidCommand so the test doesn't depend on the test process's
+    // real command line (which will never contain 'plannen-pg.mjs').
     writeFileSync(getPgPidFile(env()), String(process.pid));
-    expect(isPgRunning(env())).toBe(true);
+    const fakePsRunner = (_pid) => 'node /path/to/scripts/lib/plannen-pg.mjs start';
+    expect(isPgRunning(env(), fakePsRunner)).toBe(true);
   });
 });
