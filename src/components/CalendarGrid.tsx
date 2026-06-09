@@ -201,7 +201,8 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
             {days.map((day) => {
               const key = toDateKey(day)
               const dayEvents = eventsByDay.get(key) ?? []
-              const eventCount = dayEvents.filter((e) => e.event_kind !== 'reminder').length
+              const todoCount = dayEvents.filter((e) => e.event_kind === 'todo').length
+              const eventCount = dayEvents.filter((e) => e.event_kind !== 'reminder' && e.event_kind !== 'todo').length
               const reminderCount = dayEvents.filter((e) => e.event_kind === 'reminder').length
               const inMonth = isSameMonth(day, currentMonth)
               const isSelected = isSameDay(day, selectedDate)
@@ -229,6 +230,7 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
                     {!compact && dayEvents.length > 0 && (
                       <span className="inline-flex items-center gap-1">
                         {reminderCount > 0 && <span className="h-1.5 w-1.5 rounded-full bg-green-600" aria-label={`${reminderCount} reminders`} />}
+                        {todoCount > 0 && <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-label={`${todoCount} todos`} />}
                         <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-blue-600 text-white text-[10px] font-semibold">
                           {dayEvents.length}
                         </span>
@@ -236,12 +238,12 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
                     )}
                   </div>
                   {compact && dayEvents.length > 0 && (
-                    // One dot per item (blue = event, green = reminder), wrapped
+                    // One dot per item (blue = event, green = reminder, amber = todo), wrapped
                     // and capped so a busy day can't blow out the cell. The
                     // aria-label always carries the true counts.
                     <div
                       className="mt-0.5 flex flex-wrap items-center gap-0.5"
-                      aria-label={`${eventCount} events, ${reminderCount} reminders`}
+                      aria-label={`${eventCount} events, ${reminderCount} reminders, ${todoCount} todos`}
                     >
                       {Array.from({ length: Math.min(eventCount, DOT_CAP) }).map((_, i) => (
                         <span key={`e${i}`} className="h-1.5 w-1.5 rounded-full bg-blue-600" />
@@ -249,7 +251,10 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
                       {Array.from({ length: Math.min(reminderCount, DOT_CAP) }).map((_, i) => (
                         <span key={`r${i}`} className="h-1.5 w-1.5 rounded-full bg-green-600" />
                       ))}
-                      {(eventCount > DOT_CAP || reminderCount > DOT_CAP) && (
+                      {Array.from({ length: Math.min(todoCount, DOT_CAP) }).map((_, i) => (
+                        <span key={`t${i}`} className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                      ))}
+                      {(eventCount > DOT_CAP || reminderCount > DOT_CAP || todoCount > DOT_CAP) && (
                         <span className="text-[9px] leading-none text-gray-500">+</span>
                       )}
                     </div>
