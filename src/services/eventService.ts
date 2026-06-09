@@ -61,7 +61,9 @@ export async function createEvent(
   const now = new Date()
   let eventStatus = data.event_status
   if (!eventStatus) {
-    if (data.event_kind === 'reminder') {
+    if (data.event_kind === 'todo') {
+      eventStatus = 'going' // completion is tracked via completed_at, not status
+    } else if (data.event_kind === 'reminder') {
       eventStatus = startDate < now ? 'past' : 'going'
     } else if (watchForNextOccurrence && !isMissed) {
       eventStatus = 'watching'
@@ -90,6 +92,7 @@ export async function createEvent(
       event_kind: data.event_kind,
       event_type: data.event_type,
       created_by: userId,
+      assigned_to: data.event_kind === 'todo' ? userId : null,
       event_status: eventStatus,
       shared_with_friends: data.shared_with_friends ?? 'none',
     }) as unknown as Event
@@ -214,5 +217,34 @@ export async function getUserEvents(_userId: string): Promise<{ data: Event[] | 
     return { data: (data as unknown as Event[]).map((e) => resolveEventStatus(e)), error: null }
   } catch (e) {
     return { data: null, error: e instanceof Error ? e : new Error('List failed') }
+  }
+}
+
+export async function completeTodo(id: string): Promise<{ data: Event | null; error: Error | null }> {
+  try {
+    const data = await dbClient.events.update(id, { completed_at: new Date().toISOString() }) as unknown as Event
+    return { data, error: null }
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e : new Error('Complete failed') }
+  }
+}
+
+export async function uncompleteTodo(id: string): Promise<{ data: Event | null; error: Error | null }> {
+  try {
+    const data = await dbClient.events.update(id, { completed_at: null }) as unknown as Event
+    return { data, error: null }
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e : new Error('Uncomplete failed') }
+  }
+}
+
+export async function convertEventKind(id: string, kind: 'reminder' | 'todo'): Promise<{ data: Event | null; error: Error | null }> {
+  const patch: Record<string, unknown> = { event_kind: kind }
+  if (kind === 'reminder') patch.completed_at = null
+  try {
+    const data = await dbClient.events.update(id, patch) as unknown as Event
+    return { data, error: null }
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e : new Error('Convert failed') }
   }
 }
