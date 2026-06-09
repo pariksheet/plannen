@@ -73,6 +73,18 @@ function eventTimeState(event: Event, now: Date): EventTimeState {
 export function ScheduleOverview(props: ScheduleOverviewProps) {
   // Cancelled events don't belong on a schedule — filter once for every card.
   const events = props.events.filter((e) => e.event_status !== 'cancelled')
+
+  async function handleToggleTodo(e: Event) {
+    if (e.completed_at) await uncompleteTodo(e.id)
+    else await completeTodo(e.id)
+    props.onShareSuccess()
+  }
+
+  async function handleConvertKind(e: Event, kind: 'reminder' | 'todo') {
+    await convertEventKind(e.id, kind)
+    props.onShareSuccess()
+  }
+
   return (
     <div className="space-y-4 w-full min-w-0">
       <HeaderStrip />
@@ -85,6 +97,8 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
         onDelete={props.onDelete}
         onShareSuccess={props.onShareSuccess}
         onHashtagClick={props.onHashtagClick}
+        onToggleTodo={handleToggleTodo}
+        onConvertKind={handleConvertKind}
       />
       <ThisMonthCard
         events={events}
@@ -93,6 +107,8 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
         onDelete={props.onDelete}
         onShareSuccess={props.onShareSuccess}
         onHashtagClick={props.onHashtagClick}
+        onToggleTodo={handleToggleTodo}
+        onConvertKind={handleConvertKind}
       />
     </div>
   )

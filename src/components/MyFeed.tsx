@@ -12,7 +12,7 @@ import { ScheduleOverview } from './ScheduleOverview'
 import { ConfirmModal, PromptModal } from './Modal'
 import { Plus, ChevronUp, Calendar, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
-import { deleteEvent } from '../services/eventService'
+import { deleteEvent, completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
 import { supabase } from '../lib/supabase'
 
 // Identifies events auto-created by the mailbox-sync routine.
@@ -276,6 +276,17 @@ export function MyFeed() {
     })
   }
 
+  const handleToggleTodo = useCallback(async (event: Event) => {
+    if (event.completed_at) await uncompleteTodo(event.id)
+    else await completeTodo(event.id)
+    loadEvents()
+  }, [loadEvents])
+
+  const handleConvertKind = useCallback(async (event: Event, kind: 'reminder' | 'todo') => {
+    await convertEventKind(event.id, kind)
+    loadEvents()
+  }, [loadEvents])
+
   const openDatePicker = () => {
     const input = dateInputRef.current
     if (!input) return
@@ -505,6 +516,8 @@ export function MyFeed() {
                     setActiveHashtag(tag)
                     setShowPast(true)
                   }}
+                  onToggleTodo={handleToggleTodo}
+                  onConvertKind={handleConvertKind}
                   showActions
                   showRSVP
                   showMemories

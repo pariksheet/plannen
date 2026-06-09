@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useCallback } from 'react'
 import {
   addDays,
   addMonths,
@@ -15,6 +15,7 @@ import {
 } from 'date-fns'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Event } from '../types/event'
+import { completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
 import { EventList } from './EventList'
 import { EventDetailsModal } from './EventDetailsModal'
 import { EventForm } from './EventForm'
@@ -67,6 +68,17 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
     setEditingEvent(event)
     setShowForm(true)
   }
+
+  const handleToggleTodo = useCallback(async (event: Event) => {
+    if (event.completed_at) await uncompleteTodo(event.id)
+    else await completeTodo(event.id)
+    onDataChange?.()
+  }, [onDataChange])
+
+  const handleConvertKind = useCallback(async (event: Event, kind: 'reminder' | 'todo') => {
+    await convertEventKind(event.id, kind)
+    onDataChange?.()
+  }, [onDataChange])
 
   const eventsByDay = useMemo(() => {
     // Skip parent recurring events that have child sessions in this events array
@@ -307,6 +319,8 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
                 onDelete={onDelete}
                 onShareSuccess={onShareSuccess}
                 onHashtagClick={onHashtagClick}
+                onToggleTodo={handleToggleTodo}
+                onConvertKind={handleConvertKind}
                 showActions={showActions}
                 showRSVP
                 showMemories

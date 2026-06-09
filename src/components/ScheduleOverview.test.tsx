@@ -21,13 +21,24 @@ vi.mock('../services/practiceService', () => ({
   unmarkPracticeDone: vi.fn(async () => {}),
 }))
 // Stub the reused timeline card — exercised in its own test. Expose
-// Edit/Delete so we can assert the reveal wires actions.
+// Edit/Delete/ToggleTodo so we can assert the reveal wires actions.
 vi.mock('./EventCard', () => ({
-  EventCard: ({ event, onEdit, onDelete }: { event: Event; onEdit?: (e: Event) => void; onDelete?: (id: string) => void }) => (
+  EventCard: ({
+    event,
+    onEdit,
+    onDelete,
+    onToggleTodo,
+  }: {
+    event: Event
+    onEdit?: (e: Event) => void
+    onDelete?: (id: string) => void
+    onToggleTodo?: (e: Event) => void
+  }) => (
     <div data-testid="event-card">
       <span>Card: {event.title}</span>
       {onEdit && <button type="button" onClick={() => onEdit(event)}>Edit event</button>}
       {onDelete && <button type="button" onClick={() => onDelete(event.id)}>Delete event</button>}
+      {onToggleTodo && <button type="button" onClick={() => onToggleTodo(event)}>Toggle todo</button>}
     </div>
   ),
 }))
@@ -224,5 +235,23 @@ describe('ScheduleOverview', () => {
     expect(
       await screen.findByRole('checkbox', { name: /mark (done|not done)/i })
     ).toBeInTheDocument()
+  })
+
+  it('month-list revealed card receives onToggleTodo — clicking it calls completeTodo', async () => {
+    const user = userEvent.setup()
+    const { completeTodo } = await import('../services/eventService')
+    const today = new Date()
+    const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
+    const day = Math.min(today.getDate() + 1, lastDay)
+    const thisMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
+    const iso = `${thisMonth}-${String(day).padStart(2, '0')}`
+    const todo = makeEvent({ id: 'mtodo', title: 'Pick up package', event_kind: 'todo', start_date: iso })
+    renderOverview([todo])
+    const monthList = screen.getByTestId('month-list')
+    await user.click(within(monthList).getByText('Pick up package'))
+    // QuickEventCard is now rendered with onToggleTodo
+    expect(within(monthList).getByTestId('quick-event-card')).toBeInTheDocument()
+    await user.click(within(monthList).getByRole('button', { name: 'Toggle todo' }))
+    expect(vi.mocked(completeTodo)).toHaveBeenCalledWith('mtodo')
   })
 })

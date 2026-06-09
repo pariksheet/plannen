@@ -8,6 +8,8 @@ interface EventListProps {
   onDelete?: (eventId: string) => void
   onShareSuccess?: () => void
   onHashtagClick?: (tag: string) => void
+  onToggleTodo?: (event: Event) => void
+  onConvertKind?: (event: Event, kind: 'reminder' | 'todo') => void
   showActions?: boolean
   showRSVP?: boolean
   showMemories?: boolean
@@ -23,6 +25,8 @@ export function EventList({
   onDelete,
   onShareSuccess,
   onHashtagClick,
+  onToggleTodo,
+  onConvertKind,
   showActions = false,
   showRSVP = false,
   showMemories = false,
@@ -48,6 +52,8 @@ export function EventList({
           onDelete={onDelete}
           onShareSuccess={onShareSuccess}
           onHashtagClick={onHashtagClick}
+          onToggleTodo={onToggleTodo}
+          onConvertKind={onConvertKind}
           showActions={showActions}
           showRSVP={showRSVP}
           showMemories={showMemories}
