@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### To-do event type
+
+- **A new `todo` event kind: a dated, checkable, one-off task.** Fills the gap between passive reminders (which never get "done") and recurring practices (which can't be one-off). A todo has a full datetime like an event, a completion checkbox, and is assigned to its creator by default.
+- **Shown across all three plan views.** Todos render with a leading checkbox in the Schedule week list, the Timeline (via the reused `EventCard`), and the Calendar (a new amber dot alongside blue events / green reminders). The MyFeed timeline gains a matching amber "To-dos" filter pill.
+- **Completion + overdue states.** Ticking a todo strikes through and dims it in place; an unchecked todo whose datetime has passed is flagged "overdue" and stays put (completion is tracked via `completed_at`, never the `event_status` auto-resolver, so an unfinished task never silently ages into the past).
+- **Convert between reminder and to-do** from the card's kebab menu, in both compact and detailed views.
+- **MCP.** `create_event` accepts `event_kind: 'todo'` (+ optional `assigned_to`, defaulting to the creator); new `complete_todo` / `uncomplete_todo` tools, mirrored in both the local stdio and edge servers.
+- **Schema.** Additive, forward-only migration adds `completed_at` and `assigned_to` columns to `events` and extends the `event_kind` check constraint.
+
 ## [0.8.4] - 2026-06-05
 
 ### claude.ai custom connector (OAuth)
