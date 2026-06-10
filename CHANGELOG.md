@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-06-10
+
+### Routines folded into the day
+
+- **No more separate "Routines" list — routines now live inside your day.** The dedicated Routines section (Schedule view) and Practices section (Today view) are gone. Instead, a routine appears inline in "This week"/"Today" only when it's relevant **today**: a date-cadence routine on the days it fires, and a "N×/week or /month" routine until you've hit the target for the period. They render as ordinary checkable items, interleaved with your events by part-of-day (a morning routine among the morning items, "anytime" ones at the end).
+- **Ticking one keeps it in view.** A completed routine stays, checked off, for the rest of the day (untick to undo); a flex routine shows its progress (e.g. `1/3 this week`) and drops off once the target is met. Routines that don't apply today simply don't show — no noise.
+
 ## [0.4.1] - 2026-06-10
 
 ### Attendances & drop/pick now visible in the web app

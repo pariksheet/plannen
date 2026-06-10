@@ -90,6 +90,20 @@ function midWeekIso(): string {
 
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
+// A unified-recurrence PracticeRow fixture. `dtstart` sits well in the past so a
+// pinned-daily routine is due on ANY today; flex routines are date-agnostic.
+function practiceFixture(overrides: Record<string, unknown>): never {
+  return {
+    id: 'p', user_id: 'u', family_member_id: null, name: 'Routine',
+    category: 'household', dtstart: '2026-01-01', recurrence_until: null,
+    preferred_time_of_day: 'anytime', active: true,
+    created_at: '2026-01-01', updated_at: '2026-01-01',
+    recurrence_mode: 'pinned', recurrence_rule: { frequency: 'daily' },
+    flex_period: null, flex_target: null,
+    ...overrides,
+  } as never
+}
+
 function daysAgoIso(n: number): string {
   const d = new Date()
   d.setDate(d.getDate() - n)
@@ -137,18 +151,53 @@ describe('ScheduleOverview', () => {
     expect(await screen.findByText(/24°\s*clear/)).toBeInTheDocument()
   })
 
-  it('lists practices and toggles completion', async () => {
-    const { listPractices, completionsThisWeek, markPracticeDone } = await import('../services/practiceService')
-    vi.mocked(listPractices).mockResolvedValue([
-      { id: 'p1', name: 'Sunscreen', recurrence_mode: 'pinned', recurrence_rule: { frequency: 'daily' }, flex_period: null, flex_target: null } as never,
-      { id: 'p2', name: 'Gym', recurrence_mode: 'flex_count', recurrence_rule: null, flex_period: 'week', flex_target: 3 } as never,
+  it('folds today-applicable routines into the week card and toggles them', async () => {
+    const user = userEvent.setup()
+    const { listPractices, completionsThisWeek, markPracticeDone, unmarkPracticeDone } =
+      await import('../services/practiceService')
+    // Pinned daily with a past dtstart → due on ANY today (no calendar flakiness).
+    const sunscreen = practiceFixture({
+      id: 'p1', name: 'Sunscreen', recurrence_mode: 'pinned',
+      recurrence_rule: { frequency: 'daily' }, flex_period: null, flex_target: null,
+      preferred_time_of_day: 'morning',
+    })
+    // Flex weekly, 0 completions → under target → applicable.
+    const gym = practiceFixture({
+      id: 'p2', name: 'Gym', recurrence_mode: 'flex_count', recurrence_rule: null,
+      flex_period: 'week', flex_target: 3, preferred_time_of_day: 'anytime',
+    })
+    // Flex weekly already MET (target 1, 1 completion this week) → NOT applicable.
+    const walk = practiceFixture({
+      id: 'p3', name: 'Walk', recurrence_mode: 'flex_count', recurrence_rule: null,
+      flex_period: 'week', flex_target: 1, preferred_time_of_day: 'anytime',
+    })
+    vi.mocked(listPractices).mockResolvedValue([sunscreen, gym, walk])
+    vi.mocked(completionsThisWeek).mockResolvedValue([
+      { practice_id: 'p3', completed_on: todayIso() } as never,
     ])
-    vi.mocked(completionsThisWeek).mockResolvedValue([])
     renderOverview([])
-    expect(await screen.findByText(/Sunscreen \(daily\)/)).toBeInTheDocument()
-    expect(screen.getByText(/Gym \(0\/3 this week\)/)).toBeInTheDocument()
-    screen.getAllByRole('checkbox')[0].click()
-    expect(vi.mocked(markPracticeDone)).toHaveBeenCalledWith('p1', expect.any(String))
+
+    const week = screen.getByTestId('week-card')
+    expect(await within(week).findByText(/Sunscreen \(daily\)/)).toBeInTheDocument()
+    expect(within(week).getByText(/Gym \(0\/3 this week\)/)).toBeInTheDocument()
+    // A flex routine already at target does not fold in.
+    expect(within(week).queryByText(/Walk/)).not.toBeInTheDocument()
+
+    // Ticking the routine marks it done…
+    const sunscreenRow = within(week).getByText(/Sunscreen \(daily\)/).closest('li') as HTMLElement
+    await user.click(within(sunscreenRow).getByRole('checkbox'))
+    expect(vi.mocked(markPracticeDone)).toHaveBeenCalledWith('p1', todayIso())
+
+    // …and unticking an already-done routine unmarks it.
+    vi.mocked(completionsThisWeek).mockResolvedValue([
+      { practice_id: 'p1', completed_on: todayIso() } as never,
+    ])
+    renderOverview([])
+    const weekCards = screen.getAllByTestId('week-card')
+    const week2 = weekCards[weekCards.length - 1]
+    const doneRow = (await within(week2).findByText(/Sunscreen \(daily\)/)).closest('li') as HTMLElement
+    await user.click(within(doneRow).getByRole('checkbox'))
+    expect(vi.mocked(unmarkPracticeDone)).toHaveBeenCalledWith('p1', todayIso())
   })
 
   it('renders a today event inside the week card', () => {

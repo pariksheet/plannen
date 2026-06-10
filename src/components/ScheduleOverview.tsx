@@ -2,21 +2,18 @@ import { useEffect, useState } from 'react'
 import { Event } from '../types/event'
 import { getTodayWeather, TodayWeather } from '../services/weatherService'
 import { getLocations } from '../services/profileService'
-import {
-  listPractices, completionsThisWeek, markPracticeDone, unmarkPracticeDone,
-} from '../services/practiceService'
 import { completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
 import type {
-  PracticeRow, PracticeCompletionRow,
   AttendanceInstanceRow, ResolvedObligationRow,
 } from '../lib/dbClient/types'
 import { attendanceLabel } from '../utils/attendanceLabel'
 import { obligationLabel } from '../utils/obligationLabel'
 import { CalendarGrid } from './CalendarGrid'
 import { EventCard } from './EventCard'
-import { buildWeekAgenda, eventDateLocal, overlappingIds, weekDays, ymd } from '../utils/weekAgenda'
+import { buildWeekAgenda, eventDateLocal, overlappingIds, ymd } from '../utils/weekAgenda'
 import { defaultCity } from '../utils/homeCity'
-import { practiceLabel, doneThisPeriod, monthStartIso } from '../utils/practiceLabel'
+import { useTodayRoutines } from '../hooks/useTodayRoutines'
+import type { TodayRoutine } from '../utils/routineToday'
 
 export interface ScheduleOverviewProps {
   events: Event[]
@@ -38,10 +35,6 @@ const sketchBody = "font-['Kalam']"
 
 function todayIso(): string {
   return ymd(new Date())
-}
-
-function weekStartIso(): string {
-  return ymd(weekDays(new Date())[0])
 }
 
 function timeOf(event: Event): string {
@@ -112,9 +105,6 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
   return (
     <div className="space-y-4 w-full min-w-0">
       <HeaderStrip />
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <RoutinesCard />
-      </div>
       <TodayScheduleCard
         attendances={props.attendancesToday ?? []}
         obligations={props.obligationsToday ?? []}
@@ -176,71 +166,6 @@ function HeaderStrip() {
         )}
       </div>
     </header>
-  )
-}
-
-function RoutinesCard() {
-  const [practices, setPractices] = useState<PracticeRow[]>([])
-  const [completions, setCompletions] = useState<PracticeCompletionRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [date] = useState(todayIso())
-
-  const refresh = async () => {
-    try {
-      const ms = monthStartIso(date)
-      const ws = weekStartIso()
-      const periodFrom = ms < ws ? ms : ws
-      const [p, c] = await Promise.all([
-        listPractices(true),
-        completionsThisWeek(periodFrom),
-      ])
-      setPractices(p)
-      setCompletions(c)
-    } catch (err) {
-      console.error('RoutinesCard: failed to load practices', err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { void refresh() }, [])
-
-  const isDoneToday = (id: string) =>
-    completions.some((c) => c.practice_id === id && c.completed_on === date)
-
-  const toggle = async (p: PracticeRow) => {
-    if (isDoneToday(p.id)) await unmarkPracticeDone(p.id, date)
-    else await markPracticeDone(p.id, date)
-    await refresh()
-  }
-
-  if (loading) return null
-  if (practices.length === 0) return null
-
-  const visible = practices.slice(0, 6)
-  const overflow = practices.length - visible.length
-
-  return (
-    <section className={`rounded-xl border-2 border-stone-200/70 bg-stone-50/60 p-4 ${sketchBody}`}>
-      <ul className="space-y-1">
-        {visible.map((p) => {
-          const done = isDoneToday(p.id)
-          const periodDone = doneThisPeriod(p, completions, weekStartIso(), date)
-          const label = practiceLabel(p, periodDone)
-          return (
-            <li key={p.id}>
-              <label className="flex items-center gap-2 cursor-pointer text-base">
-                <input type="checkbox" checked={done} onChange={() => void toggle(p)} className="h-4 w-4" />
-                <span className={done ? 'line-through text-gray-400' : 'text-gray-800'}>{label}</span>
-              </label>
-            </li>
-          )
-        })}
-        {overflow > 0 && (
-          <li className="text-xs text-indigo-600">+{overflow} more in Routines</li>
-        )}
-      </ul>
-    </section>
   )
 }
 
@@ -354,6 +279,7 @@ function dayLabel(dateKey: string): string {
 type WeekRow =
   | { kind: 'empty'; key: string }
   | { kind: 'event'; key: string; event: Event; isToday: boolean; isPast: boolean; clash: boolean }
+  | { kind: 'routine'; key: string; routine: TodayRoutine }
 
 // Incomplete to-dos whose date has passed. Rendered above the week card and
 // only when there's at least one — otherwise the section is absent entirely.
@@ -434,6 +360,16 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
   const now = useNow()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const buckets = buildWeekAgenda(events, now)
+  const todayKey = todayIso()
+  const { routines, toggle: toggleRoutine } = useTodayRoutines(todayKey)
+  // Minutes-of-day for ordering today's rows; untimed events sort first (−1),
+  // timed events by clock time, routines by part-of-day (anytime → Infinity, last).
+  const eventMins = (e: Event): number => {
+    const t = timeOf(e) // 'HH:MM' or ''
+    if (!t) return -1
+    const [h, m] = t.split(':').map(Number)
+    return h * 60 + m
+  }
   const toggle = (id: string) => setSelectedId((cur) => (cur === id ? null : id))
 
   async function toggleTodo(e: Event) {
@@ -450,6 +386,23 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
   // columns (denser than stacked day-blocks). Today is always represented — as
   // a placeholder row when it has no events. Time clashes are detected per day.
   const rows = buckets.flatMap<WeekRow>((b) => {
+    if (b.isToday) {
+      const clashes = overlappingIds(b.events)
+      const eventRows = b.events.map((e) => ({
+        sortMins: eventMins(e),
+        row: {
+          kind: 'event', key: e.id, event: e, isToday: true, isPast: b.isPast,
+          clash: clashes.has(e.id),
+        } as WeekRow,
+      }))
+      const routineRows = routines.map((r) => ({
+        sortMins: r.sortMins,
+        row: { kind: 'routine', key: `routine-${r.id}`, routine: r } as WeekRow,
+      }))
+      const merged = [...eventRows, ...routineRows].sort((x, y) => x.sortMins - y.sortMins)
+      if (merged.length === 0) return [{ kind: 'empty', key: b.dateKey }]
+      return merged.map((m) => m.row)
+    }
     if (b.events.length === 0) return [{ kind: 'empty', key: b.dateKey }]
     const clashes = overlappingIds(b.events)
     return b.events.map((e) => ({
@@ -466,6 +419,24 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
             return (
               <li key={row.key} className="break-inside-avoid mb-1 text-base text-gray-500 rounded bg-yellow-100/60 px-1.5 py-0.5">
                 {dayLabel(row.key)} · nothing scheduled
+              </li>
+            )
+          }
+          if (row.kind === 'routine') {
+            const r = row.routine
+            return (
+              <li key={row.key} className="break-inside-avoid mb-1">
+                <label className="flex items-center gap-1.5 w-full text-base leading-6 rounded px-1.5 bg-yellow-100/60 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-amber-600 shrink-0"
+                    checked={r.done}
+                    onClick={(ev) => ev.stopPropagation()}
+                    onChange={() => void toggleRoutine(r.id)}
+                    aria-label={r.done ? 'Mark not done' : 'Mark done'}
+                  />
+                  <span className={r.done ? 'line-through text-gray-400' : ''}>{r.label}</span>
+                </label>
               </li>
             )
           }
