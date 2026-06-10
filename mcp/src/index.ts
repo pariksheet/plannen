@@ -2656,7 +2656,7 @@ const TOOLS: Tool[] = [
   {
     name: 'log_activity',
     description:
-      'CALL THIS IMMEDIATELY, without asking, when the user reports doing something with a DURATION or a measured QUANTITY — even casually ("slept 8h last night", "ran 40 min", "drank 2L water", "weight 72kg", "mood 4/5", "2h deep work this morning", "read to the kids 20 min"). Do NOT just reply conversationally — log it, then confirm in one line ending "· undo?". `activity` is a free label from the user\'s words (never a fixed category). Put time-spans in duration_minutes (8h → 480) and measures in quantity+unit (2 + "L"). It resolves coarse times ("last night", "this morning") to occurred_at in the profile timezone (default now), and if an active routine matches the activity it ALSO marks that routine done (returns marked_routine). Use log_completion instead for a bare "done X" with no duration/quantity; use create_event for a FUTURE task; use upsert_profile_fact for a durable fact about a person/place.',
+      'CALL THIS IMMEDIATELY, without asking, when the user reports doing something with a DURATION or a measured QUANTITY — even casually ("slept 8h last night", "ran 40 min", "drank 2L water", "weight 72kg", "mood 4/5", "2h deep work this morning", "read to the kids 20 min"). Do NOT just reply conversationally — log it, then confirm in one line ending "· undo?". `activity` is a free label from the user\'s words (never a fixed category). Put time-spans in duration_minutes (8h → 480) and measures in quantity+unit (2 + "L"). It resolves coarse times ("last night", "this morning") to occurred_at in the profile timezone (default now), and if an active routine matches the activity it ALSO marks that routine done (returns marked_routine). Use log_completion instead for a bare "done X" with no duration/quantity; use create_event for a FUTURE task; use upsert_profile_fact for a durable fact about a person/place. This records a ONE-OFF thing that already happened — NEVER create a recurring routine (create_practice) from "I slept/ran/did X"; that is a bug.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -3104,7 +3104,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'create_practice',
-    description: 'Create a recurring routine. recurrence_mode="pinned" for date-cadence routines (every other day, weekdays, monthly — set recurrence_rule); recurrence_mode="flex_count" for "N times per week/month, anytime" (gym 3×/week — set flex_period + flex_target). For time-pinned attendance like a school drop-off, use a recurring event/attendance instead, not a practice.',
+    description: 'Create an ongoing RECURRING routine the user wants to repeat going forward (gym 3×/week, vitamins every morning). Do NOT use this to record that the user DID something ONCE — "slept 8h yesterday", "ran 40 min today", "meditated this morning" are past one-off entries → call log_activity, never create_practice. Turning a one-off report into a daily routine is a bug. Only create a practice when the user explicitly asks to set up / track a repeating habit. recurrence_mode="pinned" for date-cadence routines (every other day, weekdays, monthly — set recurrence_rule); recurrence_mode="flex_count" for "N times per week/month, anytime" (set flex_period + flex_target). For time-pinned attendance like a school drop-off, use a recurring event/attendance instead, not a practice.',
     inputSchema: {
       type: 'object',
       properties: {
