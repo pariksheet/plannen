@@ -71,13 +71,28 @@ Use the family member's UUID as `subject` for facts about a member; `'user'` for
 
 Receipt (this one **is** shown — unlike plannen-core's silent passive capture, because the user explicitly logged it): `✓ Noted: <fact in plain words> · undo?`
 
-### 4. Activity / time-block → not yet wired (Phase 2)
+### 4. Activity / measurement → `log_activity`
 
-Trigger: an activity with a duration and no calendar slot ("slept 8h last night", "ran for 40 minutes", "deep work 2 hours this morning").
+Trigger: the user did something with a **duration** or a **measured quantity** ("slept 8h last night", "ran 40 min", "drank 2L water", "weight 72kg", "mood 4/5", "2h deep work this morning", "read to the kids 20 min").
 
-There is no `activity_logs` table yet. Do **not** mis-file it as a todo or a practice. Reply with the graceful notice and write nothing:
+```
+log_activity({ activity, occurred_at?, duration_minutes?, quantity?, unit?, notes?, tags?, family_member_id? })
+```
 
-`⏳ Sleep/duration logging isn't wired up yet — coming soon. (Tell me if you'd rather I save it as a plain todo for now.)`
+- `activity` is a **free label from the user's words** — never a fixed category ("sleep", "run", "water", "weight", "mood").
+- Time-spans → `duration_minutes` (8h → 480, 40 min → 40). Measures → `quantity` + `unit` (2 + "L", 72 + "kg", 4 + "/5"). Either, both, or neither.
+- Resolve coarse times ("last night", "this morning") into `occurred_at` (profile timezone; default now).
+
+**The "both" rule is server-side.** If the activity also matches an active routine (e.g. "ran 40 min" with a "run" routine), `log_activity` marks that routine done too and returns `marked_routine` — you don't make a second call.
+
+Receipts:
+- `✓ Logged sleep 8h · last night · undo?`
+- `✓ Logged water 2L · undo?`
+- `✓ Logged run 40min + marked "Run" done · undo?` (when `marked_routine` is returned)
+
+**Undo:** `delete_activity_log({ id })`; if it returned `marked_routine`, also `unmark_practice_done` for that practice/date.
+
+**Completion vs. activity — the one split rule:** a **duration or measured quantity** → `log_activity` (case 4). A bare **"done X"** with neither → `log_completion` (case 2). "just finished gym" = completion; "ran 40 min" = activity.
 
 ## Tie-breakers
 
@@ -96,12 +111,13 @@ Remember the last action you took this turn. On "undo" (or "no, scrap that"), re
 - logged a **new** completed todo (case 2 tier 3) → `uncomplete_todo({ id })`, then cancel the event as above.
 - practice completion (case 2 tier 2) → `unmark_practice_done({ practice_id, completed_on })`.
 - profile fact (case 3) → `correct_profile_fact` to mark it historical.
+- activity (case 4) → `delete_activity_log({ id })`; if it returned `marked_routine`, also `unmark_practice_done` for that practice/date.
 
 Confirm with one line: `✓ Undone.`
 
 ## Receipt rules
 
-- **One line**, always ending in `undo?` (except case 5's "coming soon" notice and the undo confirmation).
+- **One line**, always ending in `undo?` (except the undo confirmation).
 - Format: `✓ <what happened> · <when/where if useful> · undo?`.
 - 24h `HH:MM`. No prose, no encouragement, no coaching.
 - One action per log. If the user logs several things in one message ("kids in bed, took vitamins"), classify and act on each, then print one receipt line per action.

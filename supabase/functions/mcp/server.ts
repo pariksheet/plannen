@@ -30,7 +30,7 @@ Routing:
 - Finished / done something → call log_completion({ title }). It resolves to: complete an existing open todo, else mark a matching routine done, else log a new completed todo, and returns {action}. Receipt: "✓ <what> · undo?".
 - A FUTURE task with a time/date ("call dentist at 1pm") → create_event({ event_kind: "todo", start_date }). Receipt: "✓ Todo … HH:MM · undo?".
 - A durable fact about a person / place / preference ("met our neighbour, lives on our street") → upsert_profile_fact. Receipt: "✓ Noted: … · undo?".
-- An activity with a duration but no calendar slot ("slept 8h", "ran 40 min") → not supported yet; reply "⏳ Sleep/duration logging isn't wired up yet — coming soon." and write nothing.
+- An activity with a DURATION or a measured QUANTITY ("slept 8h", "ran 40 min", "drank 2L", "weight 72kg", "mood 4/5") → call log_activity({ activity, duration_minutes? | quantity?+unit? }). It also ticks a matching active routine server-side. Split rule vs above: a duration/quantity → log_activity; a bare "done X" with neither → log_completion.
 
 Guard rails — do NOTHING (reply normally) for questions ("did you…?"), intentions / hypotheticals ("I should…", "maybe I'll…", "thinking about…"), or items inside an active planning / brainstorm thread. Only act on completed, concrete, first-person / household actions stated as fact.
 
