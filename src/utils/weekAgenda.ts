@@ -40,9 +40,9 @@ export function weekDays(now: Date): Date[] {
 // events (today is always included even if empty; other empty days are
 // omitted). Recurrence parents are skipped; reminders are kept, including
 // past ones.
-export function buildWeekAgenda(events: Event[], now: Date): DayBucket[] {
-  const days = weekDays(now)
-  const todayKey = ymd(now)
+export function buildWeekAgenda(events: Event[], weekRef: Date, today: Date = weekRef): DayBucket[] {
+  const days = weekDays(weekRef)
+  const todayKey = ymd(today)
   const weekStart = ymd(days[0])
   const weekEnd = ymd(days[6])
 

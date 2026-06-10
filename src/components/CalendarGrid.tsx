@@ -39,7 +39,7 @@ interface CalendarGridProps {
 }
 
 // Max dots rendered per kind in a compact cell before showing a "+" overflow.
-const DOT_CAP = 5
+const DOT_CAP = 11
 
 function toDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`

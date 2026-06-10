@@ -121,3 +121,23 @@ describe('eventDateLocal', () => {
     expect(result).toBe(expected)
   })
 })
+
+describe('buildWeekAgenda with explicit today', () => {
+  it('builds next week with all buckets non-today / non-past', () => {
+    const now = new Date('2026-06-10T12:00:00')        // Wednesday
+    const nextWeekRef = new Date('2026-06-17T12:00:00') // +7d
+    const e = ev({ id: 'n1', start_date: '2026-06-18T09:00:00' }) // Thursday next week
+    const buckets = buildWeekAgenda([e], nextWeekRef, now)
+    expect(buckets.length).toBeGreaterThan(0)
+    expect(buckets.every((b) => b.isToday === false)).toBe(true)
+    expect(buckets.every((b) => b.isPast === false)).toBe(true)
+    expect(buckets.some((b) => b.events.some((x) => x.id === 'n1'))).toBe(true)
+  })
+
+  it('two-arg form unchanged: today is flagged', () => {
+    const now = new Date('2026-06-10T12:00:00')
+    const buckets = buildWeekAgenda([], now)
+    const today = buckets.find((b) => b.dateKey === ymd(now))
+    expect(today?.isToday).toBe(true)
+  })
+})
