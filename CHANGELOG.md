@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-10
+
+### Activity logging — capture anything you did or measured
+
+- **`/log` now records activities with a duration or a quantity.** Things like "slept 8h last night", "ran 40 min", "drank 2L water", "weight 72kg", or "mood 4/5" now land in a new generic activity log — the gap the first `/log` release left as "coming soon". The activity is a free-form label (sleep, run, water, weight, mood, whatever you say), so nothing is hard-coded to specific categories; each entry carries a duration, a quantity + unit, or just a note.
+- **Logging an activity also ticks a matching routine.** If you say "ran 40 min" and you keep a "run" routine, the run is logged *and* the routine is marked done for the day in one step — your streak follows the data without a second command.
+- **Ask how you're doing over time.** "How much did I sleep this week?" / "How often did I run this month?" read back from the log so you can see totals and frequencies.
+- **Works on mobile, no app UI needed yet.** The logic lives in three new tools (log / list / delete) on both server runtimes, so the behaviour is identical in the Claude mobile app. A visual view for trends is a deliberate later pass.
+
 ## [0.5.0] - 2026-06-10
 
 ### /log — a frictionless journal that works on mobile
