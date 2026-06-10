@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-10
+
+### Schedule view: tighter mobile header
+
+- **Create Event collapses to a + icon on mobile.** The button now shows only the plus glyph on small screens (matching the Discover button) and the full "Create Event" label returns at the `sm` breakpoint and up.
+- **Tabs and actions share one row.** `Schedule | Calendar | Timeline` and the Discover / Create buttons now sit on a single row instead of the actions wrapping to a full-width line below the tabs.
+
+### Versioning
+
+- **Plugin version realigned to the package version (`0.2.2`).** The plugin manifest had drifted to `0.1.x` while git tags tracked the package's `0.2.x`; both now move together so tags stay consistent.
+
 ## [0.2.1] - 2026-06-10
 
 ### Schedule view: Overdue to-dos, modal & overlap fixes
