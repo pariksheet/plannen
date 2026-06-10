@@ -90,8 +90,8 @@ export function Today() {
           <ul className="space-y-2">
             {practices.map((p) => {
               const done = isDoneToday(p.id)
-              const weekDone = doneThisPeriod(p, completions, weekStart(date), date)
-              const label = practiceLabel(p, weekDone)
+              const periodDone = doneThisPeriod(p, completions, weekStart(date), date)
+              const label = practiceLabel(p, periodDone)
               return (
                 <li key={p.id}>
                   <label className="flex items-center gap-3 cursor-pointer min-h-[44px] py-1">

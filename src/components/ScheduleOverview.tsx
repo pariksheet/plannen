@@ -210,8 +210,8 @@ function RoutinesCard() {
       <ul className="space-y-1">
         {visible.map((p) => {
           const done = isDoneToday(p.id)
-          const weekDone = doneThisPeriod(p, completions, weekStartIso(), date)
-          const label = practiceLabel(p, weekDone)
+          const periodDone = doneThisPeriod(p, completions, weekStartIso(), date)
+          const label = practiceLabel(p, periodDone)
           return (
             <li key={p.id}>
               <label className="flex items-center gap-2 cursor-pointer text-base">
