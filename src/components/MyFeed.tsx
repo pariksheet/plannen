@@ -9,6 +9,8 @@ import { CalendarGrid } from './CalendarGrid'
 import { EventForm } from './EventForm'
 import { DiscoverButton } from './DiscoverButton'
 import { ScheduleOverview } from './ScheduleOverview'
+import { projectScheduleForDay } from '../services/schedulingService'
+import type { AttendanceInstanceRow, ResolvedObligationRow } from '../lib/dbClient/types'
 import { ConfirmModal, PromptModal } from './Modal'
 import { Plus, ChevronUp, Calendar, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
@@ -60,6 +62,8 @@ export function MyFeed() {
   const [muteSenderPrompt, setMuteSenderPrompt] = useState<{ eventId: string; senderHint: string } | null>(null)
   const [feedError, setFeedError] = useState<string | null>(null)
   const [preferredVisitDates, setPreferredVisitDates] = useState<Record<string, string | null>>({})
+  const [attendancesToday, setAttendancesToday] = useState<AttendanceInstanceRow[]>([])
+  const [obligationsToday, setObligationsToday] = useState<ResolvedObligationRow[]>([])
   const [pastVisibleCount, setPastVisibleCount] = useState(5)
   const [showPast, setShowPast] = useState(false)
   const [activeHashtag, setActiveHashtag] = useState<string | null>(null)
@@ -129,6 +133,23 @@ export function MyFeed() {
   useEffect(() => {
     void loadEvents()
   }, [loadEvents])
+
+  // Today's read-only scheduling projection (attendances + derived obligations).
+  // Fetched once on mount via the dbClient and projected client-side; the card
+  // hides itself when both lists are empty, so failures degrade gracefully.
+  useEffect(() => {
+    let cancelled = false
+    void projectScheduleForDay(ymd(new Date()))
+      .then(({ attendancesToday: a, obligationsToday: o }) => {
+        if (cancelled) return
+        setAttendancesToday(a)
+        setObligationsToday(o)
+      })
+      .catch((err) => {
+        console.error('MyFeed: failed to project schedule', err)
+      })
+    return () => { cancelled = true }
+  }, [])
 
   const loadOlder = useCallback(() => {
     setLoadingOlder(true)
@@ -465,6 +486,8 @@ export function MyFeed() {
             <ScheduleOverview
               events={filteredEvents}
               preferredVisitDates={preferredVisitDates}
+              attendancesToday={attendancesToday}
+              obligationsToday={obligationsToday}
               onEdit={handleEdit}
               onDelete={handleDeleteClick}
               onShareSuccess={loadEvents}
