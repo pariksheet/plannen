@@ -7,21 +7,52 @@ import type { AppVariables } from '../../types.js'
 export const practices = new Hono<{ Variables: AppVariables }>()
 
 const Category = z.enum(['health', 'household', 'circle', 'focus', 'other'])
-const FrequencyType = z.enum(['daily', 'weekly_count', 'specific_days'])
 const TimeOfDay = z.enum(['morning', 'afternoon', 'evening', 'anytime'])
-const DayKey = z.enum(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'])
 
-const PracticeInput = z.object({
-  name: z.string().min(1),
-  category: Category,
-  frequency_type: FrequencyType,
-  target_count: z.number().int().min(1).max(7).nullable().optional(),
-  days_of_week: z.array(DayKey).nullable().optional(),
-  preferred_time_of_day: TimeOfDay.optional(),
-  family_member_id: z.string().uuid().nullable().optional(),
+const RecurrenceMode = z.enum(['pinned', 'flex_count'])
+const Freq = z.enum(['daily', 'weekly', 'monthly'])
+const DayCode = z.enum(['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'])
+const FlexPeriod = z.enum(['week', 'month'])
+const IsoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+
+const RecurrenceRule = z.object({
+  frequency: Freq,
+  interval: z.number().int().min(1).optional(),
+  days: z.array(DayCode).optional(),
 })
 
-const PracticePatch = PracticeInput.partial().extend({
+const PracticeInput = z
+  .object({
+    name: z.string().min(1),
+    category: Category,
+    recurrence_mode: RecurrenceMode,
+    recurrence_rule: RecurrenceRule.nullable().optional(),
+    dtstart: IsoDate.nullable().optional(),
+    recurrence_until: IsoDate.nullable().optional(),
+    flex_period: FlexPeriod.nullable().optional(),
+    flex_target: z.number().int().min(1).max(31).nullable().optional(),
+    preferred_time_of_day: TimeOfDay.optional(),
+    family_member_id: z.string().uuid().nullable().optional(),
+  })
+  .refine(
+    (p) =>
+      p.recurrence_mode === 'pinned'
+        ? !!p.recurrence_rule && p.flex_period == null
+        : p.flex_period != null && p.flex_target != null && p.recurrence_rule == null,
+    { message: 'pinned requires recurrence_rule; flex_count requires flex_period + flex_target' },
+  )
+
+const PracticePatch = z.object({
+  name: z.string().min(1).optional(),
+  category: Category.optional(),
+  recurrence_mode: RecurrenceMode.optional(),
+  recurrence_rule: RecurrenceRule.nullable().optional(),
+  dtstart: IsoDate.nullable().optional(),
+  recurrence_until: IsoDate.nullable().optional(),
+  flex_period: FlexPeriod.nullable().optional(),
+  flex_target: z.number().int().min(1).max(31).nullable().optional(),
+  preferred_time_of_day: TimeOfDay.optional(),
+  family_member_id: z.string().uuid().nullable().optional(),
   active: z.boolean().optional(),
 })
 
@@ -57,18 +88,23 @@ practices.post('/', async (c) => {
   return await withUserContext(userId, async (db) => {
     const { rows } = await db.query(
       `INSERT INTO plannen.practices
-         (user_id, family_member_id, name, category, frequency_type,
-          target_count, days_of_week, preferred_time_of_day)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, 'anytime'))
+         (user_id, family_member_id, name, category, recurrence_mode,
+          recurrence_rule, dtstart, recurrence_until, flex_period, flex_target,
+          preferred_time_of_day)
+       VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::date, current_date), $8, $9, $10,
+               COALESCE($11, 'anytime'))
        RETURNING *`,
       [
         userId,
         p.family_member_id ?? null,
         p.name,
         p.category,
-        p.frequency_type,
-        p.target_count ?? null,
-        p.days_of_week ?? null,
+        p.recurrence_mode,
+        p.recurrence_rule ? JSON.stringify(p.recurrence_rule) : null,
+        p.dtstart ?? null,
+        p.recurrence_until ?? null,
+        p.flex_period ?? null,
+        p.flex_target ?? null,
         p.preferred_time_of_day ?? null,
       ],
     )
@@ -108,7 +144,9 @@ practices.patch('/:id', async (c) => {
   const sets: string[] = []
   const params: unknown[] = []
   for (const [k, v] of Object.entries(parsed.data)) {
-    params.push(v)
+    // recurrence_rule is a jsonb column — serialise the object so the pg driver
+    // binds it as json text rather than a raw JS object.
+    params.push(k === 'recurrence_rule' && v != null ? JSON.stringify(v) : v)
     sets.push(`${k} = $${params.length}`)
   }
   if (sets.length === 0) throw new HttpError(400, 'VALIDATION', 'No fields to update')
