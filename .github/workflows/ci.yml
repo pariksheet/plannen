@@ -41,6 +41,9 @@ jobs:
       - name: MCP tool parity (local stdio vs cloud edge)
         run: node scripts/check-mcp-parity.mjs
 
+      - name: Engine parity (recurrence/scheduling mirrors byte-identical)
+        run: node scripts/check-engine-parity.mjs
+
       - name: Build web
         run: npm run build
 

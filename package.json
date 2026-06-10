@@ -28,6 +28,7 @@
     "test:cli": "vitest --config cli/vitest.config.mjs run --passWithNoTests",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "check:parity": "node scripts/check-mcp-parity.mjs && node scripts/check-engine-parity.mjs",
     "lint": "eslint src"
   },
   "dependencies": {
