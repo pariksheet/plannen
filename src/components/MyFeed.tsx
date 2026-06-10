@@ -299,10 +299,10 @@ export function MyFeed() {
 
   return (
     <div className="space-y-8 w-full min-w-0">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <div>
-          <h2 className="text-2xl sm:text-3xl font-bold text-gray-900">My Plans</h2>
-          <div className="mt-2 inline-flex rounded-md border border-gray-300 bg-white p-0.5">
+      <div className="space-y-2">
+        <h2 className="text-2xl sm:text-3xl font-bold text-gray-900">My Plans</h2>
+        <div className="flex items-center justify-between gap-2">
+          <div className="inline-flex rounded-md border border-gray-300 bg-white p-0.5">
             <button
               type="button"
               onClick={() => setViewMode('schedule')}
@@ -325,24 +325,25 @@ export function MyFeed() {
               Timeline
             </button>
           </div>
-        </div>
-        <div className="flex items-center gap-2 order-last sm:order-none w-full sm:w-auto">
-          <DiscoverButton
-            onEventCreated={loadEvents}
-            onStartCreateWithData={(data) => {
-              setEditingEvent(undefined)
-              setInitialFormData(data)
-              setShowForm(true)
-            }}
-          />
-          <button
-            type="button"
-            onClick={handleCreate}
-            className="inline-flex flex-1 sm:flex-none items-center min-h-[44px] py-2.5 px-4 bg-indigo-600 text-white font-medium rounded-md hover:bg-indigo-700 text-sm sm:text-base justify-center"
-          >
-            <Plus className="h-5 w-5 mr-2" />
-            Create Event
-          </button>
+          <div className="flex items-center gap-2">
+            <DiscoverButton
+              onEventCreated={loadEvents}
+              onStartCreateWithData={(data) => {
+                setEditingEvent(undefined)
+                setInitialFormData(data)
+                setShowForm(true)
+              }}
+            />
+            <button
+              type="button"
+              onClick={handleCreate}
+              aria-label="Create event"
+              className="inline-flex items-center min-h-[44px] py-2.5 px-3 sm:px-4 bg-indigo-600 text-white font-medium rounded-md hover:bg-indigo-700 text-sm sm:text-base justify-center"
+            >
+              <Plus className="h-5 w-5 sm:mr-2" />
+              <span className="hidden sm:inline">Create Event</span>
+            </button>
+          </div>
         </div>
       </div>
 
