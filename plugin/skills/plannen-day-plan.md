@@ -11,7 +11,11 @@ Use when the user invokes `/plannen-today` or asks anything like "today's plan",
 
 1. **Resolve date.** Default = today (in user's local timezone). If the user names a specific date ("tomorrow", "Friday", "2026-05-22"), resolve that date.
 
-2. **Fetch context.** Call `get_briefing_context({ date })`. This returns events today + tomorrow, recent past events, your circle (family_members surfaced as "circle"), practices due today with weekly remaining counts, and locations. One call — no follow-up MCP reads unless the user asks a question requiring extra data.
+2. **Fetch context.** Call `get_briefing_context({ date })`. This returns events today + tomorrow, recent past events, your circle (family_members surfaced as "circle"), practices due today with weekly remaining counts, and locations. It also returns:
+   - `attendances_today` — a member's recurring enrolments active today (school, creche, camp), already resolved for blackout suppression and the member-overlap override. **Indicative only**: render as circle/context, never conflict-check them.
+   - `obligations_today` — the resolved timed drop/pick tasks (already re-projected onto whichever attendance instance survived). **Actionable**: treat these like events — they go in Schedule and DO participate in the conflict check.
+
+   One call — no follow-up MCP reads unless the user asks a question requiring extra data.
 
 3. **Compose the briefing.** Output markdown with this structure (omit any section that is empty):
 
@@ -20,6 +24,7 @@ Use when the user invokes `/plannen-today` or asks anything like "today's plan",
 
    ## Schedule
    - HH:MM — Event title (annotation if useful, e.g. "you driving")
+   - HH:MM — Drop Milo at example school   // obligations_today render here, timed like events
 
    ## Practices today
    - [ ] Practice name (N/M this week)   // flex_count → show remaining of target
@@ -29,6 +34,7 @@ Use when the user invokes `/plannen-today` or asks anything like "today's plan",
    ## Circle
    - One-line items about your circle relevant to the day:
      school holiday window, partner away dates, overdue calls, etc.
+   - Today's attendances (attendances_today) as context: "Milo at example school 08:30–15:30"
    ```
 
    **Format rules:**
