@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-10
+
+### Attendances & drop/pick now visible in the web app
+
+- **The daily schedule view now shows attendances and derived drop/pick.** The web app renders today's expanded, blackout-suppressed attendances (as muted indicative context) and the override-resolved drop/pick obligations (as timed items tagged with their source), computed client-side from your own RLS-scoped data — so they auto-suppress on blackout days and follow the child to a camp, exactly as the briefing does. Completes the Phase 2/3 UI; creation remains agent-driven through the intent gate.
+
 ## [0.4.0] - 2026-06-10
 
 ### Attendances, blackout calendars & derived drop/pick (unified scheduling Phase 2 + 3)
