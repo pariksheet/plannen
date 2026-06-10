@@ -71,6 +71,14 @@ Decide `operation`:
 - `modify` — email implies an existing event changed (rescheduled, room changed).
 - `cancel` — email explicitly cancels something.
 
+Decide `event_kind` (creates only) — first match wins:
+
+- **`event`** — you need to be present at a specific time/place, or join a scheduled call. Tell-tales: appointment, meeting, class/session, party, trip, booking, ceremony, oudercontact; a venue or meeting link is given; the email is about *attending*. Give it a `start_date` (and `end_date` when known).
+- **`todo`** — the email asks *you* to complete a discrete, checkable action by or on a date. Tell-tale verbs: pay, book/reserve, register/enrol, RSVP/confirm by, submit, fill in, renew, upload, sign, return, bring. All-day on the action's due date. **Also** use `todo` when an email is clearly event-worthy and personally addressed but its date/time is locked in an attachment the run can't read (`bijlage`, "see attached", a PDF invite): title it `"<subject> — open attachment"`, date it on the message date (so it surfaces as actionable/overdue, not a fake calendar slot), add `review`, and put `"Couldn't read the attachment — open the original to confirm the date and act."` in the description.
+- **`reminder`** — a dated heads-up with no attendance and nothing for you to complete: pure awareness. Tell-tales: bin/waste collection, "school closed", "package arriving", "registration opens on…", "don't forget X is tomorrow", informational deadline notices. All-day or point-in-time.
+
+Boundary rule: a deadline to *do* something → `todo`; a deadline that's purely informational (nothing for you to do) → `reminder`. When an email describes an event you attend AND a distinct "confirm/pay/book by" action, create the `event`; add a separate `todo` only if that action has its own deadline worth tracking on its own.
+
 ### Step C — Matching (only for `modify` / `cancel`)
 
 Call `mcp__plugin_plannen_plannen__list_events({from_date: matchDate - 1d, to_date: matchDate + 1d, limit: 50})`.
@@ -113,7 +121,7 @@ mcp__plugin_plannen_plannen__create_event({
   title, start_date (UTC `Z`, computed from Brussels-local time),
   end_date  (UTC `Z`, or omit),
   location, description (must start with `Gmail-ID: <thread.id>\n\n`),
-  event_kind: "event" | "reminder",
+  event_kind: "event" | "reminder" | "todo",   // see "Choosing event_kind" in Step B
   event_status: "going" | "interested" | "watching" | "cancelled",
   hashtags: [ ...up to 5; always include "mbsync"; include "review" when confidence=low ],
 })
