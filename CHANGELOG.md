@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-10
+
+### Attendances, blackout calendars & derived drop/pick (unified scheduling Phase 2 + 3)
+
+- **Family-member enrolments are now first-class.** You can record that a member attends a place on a recurring schedule — school, creche, camp — with a location, start/end times, a recurrence (every-N-days / weekdays / monthly, same shape as events and routines), and a priority. Attendances are *indicative context*: they show where a member is, but never create work for anyone by themselves and never trip the conflict checker.
+- **Blackout calendars suppress attendances automatically.** A named set of date ranges (e.g. a school's holidays) can be linked to an attendance; on any covered date the attendance — and anything derived from it — silently disappears for that day. No hand-maintained exceptions.
+- **Drop/pick tasks that follow the child.** A derived obligation links a drop or pick to an attendance (anchored to its start or end, with a signed offset — e.g. drop 15 min before start, pick at end). It stays linked and re-projects at read time: it auto-suppresses during blackouts, and when a higher-priority bounded enrolment (a camp week) overlaps an open-ended one (the school term), the drop/pick automatically swap to the camp's times and location — even if you forgot to mark the school holiday.
+- **The morning briefing reflects all of it.** `get_briefing_context` now returns the day's expanded, blackout-suppressed attendances (as indicative context) and the override-resolved, projected drop/pick obligations (as actionable timed items) — so the day plan stays correct as schedules change, with no regeneration.
+- **Opt-in, never automatic.** When Plannen learns of an attendance with no drop/pick, the agent offers to add them once ("…want me to add a drop and a pick, or do they go on their own?") and only creates them on a yes — mirroring the existing event-creation intent gate.
+- New MCP tools (both runtimes, in parity) for managing attendances, blackout calendars/windows, and obligations. Web rendering for the new items is scaffolded (agent-managed for now). No personal data — all examples use generic personas.
+
 ## [0.3.0] - 2026-06-10
 
 ### Unified recurrence on routines (Phase 1)
