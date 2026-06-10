@@ -11,6 +11,7 @@ import { CalendarGrid } from './CalendarGrid'
 import { EventCard } from './EventCard'
 import { buildWeekAgenda, eventDateLocal, overlappingIds, weekDays, ymd } from '../utils/weekAgenda'
 import { defaultCity } from '../utils/homeCity'
+import { practiceLabel, doneThisPeriod, monthStartIso } from '../utils/practiceLabel'
 
 export interface ScheduleOverviewProps {
   events: Event[]
@@ -171,9 +172,12 @@ function RoutinesCard() {
 
   const refresh = async () => {
     try {
+      const ms = monthStartIso(date)
+      const ws = weekStartIso()
+      const periodFrom = ms < ws ? ms : ws
       const [p, c] = await Promise.all([
         listPractices(true),
-        completionsThisWeek(weekStartIso()),
+        completionsThisWeek(periodFrom),
       ])
       setPractices(p)
       setCompletions(c)
@@ -206,10 +210,8 @@ function RoutinesCard() {
       <ul className="space-y-1">
         {visible.map((p) => {
           const done = isDoneToday(p.id)
-          const weekDone = completions.filter((c) => c.practice_id === p.id).length
-          const label = p.frequency_type === 'weekly_count'
-            ? `${p.name} (${weekDone}/${p.target_count ?? 0} this week)`
-            : p.frequency_type === 'daily' ? `${p.name} (daily)` : p.name
+          const periodDone = doneThisPeriod(p, completions, weekStartIso(), date)
+          const label = practiceLabel(p, periodDone)
           return (
             <li key={p.id}>
               <label className="flex items-center gap-2 cursor-pointer text-base">

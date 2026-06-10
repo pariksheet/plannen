@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-10
+
+### Unified recurrence on routines (Phase 1)
+
+- **Routines now express any cadence, not just three fixed shapes.** The old practice model (`daily` / `weekly_count` / `specific_days`) is replaced by a unified recurrence with two flavors. **Pinned** routines fire on a real date cadence — every other day (e.g. meal prep), specific weekdays, or monthly — via a structured recurrence rule (`{ frequency, interval, days }`, the same shape events already use). **Flex-count** routines are "N times per period, anytime" — gym 3×/week, deep-clean twice a month — tracked as progress rather than a fixed slot.
+- **"Every other day" and other intervals finally work.** Cadences like meal-prep-every-2-days, biweekly walks, or monthly tasks are now first-class; previously they could only be approximated.
+- **Progress counts respect the right period.** Weekly routines count from Monday; monthly routines count across the whole calendar month. The Routines cards on Today and the Schedule overview render natural labels — "Gym (2/3 this week)", "Meal prep (every 2 days)", "Walk (Mon/Wed/Fri)" — with period-aware completion progress.
+- **Clearer guidance on what is and isn't a routine.** Time-pinned commitments tied to a place (a school drop-off at 08:15) belong to a recurring event, not a routine — routines stay time-flexible and carry only a coarse part-of-day preference. The agent guidance and the create/update routine tools document the new model with concrete examples.
+
 ## [0.2.3] - 2026-06-10
 
 ### Tooling

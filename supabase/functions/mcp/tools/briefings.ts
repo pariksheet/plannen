@@ -1,5 +1,5 @@
 import type { ToolDefinition, ToolHandler, ToolModule } from '../types.ts'
-import { isPracticeDueOn, remainingThisWeek, weekBoundaryStart } from '../../_shared/practices.ts'
+import { isPracticeDueOn, remainingThisPeriod, weekBoundaryStart } from '../../_shared/practices.ts'
 
 // ── Tool definitions (verbatim from mcp/src/index.ts:2422-2455) ───────────────
 
@@ -59,6 +59,8 @@ const getBriefingContext: ToolHandler = async (args, ctx) => {
   sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 7)
   const sevenDaysAgoStr = sevenDaysAgo.toISOString().slice(0, 10)
   const wkStart = weekBoundaryStart(today)
+  const monthStart = `${today.slice(0, 7)}-01`
+  const completionsFrom = monthStart < wkStart ? monthStart : wkStart
 
   const [userRow, circleRow, primaryCircleUsersRow, eventsTodayRow, eventsTomorrowRow, recentPastRow, practicesRow, completionsRow, locationsRow] =
     await Promise.all([
@@ -110,8 +112,9 @@ const getBriefingContext: ToolHandler = async (args, ctx) => {
         [id, sevenDaysAgoStr, today],
       ),
       ctx.client.query(
-        `SELECT id, family_member_id, name, category, frequency_type, target_count,
-                days_of_week, preferred_time_of_day, active
+        `SELECT id, family_member_id, name, category, recurrence_mode, recurrence_rule,
+                dtstart::text, recurrence_until::text, flex_period, flex_target,
+                preferred_time_of_day, active
          FROM plannen.practices WHERE user_id = $1 AND active = true`,
         [id],
       ),
@@ -119,7 +122,7 @@ const getBriefingContext: ToolHandler = async (args, ctx) => {
         `SELECT practice_id, completed_on::text
          FROM plannen.practice_completions
          WHERE user_id = $1 AND completed_on >= $2::date`,
-        [id, wkStart],
+        [id, completionsFrom],
       ),
       ctx.client.query(
         `SELECT id, label, city, country, is_default
@@ -133,11 +136,11 @@ const getBriefingContext: ToolHandler = async (args, ctx) => {
   const practicesDue = (practicesRow.rows as Parameters<typeof isPracticeDueOn>[0][])
     .filter((p) => isPracticeDueOn(p, today, allCompletions))
     .map((p) => {
-      const inWeek = allCompletions.filter((c) => c.practice_id === p.id).length
+      const inPeriod = allCompletions.filter((c) => c.practice_id === p.id).length
       return {
         ...p,
-        completions_this_week: inWeek,
-        remaining_this_week: remainingThisWeek(p, today, allCompletions),
+        completions_this_period: inPeriod,
+        remaining_this_period: remainingThisPeriod(p, today, allCompletions),
       }
     })
 

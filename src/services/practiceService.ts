@@ -8,7 +8,7 @@ export async function listPractices(activeOnly = true): Promise<PracticeRow[]> {
 export async function createPractice(input: Partial<PracticeRow> & {
   name: string
   category: PracticeRow['category']
-  frequency_type: PracticeRow['frequency_type']
+  recurrence_mode: PracticeRow['recurrence_mode']
 }): Promise<PracticeRow> {
   return dbClient.practices.create(input)
 }
