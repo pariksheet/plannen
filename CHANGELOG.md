@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-10
+
+### Schedule view: Overdue to-dos, modal & overlap fixes
+
+- **New "Overdue" section in the Schedule view.** Past, unchecked to-dos surface in their own section above *This week*; the section is hidden entirely when nothing is overdue, and overdue to-dos are lifted out of the week list so they're never shown twice.
+- **To-dos no longer clutter the *This month* sidebar.** They keep their amber dot on the calendar grid (and on day-click) but drop out of the month list, which now reads as an events/outings list — matching how reminders are already treated there.
+- **Event detail modal no longer renders washed-out.** `Modal` now mounts through a `document.body` portal, so a dimmed ancestor (e.g. a past-event row at 60% opacity) can't cascade its transparency onto the dialog.
+- **Reminders never trigger the "⚠ overlaps" tag.** Overlap detection ignores reminders — they're nudges, not attendance commitments, so a reminder neither clashes nor flags another event.
+
+### Mailbox & Smartschool sync: event / to-do / reminder classification
+
+- **The mailbox sync now classifies mail into the right kind.** An explicit decision tree: something you attend → `event`; a discrete action to complete by a date (pay, book, RSVP, renew, submit) → `todo`; a pure heads-up → `reminder`.
+- **Attachment-locked invites become actionable to-dos.** When an event-worthy message's date lives in a PDF the routine can't read, both the mailbox and Smartschool syncs now create a `todo` that tells you to open the original — instead of guessing a calendar event on the wrong day.
+
+## [0.2.0] - 2026-06-10
+
 ### To-do event type
 
 - **A new `todo` event kind: a dated, checkable, one-off task.** Fills the gap between passive reminders (which never get "done") and recurring practices (which can't be one-off). A todo has a full datetime like an event, a completion checkbox, and is assigned to its creator by default.
