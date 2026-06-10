@@ -5,7 +5,7 @@ import type { ToolDefinition, ToolHandler, ToolModule } from '../types.ts'
 const definitions: ToolDefinition[] = [
   {
     name: 'list_practices',
-    description: 'List your practices (frequency-flex recurring intentions like gym 3×/week, vitamin D daily). Returns rows with frequency_type, target_count, etc.',
+    description: 'List your practices (recurring routines like gym 3×/week, vitamin D daily). Returns rows with recurrence_mode, recurrence_rule, flex_period, flex_target, etc.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -16,19 +16,30 @@ const definitions: ToolDefinition[] = [
   },
   {
     name: 'create_practice',
-    description: 'Create a new practice. Use this for recurring intentions that are NOT time-pinned events — gym 3×/week, vitamins daily, dishes 2×/week. Fixed-time recurrences (drop kids at school 08:15) should be recurring events instead.',
+    description: 'Create a recurring routine. recurrence_mode="pinned" for date-cadence routines (every other day, weekdays, monthly — set recurrence_rule); recurrence_mode="flex_count" for "N times per week/month, anytime" (gym 3×/week — set flex_period + flex_target). For time-pinned attendance like a school drop-off, use a recurring event/attendance instead, not a practice.',
     inputSchema: {
       type: 'object',
       properties: {
         name: { type: 'string' },
         category: { type: 'string', enum: ['health', 'household', 'circle', 'focus', 'other'] },
-        frequency_type: { type: 'string', enum: ['daily', 'weekly_count', 'specific_days'] },
-        target_count: { type: 'number', description: 'Required when frequency_type=weekly_count. Integer 1–7.' },
-        days_of_week: { type: 'array', items: { type: 'string', enum: ['mon','tue','wed','thu','fri','sat','sun'] }, description: 'Required when frequency_type=specific_days.' },
+        recurrence_mode: { type: 'string', enum: ['pinned', 'flex_count'],
+          description: "'pinned' = fires on specific recurring dates (use recurrence_rule); 'flex_count' = N times per week/month, anytime (use flex_period + flex_target)." },
+        recurrence_rule: { type: 'object',
+          description: "Required when recurrence_mode='pinned'. { frequency: 'daily'|'weekly'|'monthly', interval?: number, days?: ['MO','WE','FR'] }. Examples: every other day = {frequency:'daily',interval:2}; weekdays = {frequency:'weekly',days:['MO','TU','WE','TH','FR']}; monthly = {frequency:'monthly'}.",
+          properties: {
+            frequency: { type: 'string', enum: ['daily', 'weekly', 'monthly'] },
+            interval: { type: 'number', description: 'Repeat every N units (default 1). For daily this is the every-N-days spacing.' },
+            days: { type: 'array', items: { type: 'string', enum: ['MO','TU','WE','TH','FR','SA','SU'] }, description: 'Weekday codes; required for weekly.' },
+          },
+          required: ['frequency'] },
+        dtstart: { type: 'string', description: 'YYYY-MM-DD anchor/start date. Defaults to today. For every-N-days this is the date the cadence counts from.' },
+        recurrence_until: { type: 'string', description: 'Optional YYYY-MM-DD end date for the recurrence.' },
+        flex_period: { type: 'string', enum: ['week', 'month'], description: "Required when recurrence_mode='flex_count'." },
+        flex_target: { type: 'number', description: "Required when recurrence_mode='flex_count'. Completions per period, 1–31 (e.g. gym 3×/week = period 'week', target 3)." },
         preferred_time_of_day: { type: 'string', enum: ['morning', 'afternoon', 'evening', 'anytime'] },
         family_member_id: { type: ['string', 'null'], description: 'Optional — owner is a circle member rather than the user themselves.' },
       },
-      required: ['name', 'category', 'frequency_type'],
+      required: ['name', 'category', 'recurrence_mode'],
     },
   },
   {
@@ -40,9 +51,20 @@ const definitions: ToolDefinition[] = [
         id: { type: 'string' },
         name: { type: 'string' },
         category: { type: 'string', enum: ['health', 'household', 'circle', 'focus', 'other'] },
-        frequency_type: { type: 'string', enum: ['daily', 'weekly_count', 'specific_days'] },
-        target_count: { type: 'number' },
-        days_of_week: { type: 'array', items: { type: 'string', enum: ['mon','tue','wed','thu','fri','sat','sun'] } },
+        recurrence_mode: { type: 'string', enum: ['pinned', 'flex_count'],
+          description: "'pinned' = fires on specific recurring dates (use recurrence_rule); 'flex_count' = N times per week/month, anytime (use flex_period + flex_target)." },
+        recurrence_rule: { type: 'object',
+          description: "Required when recurrence_mode='pinned'. { frequency: 'daily'|'weekly'|'monthly', interval?: number, days?: ['MO','WE','FR'] }. Examples: every other day = {frequency:'daily',interval:2}; weekdays = {frequency:'weekly',days:['MO','TU','WE','TH','FR']}; monthly = {frequency:'monthly'}.",
+          properties: {
+            frequency: { type: 'string', enum: ['daily', 'weekly', 'monthly'] },
+            interval: { type: 'number', description: 'Repeat every N units (default 1). For daily this is the every-N-days spacing.' },
+            days: { type: 'array', items: { type: 'string', enum: ['MO','TU','WE','TH','FR','SA','SU'] }, description: 'Weekday codes; required for weekly.' },
+          },
+          required: ['frequency'] },
+        dtstart: { type: 'string', description: 'YYYY-MM-DD anchor/start date. Defaults to today. For every-N-days this is the date the cadence counts from.' },
+        recurrence_until: { type: 'string', description: 'Optional YYYY-MM-DD end date for the recurrence.' },
+        flex_period: { type: 'string', enum: ['week', 'month'], description: "Required when recurrence_mode='flex_count'." },
+        flex_target: { type: 'number', description: "Required when recurrence_mode='flex_count'. Completions per period, 1–31 (e.g. gym 3×/week = period 'week', target 3)." },
         preferred_time_of_day: { type: 'string', enum: ['morning', 'afternoon', 'evening', 'anytime'] },
         family_member_id: { type: ['string', 'null'] },
         active: { type: 'boolean' },
@@ -100,8 +122,9 @@ const listPractices: ToolHandler = async (args, ctx) => {
     where.push(`family_member_id ${a.family_member_id === null ? 'IS NULL' : '= $' + params.length}`)
   }
   const { rows } = await ctx.client.query(
-    `SELECT id, family_member_id, name, category, frequency_type, target_count,
-            days_of_week, preferred_time_of_day, active, created_at, updated_at
+    `SELECT id, family_member_id, name, category, recurrence_mode, recurrence_rule,
+            dtstart::text, recurrence_until::text, flex_period, flex_target,
+            preferred_time_of_day, active, created_at, updated_at
      FROM plannen.practices
      WHERE ${where.join(' AND ')}
      ORDER BY created_at ASC`,
@@ -112,29 +135,29 @@ const listPractices: ToolHandler = async (args, ctx) => {
 
 const createPractice: ToolHandler = async (args, ctx) => {
   const a = args as {
-    name: string
-    category: string
-    frequency_type: string
-    target_count?: number | null
-    days_of_week?: string[] | null
-    preferred_time_of_day?: string | null
-    family_member_id?: string | null
+    name: string; category: string; recurrence_mode: string
+    recurrence_rule?: unknown; dtstart?: string | null; recurrence_until?: string | null
+    flex_period?: string | null; flex_target?: number | null
+    preferred_time_of_day?: string | null; family_member_id?: string | null
   }
-  const id = ctx.userId
   const { rows } = await ctx.client.query(
     `INSERT INTO plannen.practices
-       (user_id, family_member_id, name, category, frequency_type,
-        target_count, days_of_week, preferred_time_of_day)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, 'anytime'))
+       (user_id, family_member_id, name, category, recurrence_mode,
+        recurrence_rule, dtstart, recurrence_until, flex_period, flex_target,
+        preferred_time_of_day)
+     VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::date, current_date), $8, $9, $10, COALESCE($11, 'anytime'))
      RETURNING *`,
     [
-      id,
+      ctx.userId,
       a.family_member_id ?? null,
       a.name,
       a.category,
-      a.frequency_type,
-      a.target_count ?? null,
-      a.days_of_week ?? null,
+      a.recurrence_mode,
+      a.recurrence_rule ? JSON.stringify(a.recurrence_rule) : null,
+      a.dtstart ?? null,
+      a.recurrence_until ?? null,
+      a.flex_period ?? null,
+      a.flex_target ?? null,
       a.preferred_time_of_day ?? null,
     ],
   )
