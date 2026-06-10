@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-06-10
+
+### Tooling
+
+- **New `/release` maintainer command.** A single repo command (`.claude/commands/release.md`) now cuts a release end-to-end: it bumps the package and plugin versions in lockstep, drafts this changelog, opens and squash-merges the release PR, tags the commit, and publishes the GitHub Release. The plugin manifest version is always pinned equal to the package version, and the previously-missed "publish a GitHub Release" step is now built in, so tags and Releases can't drift apart again. Not shipped in the plugin — it's a maintainer tool only.
+
 ## [0.2.2] - 2026-06-10
 
 ### Schedule view: tighter mobile header
