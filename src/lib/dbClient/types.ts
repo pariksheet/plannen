@@ -443,4 +443,21 @@ export type DbClient = {
     getByDate: (date: string) => Promise<DailyBriefingRow | null>
     save: (input: { briefing_date: string; content_md: string; summary?: string | null; source: DailyBriefingRow['source'] }) => Promise<DailyBriefingRow>
   }
+  // Raw scheduling rows for the client-side projection (src/utils/scheduling.ts).
+  // The web has no get_briefing_context route, so it fetches the user's
+  // RLS-scoped rows and runs the pure engine in the browser.
+  scheduling: {
+    listAttendances: () => Promise<AttendanceRow[]>
+    listAttendanceBlackoutWindows: () => Promise<AttendanceBlackoutWindowRow[]>
+    listObligationsWithMember: () => Promise<(ObligationRow & { member_id: string })[]>
+  }
+}
+
+// Joined attendance_blackouts → blackout_windows row used by the projection.
+export type AttendanceBlackoutWindowRow = {
+  attendance_id: string
+  calendar_id: string
+  starts_on: string // YYYY-MM-DD, inclusive
+  ends_on: string // YYYY-MM-DD, inclusive
+  label: string | null
 }

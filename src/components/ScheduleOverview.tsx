@@ -25,15 +25,10 @@ export interface ScheduleOverviewProps {
   onDelete: (id: string) => void
   onShareSuccess: () => void
   onHashtagClick: (tag: string) => void
-  // Today's read-only scheduling projections from get_briefing_context.
-  // Optional so existing callers keep working until the data is wired.
-  // TODO(data-binding): no web path to get_briefing_context yet — the
-  // expand/suppress/override/projection logic lives only in
-  // supabase/functions/_shared/scheduling.ts (Deno) and the bearer-gated MCP
-  // edge function. Surfacing it in the web requires either porting that
-  // algorithm into src/ + a fetch route in BOTH tier0 (Node backend) and tier1
-  // (supabase-js), or exposing the briefing context over the existing dbClient.
-  // Until then these render from props (today: always empty in MyFeed).
+  // Today's read-only scheduling projections, computed client-side by
+  // src/utils/scheduling.ts (mirror of the canonical mcp/src engine) from the
+  // user's RLS-scoped rows fetched via dbClient.scheduling.*. Wired in MyFeed.
+  // Optional so other callers keep working; the card hides when both are empty.
   attendancesToday?: AttendanceInstanceRow[]
   obligationsToday?: ResolvedObligationRow[]
 }

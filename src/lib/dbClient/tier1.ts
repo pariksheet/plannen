@@ -6,8 +6,11 @@
 import { supabase } from '../supabase'
 import type {
   AgentTaskRow,
+  AttendanceBlackoutWindowRow,
+  AttendanceRow,
   DailyBriefingRow,
   DbClient,
+  ObligationRow,
   EventProvenanceRow,
   EventRow,
   FactRow,
@@ -744,6 +747,65 @@ export const tier1: DbClient = {
       return unwrap(await supabase.from('daily_briefings')
         .upsert({ ...input, user_id: userId }, { onConflict: 'user_id,briefing_date' })
         .select().single()) as DailyBriefingRow
+    },
+  },
+
+  // ── scheduling (raw rows for client-side projection) ──────────────────────
+  scheduling: {
+    listAttendances: async () => {
+      const userId = await currentUserId()
+      return unwrap(await supabase.from('attendances')
+        .select('id, user_id, family_member_id, name, location_id, recurrence_rule, dtstart, recurrence_until, time_of_day, start_time, end_time, priority, active')
+        .eq('user_id', userId)
+        .eq('active', true)) as AttendanceRow[]
+    },
+    listAttendanceBlackoutWindows: async () => {
+      const userId = await currentUserId()
+      // attendance_blackouts links an attendance to a blackout calendar; the
+      // windows live on blackout_windows keyed by the same calendar_id. Fetch
+      // both for the user and join client-side (supabase-js can't express a
+      // join across a non-FK shared key cleanly).
+      const links = unwrap(await supabase.from('attendance_blackouts')
+        .select('attendance_id, calendar_id')
+        .eq('user_id', userId)) as { attendance_id: string; calendar_id: string }[]
+      if (links.length === 0) return []
+      const calendarIds = Array.from(new Set(links.map((l) => l.calendar_id)))
+      const windows = unwrap(await supabase.from('blackout_windows')
+        .select('calendar_id, starts_on, ends_on, label')
+        .in('calendar_id', calendarIds)) as {
+          calendar_id: string; starts_on: string; ends_on: string; label: string | null
+        }[]
+      const byCalendar = new Map<string, typeof windows>()
+      for (const w of windows) {
+        const list = byCalendar.get(w.calendar_id) ?? []
+        list.push(w)
+        byCalendar.set(w.calendar_id, list)
+      }
+      return links.flatMap((link) =>
+        (byCalendar.get(link.calendar_id) ?? []).map((w) => ({
+          attendance_id: link.attendance_id,
+          calendar_id: w.calendar_id,
+          starts_on: w.starts_on,
+          ends_on: w.ends_on,
+          label: w.label,
+        })),
+      ) as AttendanceBlackoutWindowRow[]
+    },
+    listObligationsWithMember: async () => {
+      const userId = await currentUserId()
+      // Embed the derived-from attendance to lift its family_member_id.
+      const rows = unwrap(await supabase.from('obligations')
+        .select('id, user_id, derived_from_attendance_id, role, anchor, offset_minutes, location_id, active, attendances!inner(family_member_id, active)')
+        .eq('user_id', userId)
+        .eq('active', true)
+        .eq('attendances.active', true)) as Array<
+          ObligationRow & { attendances: { family_member_id: string } | { family_member_id: string }[] }
+        >
+      return rows.map((r) => {
+        const att = Array.isArray(r.attendances) ? r.attendances[0] : r.attendances
+        const { attendances: _omit, ...ob } = r
+        return { ...(ob as ObligationRow), member_id: att.family_member_id }
+      })
     },
   },
 

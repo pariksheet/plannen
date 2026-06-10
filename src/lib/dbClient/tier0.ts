@@ -5,8 +5,11 @@
 
 import type {
   AgentTaskRow,
+  AttendanceBlackoutWindowRow,
+  AttendanceRow,
   DailyBriefingRow,
   DbClient,
+  ObligationRow,
   EventProvenanceRow,
   EventRow,
   FactRow,
@@ -249,6 +252,15 @@ export const tier0: DbClient = {
   briefings: {
     getByDate: (date) => api<DailyBriefingRow | null>(`/api/briefings/${date}`),
     save: (input) => api<DailyBriefingRow>('/api/briefings', { method: 'POST', body: JSON.stringify(input) }),
+  },
+
+  // ── scheduling (raw rows for client-side projection) ──────────────────────
+  scheduling: {
+    listAttendances: () => api<AttendanceRow[]>('/api/scheduling/attendances'),
+    listAttendanceBlackoutWindows: () =>
+      api<AttendanceBlackoutWindowRow[]>('/api/scheduling/blackout-windows'),
+    listObligationsWithMember: () =>
+      api<(ObligationRow & { member_id: string })[]>('/api/scheduling/obligations'),
   },
 
   // ── functions ─────────────────────────────────────────────────────────────

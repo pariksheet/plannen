@@ -68,7 +68,7 @@ beforeEach(() => {
 const domains = [
   'events', 'stories', 'memories', 'profile', 'relationships',
   'locations', 'sources', 'watch', 'rsvp', 'groups', 'wishlist',
-  'settings', 'agentTasks', 'me', 'functions', 'realtime',
+  'settings', 'agentTasks', 'me', 'functions', 'realtime', 'scheduling',
 ] as const
 
 describe('dbClient contract — same surface on both tiers', () => {
