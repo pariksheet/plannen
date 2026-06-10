@@ -90,6 +90,33 @@ function midWeekIso(): string {
 
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
+// Format a Date as a full local ISO timestamp at midday, matching the
+// `${day}T11:00:00` shape the timed-event fixtures use. Midday avoids any
+// midnight tz-crossing flakiness.
+function middayIso(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}T12:00:00`
+}
+
+// Another weekday in the SAME ISO week (Mon–Sun) as today, never today itself.
+// Picks Tuesday unless today is Tuesday, in which case Thursday — both stay in-week.
+function otherDayThisWeek(): Date {
+  const d = new Date()
+  const dow = d.getDay() || 7 // 1..7, Mon..Sun
+  const target = dow === 2 ? 4 : 2 // Thursday if today is Tuesday, else Tuesday
+  d.setDate(d.getDate() - (dow - target))
+  return d
+}
+
+// A day in next ISO week: today + 7 lands on the same weekday one week out.
+function nextWeekDay(): Date {
+  const d = new Date()
+  d.setDate(d.getDate() + 7)
+  return d
+}
+
 // A unified-recurrence PracticeRow fixture. `dtstart` sits well in the past so a
 // pinned-daily routine is due on ANY today; flex routines are date-agnostic.
 function practiceFixture(overrides: Record<string, unknown>): never {
@@ -115,12 +142,15 @@ describe('ScheduleOverview', () => {
     vi.restoreAllMocks()
   })
 
-  it('renders the schedule sections (no separate Today card)', () => {
+  it('renders the schedule sections with the ranged week tabs', () => {
     renderOverview([])
     expect(screen.getByText('Your Schedule')).toBeInTheDocument()
-    expect(screen.getByText('This week')).toBeInTheDocument()
     expect(screen.getByText('This month')).toBeInTheDocument()
-    expect(screen.queryByText('Today')).not.toBeInTheDocument()
+    // The old "This week" heading is replaced by a Today/This Week/Next Week tablist.
+    expect(screen.getByTestId('week-card')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Today' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'This Week' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Next Week' })).toBeInTheDocument()
   })
 
   it('renders the header date', () => {
@@ -204,6 +234,54 @@ describe('ScheduleOverview', () => {
     renderOverview([makeEvent({ id: 'e1', title: 'Weekly call', start_date: todayIso() })])
     const week = screen.getByTestId('week-card')
     expect(within(week).getByText('Weekly call')).toBeInTheDocument()
+  })
+
+  it('defaults to the Today range — only today\'s events show', () => {
+    renderOverview([
+      makeEvent({ id: 'tdy', title: 'School run', start_date: middayIso(new Date()) }),
+      makeEvent({ id: 'oth', title: 'Other day meeting', start_date: middayIso(otherDayThisWeek()) }),
+    ])
+    const week = screen.getByTestId('week-card')
+    expect(within(week).getByText('School run')).toBeInTheDocument()
+    // The other in-week day is hidden under the default Today view.
+    expect(within(week).queryByText('Other day meeting')).not.toBeInTheDocument()
+  })
+
+  it('tapping "This Week" reveals other in-week days', async () => {
+    const user = userEvent.setup()
+    renderOverview([
+      makeEvent({ id: 'tdy', title: 'School run', start_date: middayIso(new Date()) }),
+      makeEvent({ id: 'oth', title: 'Other day meeting', start_date: middayIso(otherDayThisWeek()) }),
+    ])
+    const week = screen.getByTestId('week-card')
+    expect(within(week).queryByText('Other day meeting')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'This Week' }))
+    expect(within(week).getByText('Other day meeting')).toBeInTheDocument()
+    expect(within(week).getByText('School run')).toBeInTheDocument()
+  })
+
+  it('tapping "Next Week" shows next-week events but no routines', async () => {
+    const user = userEvent.setup()
+    const { listPractices, completionsThisWeek } = await import('../services/practiceService')
+    vi.mocked(completionsThisWeek).mockResolvedValue([])
+    // A pinned-daily routine that folds into Today — must NOT appear under Next Week.
+    vi.mocked(listPractices).mockResolvedValue([
+      practiceFixture({
+        id: 'p1', name: 'Gym', recurrence_mode: 'flex_count', recurrence_rule: null,
+        flex_period: 'week', flex_target: 3, preferred_time_of_day: 'anytime',
+      }),
+    ])
+    renderOverview([
+      makeEvent({ id: 'nw', title: 'Next-week trip', start_date: middayIso(nextWeekDay()) }),
+    ])
+    const week = screen.getByTestId('week-card')
+    // Routine folds into the default Today view first.
+    expect(await within(week).findByText(/Gym \(0\/3 this week\)/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'Next Week' }))
+    expect(within(week).getByText('Next-week trip')).toBeInTheDocument()
+    // Routines are today-only; the Gym label must be gone under Next Week.
+    expect(within(week).queryByText(/Gym \(0\/3 this week\)/)).not.toBeInTheDocument()
   })
 
   it('renders a reminder in the week with a tag', () => {
