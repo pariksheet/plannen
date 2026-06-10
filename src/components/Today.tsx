@@ -8,6 +8,7 @@ import {
   completionsThisWeek,
 } from '../services/practiceService'
 import { getTodayBriefing } from '../services/briefingService'
+import { practiceLabel, doneThisPeriod, monthStartIso } from '../utils/practiceLabel'
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10)
@@ -29,10 +30,13 @@ export function Today() {
 
   const refresh = useCallback(async () => {
     setLoading(true)
+    const ms = monthStartIso(date)
+    const ws = weekStart(date)
+    const periodFrom = ms < ws ? ms : ws
     const [b, p, c] = await Promise.all([
       getTodayBriefing(date),
       listPractices(true),
-      completionsThisWeek(weekStart(date)),
+      completionsThisWeek(periodFrom),
     ])
     setBriefing(b)
     setPractices(p)
@@ -86,10 +90,8 @@ export function Today() {
           <ul className="space-y-2">
             {practices.map((p) => {
               const done = isDoneToday(p.id)
-              const weekDone = completions.filter((c) => c.practice_id === p.id).length
-              const label = p.frequency_type === 'weekly_count'
-                ? `${p.name} (${weekDone}/${p.target_count ?? 0} this week)`
-                : p.frequency_type === 'daily' ? `${p.name} (daily)` : p.name
+              const weekDone = doneThisPeriod(p, completions, weekStart(date), date)
+              const label = practiceLabel(p, weekDone)
               return (
                 <li key={p.id}>
                   <label className="flex items-center gap-3 cursor-pointer min-h-[44px] py-1">

@@ -140,8 +140,8 @@ describe('ScheduleOverview', () => {
   it('lists practices and toggles completion', async () => {
     const { listPractices, completionsThisWeek, markPracticeDone } = await import('../services/practiceService')
     vi.mocked(listPractices).mockResolvedValue([
-      { id: 'p1', name: 'Sunscreen', frequency_type: 'daily', target_count: null } as never,
-      { id: 'p2', name: 'Gym', frequency_type: 'weekly_count', target_count: 3 } as never,
+      { id: 'p1', name: 'Sunscreen', recurrence_mode: 'pinned', recurrence_rule: { frequency: 'daily' }, flex_period: null, flex_target: null } as never,
+      { id: 'p2', name: 'Gym', recurrence_mode: 'flex_count', recurrence_rule: null, flex_period: 'week', flex_target: 3 } as never,
     ])
     vi.mocked(completionsThisWeek).mockResolvedValue([])
     renderOverview([])
