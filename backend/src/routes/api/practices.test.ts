@@ -37,20 +37,31 @@ describe('practices REST', () => {
       body: JSON.stringify({
         name: 'Gym',
         category: 'health',
-        frequency_type: 'weekly_count',
-        target_count: 3,
+        recurrence_mode: 'flex_count',
+        flex_period: 'week',
+        flex_target: 3,
       }),
     })
     expect(res.status).toBe(201)
-    const body = (await res.json()) as { data: { id: string; name: string } }
+    const body = (await res.json()) as {
+      data: { id: string; name: string; recurrence_mode: string; flex_period: string; flex_target: number }
+    }
     expect(body.data.name).toBe('Gym')
+    expect(body.data.recurrence_mode).toBe('flex_count')
+    expect(body.data.flex_period).toBe('week')
+    expect(body.data.flex_target).toBe(3)
   })
 
   it('GET /api/practices lists practices', async () => {
     await app.request('/api/practices', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Vitamin D', category: 'health', frequency_type: 'daily' }),
+      body: JSON.stringify({
+        name: 'Vitamin D',
+        category: 'health',
+        recurrence_mode: 'pinned',
+        recurrence_rule: { frequency: 'daily' },
+      }),
     })
     const res = await app.request('/api/practices')
     const body = (await res.json()) as { data: Array<{ name: string }> }
@@ -61,7 +72,12 @@ describe('practices REST', () => {
     const created = await app.request('/api/practices', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Gym', category: 'health', frequency_type: 'daily' }),
+      body: JSON.stringify({
+        name: 'Gym',
+        category: 'health',
+        recurrence_mode: 'pinned',
+        recurrence_rule: { frequency: 'daily' },
+      }),
     })
     const { data } = (await created.json()) as { data: { id: string } }
 
@@ -81,7 +97,12 @@ describe('practices REST', () => {
     const created = await app.request('/api/practices', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Gym', category: 'health', frequency_type: 'daily' }),
+      body: JSON.stringify({
+        name: 'Gym',
+        category: 'health',
+        recurrence_mode: 'pinned',
+        recurrence_rule: { frequency: 'daily' },
+      }),
     })
     const { data } = (await created.json()) as { data: { id: string } }
 
