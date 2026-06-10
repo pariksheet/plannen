@@ -64,7 +64,23 @@ The ambient trigger is the main hazard: "I finished the parking" must be recorde
 - `plugin/skills/plannen-log.md` — the routing table, tie-breakers, guard rails, receipt rules, undo. Description written to auto-activate on logging lead-ins and bare past-tense reports.
 - `plugin/skills/plannen-core.md` — add a short "Logging (the `/log` journal override)" block: names the trigger, states that `/log` and clear past-tense reports **bypass** the event-creation intent gate, and points to the `plannen-log` skill. Cross-references the existing profile-extraction rule so the two don't double-fire.
 
-**No new MCP tools, no migration, no parity changes in Phase 1.** All tools used (`create_event`, `complete_todo`, `uncomplete_todo`, `list_practices`, `mark_practice_done`, `unmark_practice_done`, `upsert_profile_fact`, `correct_profile_fact`) already exist in both runtimes.
+## Cross-surface portability (mobile) — the `log_completion` tool
+
+The plugin skill only loads in Claude Code / Desktop. The **claude.ai mobile app** connects over remote MCP and loads no plugin — so the routing/guard-rails/dedup must travel through channels mobile actually reads: **MCP server `instructions`** and **tool descriptions**. The user is mobile-first, so this is in scope, not deferred.
+
+**Architecture: C-thin.** Mobile's Claude does the *classification* (it's already a capable LLM); a new server-side tool does the *deterministic, dedupe-safe part*. No server-side LLM / BYOK needed.
+
+- **New MCP tool `log_completion({ title, when?, family_member_id? })`** — added in **both** runtimes (`mcp/src/index.ts` and `supabase/functions/mcp/tools/events.ts`), parity-checked. Runs inside the existing per-call transaction and resolves the completion three-tier, **first match wins**:
+  1. existing **open todo** with a confident single title match → complete it (no duplicate);
+  2. else active **practice** with a confident single name match → log a completion;
+  3. else **log a fresh completed todo**.
+  Matching is **conservative** (exact normalized match, or a single recent/contains match — never guess among 2+). Returns `{ action: 'completed_todo' | 'marked_practice' | 'logged_todo', … }` so the caller renders the right receipt.
+- **MCP server `instructions`** (`PLANNEN_INSTRUCTIONS`, set in `server.ts` + the local server) carry the compact routing table + guard rails to every client, mobile included. Kept in sync across both runtimes.
+- The `plannen-log` skill now **calls `log_completion`** for the completion case instead of hand-rolling `list_events → filter → complete` — single source of truth.
+
+No migration: `log_completion` reuses existing tables (`events`, `practices`, `practice_completions`).
+
+On mobile the *future-todo* and *profile-fact* cases route to the already-existing `create_event` / `upsert_profile_fact` tools, guided by the server instructions.
 
 ## Test matrix
 

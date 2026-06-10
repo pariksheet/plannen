@@ -18,6 +18,24 @@ const pool = new Pool({ connectionString: envGet('DATABASE_URL') || envGet('SUPA
 
 export type RequestAuth = { bearer: string } | { userId: string }
 
+// Journal/capture behaviour, delivered to every MCP client (including the
+// claude.ai mobile app, which loads no plugin skills — this is the only channel
+// that ports the /log routing + guard rails to mobile). The Claude Code plugin
+// skill `plannen-log` carries the richer version for that surface.
+export const PLANNEN_INSTRUCTIONS = `Plannen — local-first family planner. Capture / journal behaviour:
+
+When the user reports finishing something ("just finished gym", "cleaned the parking", "took my vitamins") or opens with a logging lead-in ("log…", "note that…", "jot…", "record…"), CAPTURE it immediately, then reply with a one-line receipt ending in "undo?". Do NOT ask "want me to save this?" — logging bypasses the usual ask-first gate.
+
+Routing:
+- Finished / done something → call log_completion({ title }). It resolves to: complete an existing open todo, else mark a matching routine done, else log a new completed todo, and returns {action}. Receipt: "✓ <what> · undo?".
+- A FUTURE task with a time/date ("call dentist at 1pm") → create_event({ event_kind: "todo", start_date }). Receipt: "✓ Todo … HH:MM · undo?".
+- A durable fact about a person / place / preference ("met our neighbour, lives on our street") → upsert_profile_fact. Receipt: "✓ Noted: … · undo?".
+- An activity with a duration but no calendar slot ("slept 8h", "ran 40 min") → not supported yet; reply "⏳ Sleep/duration logging isn't wired up yet — coming soon." and write nothing.
+
+Guard rails — do NOTHING (reply normally) for questions ("did you…?"), intentions / hypotheticals ("I should…", "maybe I'll…", "thinking about…"), or items inside an active planning / brainstorm thread. Only act on completed, concrete, first-person / household actions stated as fact.
+
+Undo: reverse the last action with uncomplete_todo / unmark_practice_done / correct_profile_fact.`
+
 /**
  * Build a Server with the supplied tool modules wired in. Auth must be
  * supplied per request — there is no module-level user cache so two
@@ -28,7 +46,7 @@ export type RequestAuth = { bearer: string } | { userId: string }
 export function buildServer(modules: ToolModule[], auth: RequestAuth) {
   const server = new Server(
     { name: 'plannen', version: '1.0.0' },
-    { capabilities: { tools: {} } },
+    { capabilities: { tools: {} }, instructions: PLANNEN_INSTRUCTIONS },
   )
 
   const definitions = modules.flatMap((m) => m.definitions)

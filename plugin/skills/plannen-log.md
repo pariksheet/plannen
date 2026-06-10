@@ -37,41 +37,27 @@ Do **not** complete it. `start_date` is timezone-naive in the user's profile TZ 
 
 Receipt: `✓ Todo "<title>" · <weekday/today> HH:MM · undo?`
 
-### 2. Past-tense done → complete the right existing thing, else log a new one
+### 2. Past-tense done → `log_completion` (server resolves it)
 
 Trigger: a concrete action reported as finished ("just finished gym today", "finished cleaning the parking", "called the dentist", "kids are in bed").
 
-**Resolve in this order — first match wins. The point is to avoid duplicates: never create a new completed todo if the user already had the thing planned.**
-
-**Tier 1 — an existing open todo matches.** Look for an open todo (`event_kind: 'todo'`, not yet completed) whose title matches the activity:
+**Call the single server-side tool — it does the three-tier resolution atomically so behaviour is identical on every surface (mobile included):**
 
 ```
-list_events({ to_date: <today>, limit: 50 })   // if today's items aren't already in this turn's context
-// keep event_kind='todo' rows with completed_at == null; match the activity against the title
-complete_todo({ id })                            // complete the EXISTING todo — no new row
+log_completion({ title: "<the activity>", when?: <ISO if not now>, family_member_id?: <for a circle member> })
 ```
 
-Match recent/today/overdue open todos; ignore far-future ones unless the title is an unmistakable match. Receipt: `✓ Done "<title>" · undo?`
+The tool resolves, first match wins, and tells you which path it took via `action`:
 
-**Tier 2 — an active practice matches.** A short activity word that names a known recurring routine ("gym", "vitamins", "dishes"):
+| `action` returned | What it did | Receipt |
+|---|---|---|
+| `completed_todo` | An existing **open todo** matched the title → completed *that* (no duplicate). | `✓ Done "<title>" · undo?` |
+| `marked_practice` | An active **routine** matched the name → logged a completion. | `✓ Marked "<name>" done · today · undo?` |
+| `logged_todo` | Neither matched → logged a **fresh completed todo**. | `✓ Logged + done "<title>" · undo?` |
 
-```
-list_practices({ active_only: true })   // if practices aren't already in this turn's context
-mark_practice_done({ practice_id })     // completed_on defaults to today; idempotent; pass family_member_id for a circle member
-```
+Matching is **conservative** (a confident single match only) — so it never completes the wrong thing; when unsure it just logs a fresh completed todo, which is cheap to `undo`. **Never auto-create a practice/routine from `/log`** — that is a heavier, gated action that stays in `plannen-day-plan`.
 
-Receipt: `✓ Marked "<practice name>" done · today · undo?`
-
-**Tier 3 — neither exists.** Create a fresh completed todo stamped now:
-
-```
-create_event({ title, start_date: <now ISO>, event_kind: 'todo' })   → returns { id }
-complete_todo({ id })
-```
-
-Receipt: `✓ Logged + done "<title>" · undo?`
-
-**Never auto-create a practice/routine from `/log`** — that is a heavier, gated action. Creating routines stays in `plannen-day-plan`.
+Keep `title` short and matchable ("gym", "clean the parking") so the server can match an existing todo/routine. Pass `family_member_id` when the completion is for a circle member.
 
 ### 3. Person / place / attribute → profile fact
 
