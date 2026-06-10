@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-06-10
+
+### Schedule page: Today-first week + denser calendar
+
+- **"This week" now opens on Today, with tap-to-widen ranges.** The card defaults to just today's items (events + folded routines), and a `Today · This Week · Next Week` selector lets you widen the view: This Week shows the full Mon–Sun agenda; Next Week peeks at the following week's events. Routines still fold into Today only, so they appear under Today/This Week but not Next Week.
+- **The month calendar shows more at a glance.** Compact day cells now render up to 11 dots per kind (events / reminders / todos) before the "+" overflow, instead of 5 — so a busy day reads more accurately without expanding.
+
 ## [0.4.2] - 2026-06-10
 
 ### Routines folded into the day
