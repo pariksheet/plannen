@@ -93,7 +93,12 @@ Filter the returned events to those where `location` contains the hinted venue O
 
 Before each `create_event`, call `list_events({from_date: eventDate - 1d, to_date: eventDate + 1d, limit: 50})`. Run two checks against the returned rows, in order.
 
-**D.1 — Same-thread dedupe (self-healing).** Inspect each row's `description` for the prefix `Gmail-ID: <thread.id>`. (The summary form truncates at 200 chars, which is well past the prefix.) If a match exists, the create succeeded on a prior run but the checkpoint advance failed — treat this thread as already-done: advance `latestProcessedAt` and continue. Count as `skipped`.
+**D.1 — Same-thread dedupe (self-healing, edit-proof).** A prior run may already have turned this thread — or a sibling thread for the same real-world event — into an event. Check structurally first, then fall back to description text.
+
+First build `thread_msg_ids`: the set of Gmail message/thread IDs this email comprises — `thread.id` plus any sibling-thread IDs you've identified as the same event (the IDs you would otherwise record as `Also in:` because the delivery/confirmation email quotes or references an earlier thread). Identify these *before* deciding to create, so a merge can resolve to an existing event instead of a new one.
+
+1. **Provenance match (authoritative).** For each candidate row in the window, call `mcp__plugin_plannen_plannen__get_event_provenance({event_id: row.id})`. If a row's `source_message_id` is in `thread_msg_ids`, that row IS the canonical event for this thread — a prior run already created it. Do NOT `create_event`. If this email contributes a *new* sibling ID not already linked on the row, append `Also in: Gmail-ID: <id>` to its description via `update_event`; otherwise just advance `latestProcessedAt`. Count as `skipped`. **This survives the user renaming the event or clearing/editing its description**, because it reads the structural `event_provenance` row, not description text — which is exactly the gap that let an edited event get re-ingested as a duplicate.
+2. **Description-prefix fallback.** If no provenance row matched (provenance can be missing on older events or fail to record), scan each row's `description` for the prefix `Gmail-ID: <thread.id>`. (The summary form truncates at 200 chars, well past the prefix.) Same outcome: treat as already-done, advance `latestProcessedAt`, count as `skipped`.
 
 **D.2 — Same-event semantic dedupe.** A single real-world event often produces multiple emails from different senders (booking from the organiser, calendar invite, reminder, waitlist confirmation, parent forwarding the details). They land in separate Gmail threads, so D.1 doesn't catch them. Run this fuzzy match against each candidate row in the returned window:
 
@@ -110,7 +115,7 @@ Worked example (the inline-skating triplicate that motivated this rule):
 - Candidate: title `"Kids Cup - Inline skating at RolclubNoord"`, location `"RolclubNoord"`, start `2026-06-15`.
 - Shared title tokens: `inline`, `skating`, `rolclubnoord` → 3 points (capped). Location substring match → 1 point. Total 4 → skip + link.
 
-This makes the routine self-healing across crashes (D.1) AND avoids one real-world event producing N parallel Plannen events from N senders (D.2).
+This makes the routine self-healing across crashes and user edits (D.1 — structural provenance lookup, not description text) AND avoids one real-world event producing N parallel Plannen events from N senders (D.2).
 
 ### Step E — Writing to Plannen
 
