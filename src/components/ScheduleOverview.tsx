@@ -6,7 +6,12 @@ import {
   listPractices, completionsThisWeek, markPracticeDone, unmarkPracticeDone,
 } from '../services/practiceService'
 import { completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
-import type { PracticeRow, PracticeCompletionRow } from '../lib/dbClient/types'
+import type {
+  PracticeRow, PracticeCompletionRow,
+  AttendanceInstanceRow, ResolvedObligationRow,
+} from '../lib/dbClient/types'
+import { attendanceLabel } from '../utils/attendanceLabel'
+import { obligationLabel } from '../utils/obligationLabel'
 import { CalendarGrid } from './CalendarGrid'
 import { EventCard } from './EventCard'
 import { buildWeekAgenda, eventDateLocal, overlappingIds, weekDays, ymd } from '../utils/weekAgenda'
@@ -20,6 +25,17 @@ export interface ScheduleOverviewProps {
   onDelete: (id: string) => void
   onShareSuccess: () => void
   onHashtagClick: (tag: string) => void
+  // Today's read-only scheduling projections from get_briefing_context.
+  // Optional so existing callers keep working until the data is wired.
+  // TODO(data-binding): no web path to get_briefing_context yet — the
+  // expand/suppress/override/projection logic lives only in
+  // supabase/functions/_shared/scheduling.ts (Deno) and the bearer-gated MCP
+  // edge function. Surfacing it in the web requires either porting that
+  // algorithm into src/ + a fetch route in BOTH tier0 (Node backend) and tier1
+  // (supabase-js), or exposing the briefing context over the existing dbClient.
+  // Until then these render from props (today: always empty in MyFeed).
+  attendancesToday?: AttendanceInstanceRow[]
+  obligationsToday?: ResolvedObligationRow[]
 }
 
 const sketchHand = "font-['Caveat'] tracking-tight"
@@ -104,6 +120,10 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <RoutinesCard />
       </div>
+      <TodayScheduleCard
+        attendances={props.attendancesToday ?? []}
+        obligations={props.obligationsToday ?? []}
+      />
       <OverdueCard
         events={events}
         onEdit={props.onEdit}
@@ -225,6 +245,69 @@ function RoutinesCard() {
           <li className="text-xs text-indigo-600">+{overflow} more in Routines</li>
         )}
       </ul>
+    </section>
+  )
+}
+
+// Read-only "Today on a schedule" card. Two distinct kinds of row:
+//  • Obligations — ACTIONABLE timed drop/pick tasks ("drop · Milo @ school").
+//    Rendered like timed items (time + label), but NOT editable here (creation
+//    is agent-driven).
+//  • Attendances — INDICATIVE context (a member is somewhere on a schedule).
+//    Rendered greyed/muted, with NO conflict marker — they are deliberately
+//    kept out of overlappingIds() in utils/weekAgenda.ts.
+// Absent entirely when there is nothing to show.
+function TodayScheduleCard(
+  { attendances, obligations }: {
+    attendances: AttendanceInstanceRow[]
+    obligations: ResolvedObligationRow[]
+  },
+) {
+  if (attendances.length === 0 && obligations.length === 0) return null
+  const sortedObligations = obligations.slice().sort((a, b) => a.time.localeCompare(b.time))
+  return (
+    <section
+      data-testid="today-schedule-card"
+      className={`rounded-xl border-2 border-sky-200/70 bg-sky-50/50 p-4 ${sketchBody}`}
+    >
+      <h3 className={`${sketchHand} text-3xl text-gray-900 mb-2`}>Today on a schedule</h3>
+
+      {sortedObligations.length > 0 && (
+        <ul className="md:columns-2 gap-x-6 mb-2">
+          {sortedObligations.map((o) => (
+            <li
+              key={o.obligation_id}
+              data-testid="obligation-row"
+              className="break-inside-avoid mb-1 flex items-center gap-1.5 w-full text-base leading-6 px-1.5"
+            >
+              <span className="text-gray-500 text-sm whitespace-nowrap mr-2">{o.time}</span>
+              <span className="text-gray-800">
+                {obligationLabel(o)}
+                <span className="ml-1.5 text-[11px] not-italic bg-sky-100 text-sky-800 border border-sky-200 rounded-full px-1.5 py-0.5">
+                  {o.role}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {attendances.length > 0 && (
+        <ul data-testid="attendance-list" className="md:columns-2 gap-x-6">
+          {attendances.map((a) => (
+            <li
+              key={a.attendance_id}
+              data-testid="attendance-row"
+              className="break-inside-avoid mb-1 text-base leading-6 px-1.5 text-gray-400"
+            >
+              {attendanceLabel(a)}
+              <span className="ml-1.5 text-[11px] not-italic bg-gray-100 text-gray-500 border border-gray-200 rounded-full px-1.5 py-0.5">
+                indicative
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   )
 }

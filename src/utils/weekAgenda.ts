@@ -77,6 +77,10 @@ export function buildWeekAgenda(events: Event[], now: Date): DayBucket[] {
 
 const DEFAULT_DURATION_MS = 2 * 60 * 60 * 1000 // assume 2h when no end_date
 
+// Indicative attendance instances are deliberately NOT passed here — like
+// reminders, they are context, not commitments, so they never clash. Only
+// Event rows are accepted. Obligations are actionable but rendered separately.
+//
 // Ids of timed events whose clock ranges intersect another timed event in the
 // same list. Date-only (all-day) events never count as clashing, and back-to-
 // back events that merely touch (a.end === b.start) do not overlap. Reminders
