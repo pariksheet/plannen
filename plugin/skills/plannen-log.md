@@ -37,34 +37,43 @@ Do **not** complete it. `start_date` is timezone-naive in the user's profile TZ 
 
 Receipt: `✓ Todo "<title>" · <weekday/today> HH:MM · undo?`
 
-### 2. Past-tense done → todo + complete
+### 2. Past-tense done → complete the right existing thing, else log a new one
 
-Trigger: a concrete action reported as finished ("finished cleaning the parking", "called the dentist", "kids are in bed").
+Trigger: a concrete action reported as finished ("just finished gym today", "finished cleaning the parking", "called the dentist", "kids are in bed").
+
+**Resolve in this order — first match wins. The point is to avoid duplicates: never create a new completed todo if the user already had the thing planned.**
+
+**Tier 1 — an existing open todo matches.** Look for an open todo (`event_kind: 'todo'`, not yet completed) whose title matches the activity:
+
+```
+list_events({ to_date: <today>, limit: 50 })   // if today's items aren't already in this turn's context
+// keep event_kind='todo' rows with completed_at == null; match the activity against the title
+complete_todo({ id })                            // complete the EXISTING todo — no new row
+```
+
+Match recent/today/overdue open todos; ignore far-future ones unless the title is an unmistakable match. Receipt: `✓ Done "<title>" · undo?`
+
+**Tier 2 — an active practice matches.** A short activity word that names a known recurring routine ("gym", "vitamins", "dishes"):
+
+```
+list_practices({ active_only: true })   // if practices aren't already in this turn's context
+mark_practice_done({ practice_id })     // completed_on defaults to today; idempotent; pass family_member_id for a circle member
+```
+
+Receipt: `✓ Marked "<practice name>" done · today · undo?`
+
+**Tier 3 — neither exists.** Create a fresh completed todo stamped now:
 
 ```
 create_event({ title, start_date: <now ISO>, event_kind: 'todo' })   → returns { id }
-complete_todo({ id })                                                  // defaults completed_at to now
+complete_todo({ id })
 ```
 
 Receipt: `✓ Logged + done "<title>" · undo?`
 
-### 3. Matches an active routine → mark practice done
+**Never auto-create a practice/routine from `/log`** — that is a heavier, gated action. Creating routines stays in `plannen-day-plan`.
 
-Trigger: a short activity word that names a known recurring practice ("log gym", "did my vitamins", "dishes done").
-
-```
-list_practices({ active_only: true })   // if practices aren't already in this turn's context
-// find the practice whose name matches the activity
-mark_practice_done({ practice_id })     // completed_on defaults to today; idempotent
-```
-
-If the practice belongs to a circle member, pass `family_member_id`.
-
-Receipt: `✓ Marked "<practice name>" done · today · undo?`
-
-**No matching practice?** Fall through to case 2 — create a completed todo stamped now. **Never auto-create a practice/routine from `/log`** — that is a heavier, gated action. Creating routines stays in `plannen-day-plan`.
-
-### 4. Person / place / attribute → profile fact
+### 3. Person / place / attribute → profile fact
 
 Trigger: a durable fact about a person, place, schedule, or preference ("met person A, lives on my street", "Milo started swimming on Tuesdays").
 
@@ -76,7 +85,7 @@ Use the family member's UUID as `subject` for facts about a member; `'user'` for
 
 Receipt (this one **is** shown — unlike plannen-core's silent passive capture, because the user explicitly logged it): `✓ Noted: <fact in plain words> · undo?`
 
-### 5. Activity / time-block → not yet wired (Phase 2)
+### 4. Activity / time-block → not yet wired (Phase 2)
 
 Trigger: an activity with a duration and no calendar slot ("slept 8h last night", "ran for 40 minutes", "deep work 2 hours this morning").
 
@@ -86,20 +95,21 @@ There is no `activity_logs` table yet. Do **not** mis-file it as a todo or a pra
 
 ## Tie-breakers
 
-- Past-tense / completion words ("finished", "did", "done", "just …ed") → case 2 or 3.
+- Past-tense / completion words ("finished", "did", "done", "just …ed") → case 2 (resolves existing-todo → practice → new-todo in that order).
 - A specific future time/date → case 1.
-- "met / lives / works / allergic / prefers / their …" → case 4.
-- Duration + activity, no clock slot ("8h", "40 minutes") → case 5.
-- "log gym" — practice exists → case 3; no practice → case 2.
+- "met / lives / works / allergic / prefers / their …" → case 3.
+- Duration + activity, no clock slot ("8h", "40 minutes") → case 4.
+- "just finished gym": open `gym` todo exists → complete it; else gym practice exists → mark done; else log a new completed todo.
 
 ## Undo
 
 Remember the last action you took this turn. On "undo" (or "no, scrap that"), reverse it with the inverse tool — no new infrastructure:
 
-- future todo (case 1) → delete the event (set `event_status: 'cancelled'` via `update_event`, or note it's removed).
-- done todo (case 2) → `uncomplete_todo({ id })`, then cancel the event as above.
-- practice completion (case 3) → `unmark_practice_done({ practice_id, completed_on })`.
-- profile fact (case 4) → `correct_profile_fact` to mark it historical.
+- new future todo (case 1) → delete the event (set `event_status: 'cancelled'` via `update_event`, or note it's removed).
+- completed an **existing** todo (case 2 tier 1) → `uncomplete_todo({ id })` only — it pre-existed, so re-open it, don't delete it.
+- logged a **new** completed todo (case 2 tier 3) → `uncomplete_todo({ id })`, then cancel the event as above.
+- practice completion (case 2 tier 2) → `unmark_practice_done({ practice_id, completed_on })`.
+- profile fact (case 3) → `correct_profile_fact` to mark it historical.
 
 Confirm with one line: `✓ Undone.`
 

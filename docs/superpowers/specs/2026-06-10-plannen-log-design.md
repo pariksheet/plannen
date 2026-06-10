@@ -30,9 +30,7 @@ All three trigger **act-immediately → one-line receipt with an undo hint**, ex
 | Input shape | Example | Action | Receipt |
 |---|---|---|---|
 | Future / timed task | "log call dentist at 1pm" | `create_event({ title, start_date, event_kind: 'todo' })` | `✓ Todo "call dentist" · today 13:00 · undo?` |
-| Past-tense done | "finished cleaning the parking" | `create_event({ title, start_date: now, event_kind: 'todo' })` → `complete_todo({ id })` | `✓ Logged + done "clean parking" · undo?` |
-| Matches an active routine | "log gym" (a gym practice exists) | `list_practices` match → `mark_practice_done({ practice_id })` | `✓ Marked "Gym" done · today · undo?` |
-| "log gym" — **no** matching routine | — | completed todo stamped now (**never** auto-creates a routine) | `✓ Logged + done "gym" · undo?` |
+| Past-tense done | "just finished gym today" / "finished cleaning the parking" | **Three-tier resolve (first match wins):** (1) existing open todo matches → `complete_todo({ id })`; (2) active practice matches → `mark_practice_done({ practice_id })`; (3) neither → `create_event(todo, now)` → `complete_todo`. Avoids duplicating an already-planned item; **never** auto-creates a routine. | `✓ Done "<title>" · undo?` (tier 1) / `✓ Marked "Gym" done · today · undo?` (tier 2) / `✓ Logged + done "<title>" · undo?` (tier 3) |
 | Person / place / attribute | "met person A, lives on my street" | `upsert_profile_fact({ subject, predicate, value, source: 'user_stated' })` | `✓ Noted: A lives on your street · undo?` |
 | Activity / time-block | "slept 8h last night" | *(Phase 2 — no table yet)* graceful notice, no write | `⏳ Sleep/duration logging isn't wired up yet — coming soon` |
 
