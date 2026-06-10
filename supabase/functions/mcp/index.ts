@@ -15,6 +15,7 @@ import { watchesModule } from './tools/watches.ts'
 import { sourcesModule } from './tools/sources.ts'
 import { profileFactsModule } from './tools/profileFacts.ts'
 import { practicesModule } from './tools/practices.ts'
+import { schedulingModule } from './tools/scheduling.ts'
 import { briefingsModule } from './tools/briefings.ts'
 import { mailboxModule } from './tools/mailbox.ts'
 import { provenanceModule } from './tools/provenance.ts'
@@ -104,7 +105,7 @@ export async function handleRequest(
 }
 
 // Module-level tool registry.
-const TOOLS: ToolModule[] = [eventsModule, memoriesModule, storiesModule, photosModule, gcalModule, relationshipsModule, profileModule, familyModule, locationsModule, watchesModule, sourcesModule, profileFactsModule, practicesModule, briefingsModule, mailboxModule, provenanceModule]
+const TOOLS: ToolModule[] = [eventsModule, memoriesModule, storiesModule, photosModule, gcalModule, relationshipsModule, profileModule, familyModule, locationsModule, watchesModule, sourcesModule, profileFactsModule, practicesModule, schedulingModule, briefingsModule, mailboxModule, provenanceModule]
 
 if (typeof Deno !== 'undefined') {
   Deno.serve((req) => handleRequest(req, { tools: TOOLS }))
