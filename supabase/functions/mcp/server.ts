@@ -24,7 +24,7 @@ export type RequestAuth = { bearer: string } | { userId: string }
 // skill `plannen-log` carries the richer version for that surface.
 export const PLANNEN_INSTRUCTIONS = `Plannen — local-first family planner. Capture / journal behaviour:
 
-When the user reports finishing something ("just finished gym", "cleaned the parking", "took my vitamins") or opens with a logging lead-in ("log…", "note that…", "jot…", "record…"), CAPTURE it immediately, then reply with a one-line receipt ending in "undo?". Do NOT ask "want me to save this?" — logging bypasses the usual ask-first gate.
+ALWAYS call log_completion the moment the user reports finishing or doing something — even casually or in passing ("just finished gym today", "cleaned the parking", "kids are in bed", "took my vitamins"). NEVER just reply conversationally ("nice, little win!"): a chat-only reply drops the data. Call the tool, then give a one-line receipt ending in "undo?". Do NOT ask "want me to save this?" — logging bypasses the usual ask-first gate. Logging lead-ins ("log…", "note that…", "jot…", "record…") work the same way.
 
 Routing:
 - Finished / done something → call log_completion({ title }). It resolves to: complete an existing open todo, else mark a matching routine done, else log a new completed todo, and returns {action}. Receipt: "✓ <what> · undo?".

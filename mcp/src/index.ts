@@ -2516,7 +2516,7 @@ const TOOLS: Tool[] = [
   {
     name: 'log_completion',
     description:
-      'Log that something was just finished/done — the journal "I did X" path. Resolves in order: (1) if an open todo matches the title, mark THAT todo done (no duplicate); (2) else if an active practice/routine matches the name, log a completion for that date; (3) else create a new todo and immediately complete it. Use for past-tense reports ("just finished gym", "cleaned the parking", "took my vitamins"). Do NOT use for a FUTURE task with a time (use create_event event_kind=todo), for a durable fact about a person/place (use upsert_profile_fact), or for questions / intentions / hypotheticals (do nothing at all). Matching is conservative: only a confident single match completes an existing item, otherwise it logs a fresh completed todo. Returns {action} = completed_todo | marked_practice | logged_todo so you can render the right one-line receipt.',
+      'Capture that the user just finished or did something. CALL THIS IMMEDIATELY, without asking, whenever the user reports completing an activity — even casually or in passing ("just finished gym today", "cleaned the parking", "kids are in bed", "took my vitamins", "called the dentist"). Do NOT merely reply conversationally ("nice, little win!") — a chat reply DROPS the data; you must call this tool, then confirm in one short line ending "· undo?". It resolves server-side, first match wins: (1) an existing open todo matching the title is marked done (no duplicate); (2) else a matching active practice/routine is logged done; (3) else a new completed todo is created. Matching is conservative — it never guesses among ambiguous matches. Returns {action} = completed_todo | marked_practice | logged_todo so you render the right receipt. Do NOT use for: a FUTURE task with a time (use create_event with event_kind=todo); a durable fact about a person/place (use upsert_profile_fact); or questions / intentions / hypotheticals ("should I…", "maybe I will…", "thinking about…") — do nothing for those.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -3359,7 +3359,7 @@ const TOOLS: Tool[] = [
 // supabase/functions/mcp/server.ts (PLANNEN_INSTRUCTIONS).
 const PLANNEN_INSTRUCTIONS = `Plannen — local-first family planner. Capture / journal behaviour:
 
-When the user reports finishing something ("just finished gym", "cleaned the parking", "took my vitamins") or opens with a logging lead-in ("log…", "note that…", "jot…", "record…"), CAPTURE it immediately, then reply with a one-line receipt ending in "undo?". Do NOT ask "want me to save this?" — logging bypasses the usual ask-first gate.
+ALWAYS call log_completion the moment the user reports finishing or doing something — even casually or in passing ("just finished gym today", "cleaned the parking", "kids are in bed", "took my vitamins"). NEVER just reply conversationally ("nice, little win!"): a chat-only reply drops the data. Call the tool, then give a one-line receipt ending in "undo?". Do NOT ask "want me to save this?" — logging bypasses the usual ask-first gate. Logging lead-ins ("log…", "note that…", "jot…", "record…") work the same way.
 
 Routing:
 - Finished / done something → call log_completion({ title }). It resolves to: complete an existing open todo, else mark a matching routine done, else log a new completed todo, and returns {action}. Receipt: "✓ <what> · undo?".
