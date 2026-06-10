@@ -29,6 +29,7 @@ Workflow logic — event-creation intent gate, passive profile extraction, watch
 - Embedded Postgres lifecycle: `scripts/pg-start.sh` / `scripts/pg-stop.sh` (wrappers around `scripts/lib/plannen-pg.mjs`). PID at `~/.plannen/pg.pid`, data at `~/.plannen/pgdata`.
 - Edge functions: `supabase/functions/` — BYOK wrapper at `_shared/ai.ts` (Tier 1 only; Phase 2 swaps these for a Node backend).
 - Plugin source: `plugin/skills/` (always-on rules) and `plugin/commands/` (slash commands).
+- Releases: run `/release [patch|minor|major|X.Y.Z]` (maintainer command at `.claude/commands/release.md`). It bumps `package.json` + `package-lock.json` + `plugin/.claude-plugin/plugin.json.example` (plugin version kept **equal** to the package version), drafts the CHANGELOG, opens + squash-merges a PR, tags `vX.Y.Z`, and **publishes a GitHub Release** (a tag alone is not a Release — that step was missed pre-0.2.1).
 - Mailbox sync: launchd job at `~/Library/LaunchAgents/work.plannen.mailbox-sync.plist`. Logs at `~/.plannen/logs/mailbox-sync.log`. Manage via `npx plannen mailbox {install,uninstall}` and `/plannen-mailbox-rules`.
 - Design docs (approved brainstorms): `docs/superpowers/specs/`.
 - Tier model: `docs/TIERED_DEPLOYMENT_MODEL.md`. Integration vs storage framing: `docs/INTEGRATIONS.md`.
