@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-10
+
+### /log — a frictionless journal that works on mobile
+
+- **One verb to capture anything that happened.** A new `/log` command (and bare past-tense reports like "just finished gym today" or "met our new neighbour, lives on our street") records a finished chore, a completed routine, a future todo, or a fact about a person/place — and files it in the right place immediately, then shows a one-line receipt you can `undo`. Logging deliberately bypasses the usual "want me to save this?" gate; it's capture, not planning.
+- **Smart, dedupe-safe completion.** When you report finishing something, it resolves conservatively: completes an existing open todo if one matches (no duplicate), else marks a matching routine done, else logs a fresh completed todo. It never auto-creates a routine, and never guesses when the match is ambiguous.
+- **Works the same on the mobile app.** The new `log_completion` MCP tool (added in both server runtimes) does the resolution server-side, and the routing rules + guard rails now ship as MCP server instructions — so the journal behaves identically in the Claude mobile app, which loads no plugin. Guard rails keep it from acting on questions, intentions, or hypotheticals.
+- **Activity time-blocks (sleep, durations) are next.** Logging "slept 8h last night" returns a friendly "coming soon" for now; the duration/activity store lands in a follow-up. No migration in this release — `/log` reuses existing tables.
+
 ## [0.4.3] - 2026-06-10
 
 ### Schedule page: Today-first week + denser calendar
