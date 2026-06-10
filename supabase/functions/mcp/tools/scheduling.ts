@@ -80,6 +80,57 @@ const definitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'create_obligation',
+    description: "A derived drop/pick task linked to an attendance. It stays linked and re-projects onto whichever attendance instance survives blackout suppression and member-overlap override — so drop/pick auto-suppress on holidays and follow the child to a camp.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        derived_from_attendance_id: { type: 'string' },
+        role: { type: 'string', enum: ['drop', 'pick'] },
+        anchor: { type: 'string', enum: ['start', 'end'], description: "Which end of the attendance the offset is measured from: 'start' for a drop, 'end' for a pick." },
+        offset_minutes: { type: 'number', description: 'Signed minutes from the anchor; a drop is negative from start (e.g. -15 = arrive 15m before start), a pick is 0 from end.' },
+        location_id: { type: ['string', 'null'], description: 'Optional; defaults to inheriting the attendance/winning-instance location (so it follows the child to a camp).' },
+      },
+      required: ['derived_from_attendance_id', 'role', 'anchor'],
+    },
+  },
+  {
+    name: 'update_obligation',
+    description: 'Update fields on an existing obligation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        role: { type: 'string', enum: ['drop', 'pick'] },
+        anchor: { type: 'string', enum: ['start', 'end'], description: "Which end of the attendance the offset is measured from: 'start' for a drop, 'end' for a pick." },
+        offset_minutes: { type: 'number', description: 'Signed minutes from the anchor; a drop is negative from start (e.g. -15 = arrive 15m before start), a pick is 0 from end.' },
+        location_id: { type: ['string', 'null'], description: 'Optional; defaults to inheriting the attendance/winning-instance location (so it follows the child to a camp).' },
+        active: { type: 'boolean' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'list_obligations',
+    description: 'List derived drop/pick obligations linked to attendances.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        attendance_id: { type: 'string' },
+        active_only: { type: 'boolean' },
+      },
+    },
+  },
+  {
+    name: 'delete_obligation',
+    description: 'Soft-delete an obligation (sets active=false).',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  {
     name: 'create_blackout_calendar',
     description: "A named set of date-range windows (e.g. 'example school holidays') that suppress linked attendance instances.",
     inputSchema: {
@@ -225,6 +276,95 @@ const deleteAttendance: ToolHandler = async (args, ctx) => {
   return { ok: true }
 }
 
+type ObligationInput = {
+  derived_from_attendance_id: string
+  role: 'drop' | 'pick'
+  anchor: 'start' | 'end'
+  offset_minutes?: number | null
+  location_id?: string | null
+}
+
+const createObligation: ToolHandler = async (args, ctx) => {
+  const a = args as ObligationInput
+  const userId = ctx.userId
+  const { rows: attRows } = await ctx.client.query(
+    `SELECT 1 FROM plannen.attendances WHERE id = $1 AND user_id = $2`,
+    [a.derived_from_attendance_id, userId],
+  )
+  if (attRows.length === 0) throw new Error('attendance not found')
+  const { rows } = await ctx.client.query(
+    `INSERT INTO plannen.obligations
+       (user_id, derived_from_attendance_id, role, anchor, offset_minutes, location_id)
+     VALUES ($1, $2, $3, $4, COALESCE($5, 0), $6)
+     RETURNING *`,
+    [
+      userId,
+      a.derived_from_attendance_id,
+      a.role,
+      a.anchor,
+      a.offset_minutes ?? null,
+      a.location_id ?? null,
+    ],
+  )
+  return rows[0]
+}
+
+const updateObligation: ToolHandler = async (args, ctx) => {
+  const a = args as { id: string } & Partial<ObligationInput> & { active?: boolean }
+  const userId = ctx.userId
+  const sets: string[] = []
+  const params: unknown[] = []
+  const entries = Object.entries(a).filter(([k, v]) => k !== 'id' && v !== undefined)
+  for (const [k, v] of entries) {
+    params.push(v)
+    sets.push(`${k} = $${params.length}`)
+  }
+  if (sets.length === 0) throw new Error('no fields to update')
+  params.push(a.id, userId)
+  const { rows } = await ctx.client.query(
+    `UPDATE plannen.obligations SET ${sets.join(', ')}
+     WHERE id = $${params.length - 1} AND user_id = $${params.length}
+     RETURNING *`,
+    params,
+  )
+  if (rows.length === 0) throw new Error('obligation not found')
+  return rows[0]
+}
+
+const listObligations: ToolHandler = async (args, ctx) => {
+  const a = (args ?? {}) as { attendance_id?: string; active_only?: boolean }
+  const userId = ctx.userId
+  const where: string[] = ['user_id = $1']
+  const params: unknown[] = [userId]
+  if (a.attendance_id !== undefined) {
+    params.push(a.attendance_id)
+    where.push(`derived_from_attendance_id = $${params.length}`)
+  }
+  if (a.active_only) where.push('active = true')
+  const { rows } = await ctx.client.query(
+    `SELECT id, derived_from_attendance_id, role, anchor, offset_minutes,
+            location_id, active, created_at, updated_at
+     FROM plannen.obligations
+     WHERE ${where.join(' AND ')}
+     ORDER BY created_at ASC`,
+    params,
+  )
+  return rows
+}
+
+const deleteObligation: ToolHandler = async (args, ctx) => {
+  const a = args as { id: string }
+  const userId = ctx.userId
+  const { rowCount } = await ctx.client.query(
+    `UPDATE plannen.obligations SET active = false
+     WHERE id = $1 AND user_id = $2
+     RETURNING id`,
+    [a.id, userId],
+  )
+  if (rowCount === 0) throw new Error('obligation not found')
+  return { ok: true }
+}
+
 const createBlackoutCalendar: ToolHandler = async (args, ctx) => {
   const a = args as { name: string; family_member_id?: string | null }
   const id = ctx.userId
@@ -313,6 +453,10 @@ export const schedulingModule: ToolModule = {
     update_attendance: updateAttendance,
     list_attendances: listAttendances,
     delete_attendance: deleteAttendance,
+    create_obligation: createObligation,
+    update_obligation: updateObligation,
+    list_obligations: listObligations,
+    delete_obligation: deleteObligation,
     create_blackout_calendar: createBlackoutCalendar,
     add_blackout_window: addBlackoutWindow,
     list_blackout_calendars: listBlackoutCalendars,

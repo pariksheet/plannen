@@ -2009,6 +2009,101 @@ async function linkAttendanceBlackout(args: { attendance_id: string; calendar_id
   })
 }
 
+// ── Obligations (derived drop/pick tasks linked to attendances) ────────────────
+
+type ObligationInput = {
+  derived_from_attendance_id: string
+  role: 'drop' | 'pick'
+  anchor: 'start' | 'end'
+  offset_minutes?: number | null
+  location_id?: string | null
+}
+
+async function createObligation(args: ObligationInput) {
+  const userId = await uid()
+  return await withUserContext(userId, async (c) => {
+    const { rows: attRows } = await c.query(
+      `SELECT 1 FROM plannen.attendances WHERE id = $1 AND user_id = $2`,
+      [args.derived_from_attendance_id, userId],
+    )
+    if (attRows.length === 0) throw new Error('attendance not found')
+    const { rows } = await c.query(
+      `INSERT INTO plannen.obligations
+         (user_id, derived_from_attendance_id, role, anchor, offset_minutes, location_id)
+       VALUES ($1, $2, $3, $4, COALESCE($5, 0), $6)
+       RETURNING *`,
+      [
+        userId,
+        args.derived_from_attendance_id,
+        args.role,
+        args.anchor,
+        args.offset_minutes ?? null,
+        args.location_id ?? null,
+      ],
+    )
+    return rows[0]
+  })
+}
+
+async function updateObligation(args: { id: string } & Partial<ObligationInput> & { active?: boolean }) {
+  const userId = await uid()
+  return await withUserContext(userId, async (c) => {
+    const sets: string[] = []
+    const params: unknown[] = []
+    const entries = Object.entries(args).filter(([k, v]) => k !== 'id' && v !== undefined)
+    for (const [k, v] of entries) {
+      params.push(v)
+      sets.push(`${k} = $${params.length}`)
+    }
+    if (sets.length === 0) throw new Error('no fields to update')
+    params.push(args.id, userId)
+    const { rows } = await c.query(
+      `UPDATE plannen.obligations SET ${sets.join(', ')}
+       WHERE id = $${params.length - 1} AND user_id = $${params.length}
+       RETURNING *`,
+      params,
+    )
+    if (rows.length === 0) throw new Error('obligation not found')
+    return rows[0]
+  })
+}
+
+async function listObligations(args: { attendance_id?: string; active_only?: boolean } = {}) {
+  const userId = await uid()
+  return await withUserContext(userId, async (c) => {
+    const where: string[] = ['user_id = $1']
+    const params: unknown[] = [userId]
+    if (args.attendance_id !== undefined) {
+      params.push(args.attendance_id)
+      where.push(`derived_from_attendance_id = $${params.length}`)
+    }
+    if (args.active_only) where.push('active = true')
+    const { rows } = await c.query(
+      `SELECT id, derived_from_attendance_id, role, anchor, offset_minutes,
+              location_id, active, created_at, updated_at
+       FROM plannen.obligations
+       WHERE ${where.join(' AND ')}
+       ORDER BY created_at ASC`,
+      params,
+    )
+    return rows
+  })
+}
+
+async function deleteObligation(args: { id: string }) {
+  const userId = await uid()
+  return await withUserContext(userId, async (c) => {
+    const { rowCount } = await c.query(
+      `UPDATE plannen.obligations SET active = false
+       WHERE id = $1 AND user_id = $2
+       RETURNING id`,
+      [args.id, userId],
+    )
+    if (rowCount === 0) throw new Error('obligation not found')
+    return { ok: true }
+  })
+}
+
 /**
  * Composite read for the daily briefing. `args.date` is a UTC calendar date
  * (`YYYY-MM-DD`); pass `new Date().toISOString().slice(0, 10)` from the
@@ -2874,6 +2969,57 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: 'create_obligation',
+    description: "A derived drop/pick task linked to an attendance. It stays linked and re-projects onto whichever attendance instance survives blackout suppression and member-overlap override — so drop/pick auto-suppress on holidays and follow the child to a camp.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        derived_from_attendance_id: { type: 'string' },
+        role: { type: 'string', enum: ['drop', 'pick'] },
+        anchor: { type: 'string', enum: ['start', 'end'], description: "Which end of the attendance the offset is measured from: 'start' for a drop, 'end' for a pick." },
+        offset_minutes: { type: 'number', description: 'Signed minutes from the anchor; a drop is negative from start (e.g. -15 = arrive 15m before start), a pick is 0 from end.' },
+        location_id: { type: ['string', 'null'], description: 'Optional; defaults to inheriting the attendance/winning-instance location (so it follows the child to a camp).' },
+      },
+      required: ['derived_from_attendance_id', 'role', 'anchor'],
+    },
+  },
+  {
+    name: 'update_obligation',
+    description: 'Update fields on an existing obligation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        role: { type: 'string', enum: ['drop', 'pick'] },
+        anchor: { type: 'string', enum: ['start', 'end'], description: "Which end of the attendance the offset is measured from: 'start' for a drop, 'end' for a pick." },
+        offset_minutes: { type: 'number', description: 'Signed minutes from the anchor; a drop is negative from start (e.g. -15 = arrive 15m before start), a pick is 0 from end.' },
+        location_id: { type: ['string', 'null'], description: 'Optional; defaults to inheriting the attendance/winning-instance location (so it follows the child to a camp).' },
+        active: { type: 'boolean' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'list_obligations',
+    description: 'List derived drop/pick obligations linked to attendances.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        attendance_id: { type: 'string' },
+        active_only: { type: 'boolean' },
+      },
+    },
+  },
+  {
+    name: 'delete_obligation',
+    description: 'Soft-delete an obligation (sets active=false).',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+    },
+  },
+  {
     name: 'create_blackout_calendar',
     description: "A named set of date-range windows (e.g. 'example school holidays') that suppress linked attendance instances.",
     inputSchema: {
@@ -3128,6 +3274,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case 'update_attendance':         result = await updateAttendance(args as Parameters<typeof updateAttendance>[0]); break
       case 'list_attendances':          result = await listAttendances(args as Parameters<typeof listAttendances>[0]); break
       case 'delete_attendance':         result = await deleteAttendance(args as Parameters<typeof deleteAttendance>[0]); break
+      case 'create_obligation':         result = await createObligation(args as Parameters<typeof createObligation>[0]); break
+      case 'update_obligation':         result = await updateObligation(args as Parameters<typeof updateObligation>[0]); break
+      case 'list_obligations':          result = await listObligations(args as Parameters<typeof listObligations>[0]); break
+      case 'delete_obligation':         result = await deleteObligation(args as Parameters<typeof deleteObligation>[0]); break
       case 'create_blackout_calendar':  result = await createBlackoutCalendar(args as Parameters<typeof createBlackoutCalendar>[0]); break
       case 'add_blackout_window':       result = await addBlackoutWindow(args as Parameters<typeof addBlackoutWindow>[0]); break
       case 'list_blackout_calendars':   result = await listBlackoutCalendars(); break

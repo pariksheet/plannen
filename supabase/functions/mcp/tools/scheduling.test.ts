@@ -6,11 +6,15 @@ const EXPECTED = [
   'add_blackout_window',
   'create_attendance',
   'create_blackout_calendar',
+  'create_obligation',
   'delete_attendance',
+  'delete_obligation',
   'link_attendance_blackout',
   'list_attendances',
   'list_blackout_calendars',
+  'list_obligations',
   'update_attendance',
+  'update_obligation',
 ]
 
 function mockCtx(queryImpl: (sql: string, params?: unknown[]) => unknown) {
@@ -20,8 +24,8 @@ function mockCtx(queryImpl: (sql: string, params?: unknown[]) => unknown) {
 }
 
 describe('scheduling module', () => {
-  it('registers 8 definitions', () => {
-    expect(schedulingModule.definitions).toHaveLength(8)
+  it('registers 12 definitions', () => {
+    expect(schedulingModule.definitions).toHaveLength(12)
   })
 
   it('exposes the expected tool names', () => {
@@ -96,5 +100,54 @@ describe('scheduling module', () => {
     const insertCall = query.mock.calls.find((c) => /INSERT INTO plannen\.attendance_blackouts/.test(c[0] as string))
     expect(insertCall).toBeDefined()
     expect(insertCall![0]).toMatch(/ON CONFLICT \(attendance_id, calendar_id\) DO NOTHING/)
+  })
+
+  it('create_obligation verifies attendance ownership then INSERTs in the documented param order', async () => {
+    const { ctx, query } = mockCtx((sql) =>
+      /SELECT 1 FROM plannen\.attendances/.test(sql)
+        ? { rows: [{ '?column?': 1 }] }
+        : { rows: [{ id: 'obl-1' }] },
+    )
+    const out = await schedulingModule.dispatch.create_obligation(
+      { derived_from_attendance_id: 'att-1', role: 'drop', anchor: 'start', offset_minutes: -15 },
+      ctx,
+    )
+    expect(out).toEqual({ id: 'obl-1' })
+    expect(query.mock.calls[0][0]).toMatch(/SELECT 1 FROM plannen\.attendances/)
+    const [sql, params] = query.mock.calls[1]
+    expect(sql).toMatch(/INSERT INTO plannen\.obligations/)
+    // param order: user_id, derived_from_attendance_id, role, anchor, offset_minutes, location_id
+    expect(params).toEqual(['user-1', 'att-1', 'drop', 'start', -15, null])
+  })
+
+  it('create_obligation throws when the attendance is not owned', async () => {
+    const { ctx } = mockCtx(() => ({ rows: [] }))
+    await expect(
+      schedulingModule.dispatch.create_obligation(
+        { derived_from_attendance_id: 'nope', role: 'pick', anchor: 'end' },
+        ctx,
+      ),
+    ).rejects.toThrow('attendance not found')
+  })
+
+  it('list_obligations scopes to the user and filters by attendance + active_only', async () => {
+    const { ctx, query } = mockCtx(() => ({ rows: [{ id: 'obl-1' }] }))
+    const out = await schedulingModule.dispatch.list_obligations(
+      { attendance_id: 'att-1', active_only: true },
+      ctx,
+    )
+    expect(out).toEqual([{ id: 'obl-1' }])
+    const [sql, params] = query.mock.calls[0]
+    expect(sql).toMatch(/FROM plannen\.obligations/)
+    expect(sql).toMatch(/derived_from_attendance_id = \$2/)
+    expect(sql).toMatch(/active = true/)
+    expect(params).toEqual(['user-1', 'att-1'])
+  })
+
+  it('delete_obligation soft-deletes (active = false) and throws when missing', async () => {
+    const { ctx } = mockCtx(() => ({ rows: [], rowCount: 0 }))
+    await expect(
+      schedulingModule.dispatch.delete_obligation({ id: 'nope' }, ctx),
+    ).rejects.toThrow('obligation not found')
   })
 })
