@@ -372,6 +372,90 @@ async function uncompleteTodo(args: { id: string }) {
   })
 }
 
+// Journal "I did X" resolver. Conservative single-match: complete an existing
+// open todo, else mark a matching active practice done, else log a fresh
+// completed todo. Server-side so EVERY surface (mobile included) dedupes
+// identically without the client hand-rolling list→filter→complete.
+async function logCompletion(args: { title?: string; when?: string; family_member_id?: string | null }) {
+  if (!args.title || !args.title.trim()) throw new Error('title is required')
+  const title = args.title.trim()
+  const norm = title.toLowerCase()
+  const userId = await uid()
+  const tz = await getUserTimezone()
+  const whenTs = args.when ? parseInUserTz(args.when, tz) : new Date()
+  const completedAtIso = whenTs.toISOString()
+  const completedOn = args.when && /^\d{4}-\d{2}-\d{2}$/.test(args.when) ? args.when : completedAtIso.slice(0, 10)
+  const cutoffMs = whenTs.getTime() + 24 * 60 * 60 * 1000
+  const normOf = (v: unknown) => String(v ?? '').trim().toLowerCase()
+  return await withUserContext(userId, async (c) => {
+    // Tier 1 — existing open todo (confident single match only).
+    const { rows: todos } = await c.query(
+      `SELECT id, title, start_date FROM plannen.events
+       WHERE created_by = $1 AND event_kind = 'todo' AND completed_at IS NULL`,
+      [userId],
+    )
+    const exact = todos.filter((r) => normOf((r as { title: unknown }).title) === norm)
+    let todoMatch: { id: string; title: string } | null = null
+    if (exact.length === 1) todoMatch = exact[0] as { id: string; title: string }
+    else if (exact.length === 0) {
+      const contains = todos.filter((r) => {
+        const row = r as { title: unknown; start_date: string | null }
+        const notFarFuture = row.start_date == null || new Date(row.start_date).getTime() <= cutoffMs
+        return notFarFuture && normOf(row.title).includes(norm)
+      })
+      if (contains.length === 1) todoMatch = contains[0] as { id: string; title: string }
+    }
+    if (todoMatch) {
+      const { rows } = await c.query(
+        `UPDATE plannen.events SET completed_at = $1, updated_at = now()
+         WHERE id = $2 AND created_by = $3 AND event_kind = 'todo'
+         RETURNING id, title`,
+        [completedAtIso, todoMatch.id, userId],
+      )
+      return { action: 'completed_todo', id: rows[0].id, title: rows[0].title }
+    }
+
+    // Tier 2 — active practice (confident single match only).
+    const practiceParams: unknown[] = [userId]
+    let practiceWhere = 'user_id = $1 AND active = true'
+    if (args.family_member_id !== undefined && args.family_member_id !== null) {
+      practiceParams.push(args.family_member_id)
+      practiceWhere += ` AND family_member_id = $${practiceParams.length}`
+    }
+    const { rows: practices } = await c.query(
+      `SELECT id, name, family_member_id FROM plannen.practices WHERE ${practiceWhere}`,
+      practiceParams,
+    )
+    type PracticeMatch = { id: string; name: string; family_member_id: string | null }
+    const pExact = practices.filter((r) => normOf((r as { name: unknown }).name) === norm)
+    let pMatch: PracticeMatch | null = null
+    if (pExact.length === 1) pMatch = pExact[0] as PracticeMatch
+    else if (pExact.length === 0) {
+      const pContains = practices.filter((r) => normOf((r as { name: unknown }).name).includes(norm))
+      if (pContains.length === 1) pMatch = pContains[0] as PracticeMatch
+    }
+    if (pMatch) {
+      await c.query(
+        `INSERT INTO plannen.practice_completions (practice_id, user_id, family_member_id, completed_on)
+         VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+        [pMatch.id, userId, pMatch.family_member_id ?? null, completedOn],
+      )
+      return { action: 'marked_practice', practice_id: pMatch.id, name: pMatch.name, completed_on: completedOn }
+    }
+
+    // Tier 3 — log a fresh completed todo.
+    const { rows } = await c.query(
+      `INSERT INTO plannen.events
+         (title, start_date, event_kind, event_type, event_status, created_by,
+          assigned_to, shared_with_friends, completed_at)
+       VALUES ($1, $2, 'todo', 'personal', 'past', $3, $3, 'none', $4)
+       RETURNING id, title`,
+      [title, completedAtIso, userId, completedAtIso],
+    )
+    return { action: 'logged_todo', id: rows[0].id, title: rows[0].title }
+  })
+}
+
 async function rsvpEvent(args: { event_id: string; status: string }) {
   const id = await uid()
   return await withUserContext(id, async (c) => {
@@ -2430,6 +2514,29 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: 'log_completion',
+    description:
+      'Log that something was just finished/done — the journal "I did X" path. Resolves in order: (1) if an open todo matches the title, mark THAT todo done (no duplicate); (2) else if an active practice/routine matches the name, log a completion for that date; (3) else create a new todo and immediately complete it. Use for past-tense reports ("just finished gym", "cleaned the parking", "took my vitamins"). Do NOT use for a FUTURE task with a time (use create_event event_kind=todo), for a durable fact about a person/place (use upsert_profile_fact), or for questions / intentions / hypotheticals (do nothing at all). Matching is conservative: only a confident single match completes an existing item, otherwise it logs a fresh completed todo. Returns {action} = completed_todo | marked_practice | logged_todo so you can render the right one-line receipt.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'The activity or task finished, e.g. "gym" or "clean the parking". Keep it short and matchable.',
+        },
+        when: {
+          type: 'string',
+          description: 'ISO date or datetime it was done (naive = profile timezone). Defaults to now.',
+        },
+        family_member_id: {
+          type: ['string', 'null'],
+          description: 'Set when logging a completion for a circle member (practice case).',
+        },
+      },
+      required: ['title'],
+    },
+  },
+  {
     name: 'rsvp_event',
     description: 'Set your RSVP for an event',
     inputSchema: {
@@ -3247,9 +3354,26 @@ const TOOLS: Tool[] = [
 
 // ── Server ────────────────────────────────────────────────────────────────────
 
+// Journal/capture behaviour, delivered to every MCP client (including the
+// claude.ai mobile app, which loads no plugin skills). Kept in sync with
+// supabase/functions/mcp/server.ts (PLANNEN_INSTRUCTIONS).
+const PLANNEN_INSTRUCTIONS = `Plannen — local-first family planner. Capture / journal behaviour:
+
+When the user reports finishing something ("just finished gym", "cleaned the parking", "took my vitamins") or opens with a logging lead-in ("log…", "note that…", "jot…", "record…"), CAPTURE it immediately, then reply with a one-line receipt ending in "undo?". Do NOT ask "want me to save this?" — logging bypasses the usual ask-first gate.
+
+Routing:
+- Finished / done something → call log_completion({ title }). It resolves to: complete an existing open todo, else mark a matching routine done, else log a new completed todo, and returns {action}. Receipt: "✓ <what> · undo?".
+- A FUTURE task with a time/date ("call dentist at 1pm") → create_event({ event_kind: "todo", start_date }). Receipt: "✓ Todo … HH:MM · undo?".
+- A durable fact about a person / place / preference ("met our neighbour, lives on our street") → upsert_profile_fact. Receipt: "✓ Noted: … · undo?".
+- An activity with a duration but no calendar slot ("slept 8h", "ran 40 min") → not supported yet; reply "⏳ Sleep/duration logging isn't wired up yet — coming soon." and write nothing.
+
+Guard rails — do NOTHING (reply normally) for questions ("did you…?"), intentions / hypotheticals ("I should…", "maybe I'll…", "thinking about…"), or items inside an active planning / brainstorm thread. Only act on completed, concrete, first-person / household actions stated as fact.
+
+Undo: reverse the last action with uncomplete_todo / unmark_practice_done / correct_profile_fact.`
+
 const server = new Server(
   { name: 'plannen', version: '1.0.0' },
-  { capabilities: { tools: {} } }
+  { capabilities: { tools: {} }, instructions: PLANNEN_INSTRUCTIONS }
 )
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
@@ -3265,6 +3389,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case 'update_event':       result = await updateEvent(args as Parameters<typeof updateEvent>[0]); break
       case 'complete_todo':      result = await completeTodo(args as Parameters<typeof completeTodo>[0]); break
       case 'uncomplete_todo':    result = await uncompleteTodo(args as Parameters<typeof uncompleteTodo>[0]); break
+      case 'log_completion':     result = await logCompletion(args as Parameters<typeof logCompletion>[0]); break
       case 'rsvp_event':              result = await rsvpEvent(args as Parameters<typeof rsvpEvent>[0]); break
       case 'add_event_memory':        result = await addEventMemory(args as Parameters<typeof addEventMemory>[0]); break
       case 'list_event_memories':     result = await listEventMemories(args as Parameters<typeof listEventMemories>[0]); break

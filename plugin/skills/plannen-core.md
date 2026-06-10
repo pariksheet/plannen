@@ -49,6 +49,14 @@ Before calling `create_event`, check whether the user has actually committed.
 
 **When unsure**, end the reply with: *"Want me to save this as a planned event, or are you still working it out?"* — then wait. Do not pre-emptively create and apologise after.
 
+### Logging (the `/log` journal override)
+
+The intent gate above is for *planning ahead*. **Capture is different.** When the user is recording something — they ran `/log` / `/plannen-log`, opened with a logging lead-in ("log…", "note that…", "jot…", "record…"), or made a **clear past-tense report of something done** ("finished the parking", "kids are in bed", "just met our new neighbour", "took my vitamins") — switch to the `plannen-log` skill and **act immediately, then print a one-line receipt ending in `undo?`**. Do **not** ask "want me to save this?" — this is the one sanctioned exception to the gate.
+
+Act ONLY on completed, concrete, first-person / household actions stated as fact. Do **not** fire on questions ("did you finish…?"), intentions / hypotheticals ("I should…", "maybe I'll…", "thinking about…"), or anything inside an active brainstorm thread — those keep normal gated behavior.
+
+This does not replace passive profile extraction below — it complements it. When a logged item is a durable fact about a person/place ("met person A, lives on my street"), `plannen-log` records it via `upsert_profile_fact` **and shows a receipt** (whereas passive extraction stays silent). Don't double-write the same fact: if `plannen-log` handled it, the passive pass has nothing left to do.
+
 ## Attendances, blackouts & derived obligations
 
 These primitives model a family member's *recurring enrolment* (school, creche, camp) and the drop-off / pick-up tasks that hang off it. They sit alongside events and practices.

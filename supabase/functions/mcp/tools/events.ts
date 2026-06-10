@@ -146,6 +146,29 @@ const definitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'log_completion',
+    description:
+      'Log that something was just finished/done — the journal "I did X" path. Resolves in order: (1) if an open todo matches the title, mark THAT todo done (no duplicate); (2) else if an active practice/routine matches the name, log a completion for that date; (3) else create a new todo and immediately complete it. Use for past-tense reports ("just finished gym", "cleaned the parking", "took my vitamins"). Do NOT use for a FUTURE task with a time (use create_event event_kind=todo), for a durable fact about a person/place (use upsert_profile_fact), or for questions / intentions / hypotheticals (do nothing at all). Matching is conservative: only a confident single match completes an existing item, otherwise it logs a fresh completed todo. Returns {action} = completed_todo | marked_practice | logged_todo so you can render the right one-line receipt.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'The activity or task finished, e.g. "gym" or "clean the parking". Keep it short and matchable.',
+        },
+        when: {
+          type: 'string',
+          description: 'ISO date or datetime it was done (naive = profile timezone). Defaults to now.',
+        },
+        family_member_id: {
+          type: ['string', 'null'],
+          description: 'Set when logging a completion for a circle member (practice case).',
+        },
+      },
+      required: ['title'],
+    },
+  },
+  {
     name: 'rsvp_event',
     description: 'Set your RSVP for an event',
     inputSchema: {
@@ -403,6 +426,89 @@ const rsvpEvent: ToolHandler = async (args, ctx) => {
   return { success: true, event_id: a.event_id, status: a.status }
 }
 
+// Journal "I did X" resolver. Conservative single-match: complete an existing
+// open todo, else mark a matching active practice done, else log a fresh
+// completed todo. Server-side so EVERY surface (mobile included) dedupes
+// identically without the client hand-rolling list→filter→complete.
+const logCompletion: ToolHandler = async (args, ctx) => {
+  const a = args as { title?: string; when?: string; family_member_id?: string | null }
+  if (!a.title || !a.title.trim()) throw new Error('title is required')
+  const title = a.title.trim()
+  const norm = title.toLowerCase()
+  const tz = await getUserTimezone(ctx.client, ctx.userId)
+  const whenTs = a.when ? parseInUserTz(a.when, tz) : new Date()
+  const completedAtIso = whenTs.toISOString()
+  const completedOn = a.when && /^\d{4}-\d{2}-\d{2}$/.test(a.when) ? a.when : completedAtIso.slice(0, 10)
+  const cutoffMs = whenTs.getTime() + 24 * 60 * 60 * 1000
+  const normOf = (v: unknown) => String(v ?? '').trim().toLowerCase()
+
+  // Tier 1 — existing open todo (confident single match only).
+  const { rows: todos } = await ctx.client.query(
+    `SELECT id, title, start_date FROM plannen.events
+     WHERE created_by = $1 AND event_kind = 'todo' AND completed_at IS NULL`,
+    [ctx.userId],
+  )
+  const exact = todos.filter((r) => normOf((r as { title: unknown }).title) === norm)
+  let todoMatch: { id: string; title: string } | null = null
+  if (exact.length === 1) todoMatch = exact[0] as { id: string; title: string }
+  else if (exact.length === 0) {
+    const contains = todos.filter((r) => {
+      const row = r as { title: unknown; start_date: string | null }
+      const notFarFuture = row.start_date == null || new Date(row.start_date).getTime() <= cutoffMs
+      return notFarFuture && normOf(row.title).includes(norm)
+    })
+    if (contains.length === 1) todoMatch = contains[0] as { id: string; title: string }
+  }
+  if (todoMatch) {
+    const { rows } = await ctx.client.query(
+      `UPDATE plannen.events SET completed_at = $1, updated_at = now()
+       WHERE id = $2 AND created_by = $3 AND event_kind = 'todo'
+       RETURNING id, title`,
+      [completedAtIso, todoMatch.id, ctx.userId],
+    )
+    return { action: 'completed_todo', id: rows[0].id, title: rows[0].title }
+  }
+
+  // Tier 2 — active practice (confident single match only).
+  const practiceParams: unknown[] = [ctx.userId]
+  let practiceWhere = 'user_id = $1 AND active = true'
+  if (a.family_member_id !== undefined && a.family_member_id !== null) {
+    practiceParams.push(a.family_member_id)
+    practiceWhere += ` AND family_member_id = $${practiceParams.length}`
+  }
+  const { rows: practices } = await ctx.client.query(
+    `SELECT id, name, family_member_id FROM plannen.practices WHERE ${practiceWhere}`,
+    practiceParams,
+  )
+  type PracticeMatch = { id: string; name: string; family_member_id: string | null }
+  const pExact = practices.filter((r) => normOf((r as { name: unknown }).name) === norm)
+  let pMatch: PracticeMatch | null = null
+  if (pExact.length === 1) pMatch = pExact[0] as PracticeMatch
+  else if (pExact.length === 0) {
+    const pContains = practices.filter((r) => normOf((r as { name: unknown }).name).includes(norm))
+    if (pContains.length === 1) pMatch = pContains[0] as PracticeMatch
+  }
+  if (pMatch) {
+    await ctx.client.query(
+      `INSERT INTO plannen.practice_completions (practice_id, user_id, family_member_id, completed_on)
+       VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+      [pMatch.id, ctx.userId, pMatch.family_member_id ?? null, completedOn],
+    )
+    return { action: 'marked_practice', practice_id: pMatch.id, name: pMatch.name, completed_on: completedOn }
+  }
+
+  // Tier 3 — log a fresh completed todo.
+  const { rows } = await ctx.client.query(
+    `INSERT INTO plannen.events
+       (title, start_date, event_kind, event_type, event_status, created_by,
+        assigned_to, shared_with_friends, completed_at)
+     VALUES ($1, $2, 'todo', 'personal', 'past', $3, $3, 'none', $4)
+     RETURNING id, title`,
+    [title, completedAtIso, ctx.userId, completedAtIso],
+  )
+  return { action: 'logged_todo', id: rows[0].id, title: rows[0].title }
+}
+
 // ── Module export ─────────────────────────────────────────────────────────────
 
 export const eventsModule: ToolModule = {
@@ -414,6 +520,7 @@ export const eventsModule: ToolModule = {
     update_event: updateEvent,
     complete_todo: completeTodo,
     uncomplete_todo: uncompleteTodo,
+    log_completion: logCompletion,
     rsvp_event: rsvpEvent,
   },
 }
