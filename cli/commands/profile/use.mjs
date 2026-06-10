@@ -21,8 +21,11 @@ export async function invokeProfileUse(rawArgs, ctx = {}) {
   // 54322 (Colima SSH multiplex, an unrelated Postgres, etc.) and falsely
   // refuse a valid profile switch. Probe with the PREVIOUS profile's composed
   // env so its per-profile pid paths are honoured (#7).
+  // _pidCommand is injectable for tests so identity-checked liveness can be
+  // exercised without a real Plannen process running.
+  const _pidCommand = ctx._pidCommand;
   const isUp = ctx.isProfileRunning
-    ?? ((e) => isPgRunning(e) || isBackendRunning(e));
+    ?? ((e) => isPgRunning(e, _pidCommand) || isBackendRunning(e, _pidCommand));
   const swap = ctx.swap ?? swapEnvSymlink;
 
   const name = rawArgs.name;

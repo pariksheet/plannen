@@ -96,7 +96,7 @@ export function extractDomain(url: string): string | null {
 // updated_at, gcal_event_id, event_type, shared_with_*, enrollment_start_date,
 // which are rarely needed by callers and balloon token usage.
 export const SLIM_EVENT_COLUMNS =
-  'id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, recurrence_rule, parent_event_id'
+  'id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, recurrence_rule, parent_event_id, completed_at, assigned_to'
 
 export function slimEvent<T extends Record<string, unknown>>(e: T) {
   return {
@@ -111,6 +111,8 @@ export function slimEvent<T extends Record<string, unknown>>(e: T) {
     hashtags: e.hashtags,
     enrollment_url: e.enrollment_url,
     enrollment_deadline: e.enrollment_deadline,
+    completed_at: e.completed_at ?? null,
+    assigned_to: e.assigned_to ?? null,
   }
 }
 

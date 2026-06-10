@@ -67,3 +67,45 @@ describe('events routes', () => {
     expect(del.status).toBe(200)
   })
 })
+
+describe('todo columns', () => {
+  it('POST persists event_kind=todo with assigned_to and completed_at null', async () => {
+    const res = await app.request('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Renew passport',
+        start_date: '2026-06-20T09:00:00.000Z',
+        event_kind: 'todo',
+        assigned_to: testUserId,
+      }),
+    })
+    expect(res.status).toBe(201)
+    const body = await res.json()
+    expect(body.data.event_kind).toBe('todo')
+    expect(body.data.assigned_to).toBe(testUserId)
+    expect(body.data.completed_at).toBeNull()
+  })
+
+  it('PATCH sets completed_at', async () => {
+    const created = await (await app.request('/api/events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Book dentist appointment',
+        start_date: '2026-06-20T10:00:00.000Z',
+        event_kind: 'todo',
+      }),
+    })).json()
+    const id = created.data.id
+
+    const patch = await app.request(`/api/events/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ completed_at: '2026-06-09T12:00:00.000Z' }),
+    })
+    expect(patch.status).toBe(200)
+    const patchBody = await patch.json()
+    expect(patchBody.data.completed_at).toBe('2026-06-09T12:00:00.000Z')
+  })
+})

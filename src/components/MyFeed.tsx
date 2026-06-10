@@ -12,7 +12,7 @@ import { ScheduleOverview } from './ScheduleOverview'
 import { ConfirmModal, PromptModal } from './Modal'
 import { Plus, ChevronUp, Calendar, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
-import { deleteEvent } from '../services/eventService'
+import { deleteEvent, completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
 import { supabase } from '../lib/supabase'
 
 // Identifies events auto-created by the mailbox-sync routine.
@@ -33,9 +33,10 @@ function extractSenderHint(description: string | null): string {
 }
 
 // 'session' excluded — sessions are child records of recurring events, not standalone filterable items
-const KIND_FILTER_PILLS: { kind: 'event' | 'reminder'; label: string; className: string; activeClassName: string }[] = [
+const KIND_FILTER_PILLS: { kind: 'event' | 'reminder' | 'todo'; label: string; className: string; activeClassName: string }[] = [
   { kind: 'event',    label: 'Events',    className: 'bg-white text-indigo-700 border-indigo-300', activeClassName: 'bg-indigo-600 text-white border-indigo-600' },
   { kind: 'reminder', label: 'Reminders', className: 'bg-white text-purple-700 border-purple-300', activeClassName: 'bg-purple-600 text-white border-purple-600' },
+  { kind: 'todo',     label: 'To-dos',    className: 'bg-white text-amber-700 border-amber-300',   activeClassName: 'bg-amber-600 text-white border-amber-600' },
 ]
 
 const ymd = (d: Date): string =>
@@ -62,9 +63,9 @@ export function MyFeed() {
   const [pastVisibleCount, setPastVisibleCount] = useState(5)
   const [showPast, setShowPast] = useState(false)
   const [activeHashtag, setActiveHashtag] = useState<string | null>(null)
-  // Both kinds selected by default — show all. Toggling a pill hides that kind.
-  const [activeKindFilter, setActiveKindFilter] = useState<Set<'event' | 'reminder'>>(
-    () => new Set(['event', 'reminder']),
+  // All kinds selected by default — show all. Toggling a pill hides that kind.
+  const [activeKindFilter, setActiveKindFilter] = useState<Set<'event' | 'reminder' | 'todo'>>(
+    () => new Set(['event', 'reminder', 'todo']),
   )
   const [selectedDate, setSelectedDate] = useState<string>('')
   const dateInputRef = useRef<HTMLInputElement>(null)
@@ -258,22 +259,33 @@ export function MyFeed() {
   // behavior cascades: reveal local past → page → extend the fetch window.
   const showEarlierButton = !filterShowsAllPast
   const kindFilterModified =
-    !activeKindFilter.has('event') || !activeKindFilter.has('reminder')
+    !activeKindFilter.has('event') || !activeKindFilter.has('reminder') || !activeKindFilter.has('todo')
   const filtersActive = kindFilterModified || !!activeHashtag || !!selectedDate
   const clearFilters = () => {
     setActiveHashtag(null)
-    setActiveKindFilter(new Set(['event', 'reminder']))
+    setActiveKindFilter(new Set(['event', 'reminder', 'todo']))
     setSelectedDate('')
   }
   const timelineEmptyMessage = filtersActive ? 'No upcoming events match your filters.' : 'No upcoming events. Create one or watch for a past event’s next occurrence.'
 
-  const handleKindChange = (kind: 'event' | 'reminder') => {
+  const handleKindChange = (kind: 'event' | 'reminder' | 'todo') => {
     setActiveKindFilter(prev => {
       const next = new Set(prev)
       next.has(kind) ? next.delete(kind) : next.add(kind)
       return next
     })
   }
+
+  const handleToggleTodo = useCallback(async (event: Event) => {
+    if (event.completed_at) await uncompleteTodo(event.id)
+    else await completeTodo(event.id)
+    loadEvents()
+  }, [loadEvents])
+
+  const handleConvertKind = useCallback(async (event: Event, kind: 'reminder' | 'todo') => {
+    await convertEventKind(event.id, kind)
+    loadEvents()
+  }, [loadEvents])
 
   const openDatePicker = () => {
     const input = dateInputRef.current
@@ -504,6 +516,8 @@ export function MyFeed() {
                     setActiveHashtag(tag)
                     setShowPast(true)
                   }}
+                  onToggleTodo={handleToggleTodo}
+                  onConvertKind={handleConvertKind}
                   showActions
                   showRSVP
                   showMemories

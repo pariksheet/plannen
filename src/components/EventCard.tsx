@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Event, EventViewMode } from '../types/event'
+import { Event, EventViewMode, isTodoOverdue } from '../types/event'
 import { format } from 'date-fns'
 import { Calendar, Pencil, Trash2, CalendarDays, Bell, CheckCircle, Eye, Share2, UserPlus, MapPin, Handshake, Lock, Copy, CalendarPlus, Download, MessageCircle, Layers, MoreVertical, Mail } from 'lucide-react'
 import { getMyRsvp, getRsvpList, type RsvpStatus } from '../services/rsvpService'
@@ -103,6 +103,10 @@ interface EventCardProps {
   onDelete?: (eventId: string) => void
   onShareSuccess?: () => void
   onHashtagClick?: (tag: string) => void
+  /** Called when the todo checkbox is toggled. */
+  onToggleTodo?: (event: Event) => void
+  /** Called to convert a reminder↔todo. */
+  onConvertKind?: (event: Event, kind: 'reminder' | 'todo') => void
   showActions?: boolean
   showRSVP?: boolean
   showMemories?: boolean
@@ -123,6 +127,8 @@ export function EventCard({
   onDelete,
   onShareSuccess,
   onHashtagClick,
+  onToggleTodo,
+  onConvertKind,
   showActions = false,
   showRSVP = true,
   showMemories = false,
@@ -137,6 +143,10 @@ export function EventCard({
   const isWishlist = event.event_status === 'watching'
   const isWatching = isMissed || isWishlist
   const isReminder = event.event_kind === 'reminder'
+  const isTodo = event.event_kind === 'todo'
+  const isLean = isReminder || isTodo               // no RSVP / enrollment / memories
+  const isDone = isTodo && !!event.completed_at
+  const isOverdueTodo = isTodoOverdue(event)
   const isOrganizer = user?.id === event.created_by
   const [myRsvpStatus, setMyRsvpStatus] = useState<RsvpStatus | null>(event.my_rsvp_status ?? null)
   const isOwnNotGoing = isOrganizer && myRsvpStatus === 'not_going'
@@ -205,14 +215,14 @@ export function EventCard({
     const { data } = await getEvent(event.parent_event_id)
     if (data) setParentEvent(data)
   }
-  const canSwipeRsvp = showRSVP && !isWatching && !isReminder
+  const canSwipeRsvp = showRSVP && !isWatching && !isLean
 
   useEffect(() => {
-    if (!showRSVP || isWatching || isReminder) return
+    if (!showRSVP || isWatching || isLean) return
     getMyRsvp(event.id).then(({ data }) => {
       setMyRsvpStatus(data?.status ?? null)
     })
-  }, [event.id, showRSVP, isWatching, isReminder, rsvpVersion])
+  }, [event.id, showRSVP, isWatching, isLean, rsvpVersion])
 
   useLayoutEffect(() => {
     if (showKebabMenu && kebabTriggerRef.current) {
@@ -283,12 +293,13 @@ export function EventCard({
   // anything to do. (Desktop hides the kebab if it would only duplicate the
   // inline actions.)
   const kebabHasItems =
-    (!isReminder) ||
+    (!isLean) ||
     (!!onClone) ||
     (!!onDelete && isOrganizer) ||
     (showActions && isOrganizer) ||
     (showActions && !isOrganizer) ||
-    (!!onEdit && isOrganizer)
+    (!!onEdit && isOrganizer) ||
+    (!!onConvertKind)
   const compactAccentClass: Record<string, string> = {
     personal: 'border-l-violet-500',
     friends: 'border-l-amber-500',
@@ -337,7 +348,7 @@ export function EventCard({
   if (viewMode === 'compact') {
     return (
       <>
-        <div className={`relative overflow-hidden rounded-lg${dimmed ? ' opacity-70' : ''}`}>
+        <div className={`relative overflow-hidden rounded-lg${dimmed ? ' opacity-70' : ''}${isDone ? ' opacity-60' : ''}`}>
           {canSwipeRsvp && (
             <div
               className={`sm:hidden absolute inset-y-0 right-0 w-[20%] bg-indigo-50 border border-indigo-200 border-l-0 rounded-r-lg p-1.5 transition-opacity ${
@@ -383,8 +394,8 @@ export function EventCard({
                         <Bell className="h-3 w-3" /> Reminder
                       </span>
                     )}
-                    {!isReminder && <StatusBadge status={event.event_status} size="xs" />}
-                    {!isReminder && showRSVP && !isWatching && (
+                    {!isLean && <StatusBadge status={event.event_status} size="xs" />}
+                    {!isLean && showRSVP && !isWatching && (
                       <MyRsvpBadge eventId={event.id} showRSVP={showRSVP} refreshTrigger={rsvpVersion} />
                     )}
                     {event.parent_event_id && resolvedParentTitle && (
@@ -397,18 +408,31 @@ export function EventCard({
                         <span className="truncate">{resolvedParentTitle}</span>
                       </button>
                     )}
-                    {event.enrollment_url && !isReminder ? (
+                    {isTodo && (
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 shrink-0 accent-amber-600"
+                        checked={isDone}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => onToggleTodo?.(event)}
+                        aria-label={isDone ? 'Mark not done' : 'Mark done'}
+                      />
+                    )}
+                    {isTodo && isOverdueTodo && (
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">overdue</span>
+                    )}
+                    {event.enrollment_url && !isLean ? (
                       <a
                         href={event.enrollment_url}
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
-                        className="text-sm font-semibold text-indigo-800 hover:text-indigo-900 hover:underline break-words"
+                        className={`text-sm font-semibold text-indigo-800 hover:text-indigo-900 hover:underline break-words${isDone ? ' line-through text-gray-400' : ''}`}
                       >
                         {event.title}
                       </a>
                     ) : (
-                      <h3 className="text-sm font-semibold text-slate-900 break-words">{event.title}</h3>
+                      <h3 className={`text-sm font-semibold text-slate-900 break-words${isDone ? ' line-through text-gray-400' : ''}`}>{event.title}</h3>
                     )}
                     {updateBadge}
                   </div>
@@ -439,7 +463,7 @@ export function EventCard({
                     </div>
                   )}
                   <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                    {!isReminder && showRSVP && !isWatching && (
+                    {!isLean && showRSVP && !isWatching && (
                       <CompactRsvpInitials
                         eventId={event.id}
                         showRSVP={showRSVP}
@@ -618,7 +642,7 @@ export function EventCard({
               {(showActions || (onEdit && isOrganizer)) && (
                 <div className="my-1 border-t border-gray-100 sm:hidden" />
               )}
-              {!isReminder && (
+              {!isLean && (
                 <>
                   <button
                     type="button"
@@ -653,7 +677,7 @@ export function EventCard({
                   </a>
                 </>
               )}
-              {!isReminder && (onClone || (onDelete && isOrganizer)) && (
+              {!isLean && (onClone || (onDelete && isOrganizer)) && (
                 <div className="my-1 border-t border-gray-100" />
               )}
               {onClone && (
@@ -674,6 +698,15 @@ export function EventCard({
                 >
                   <Trash2 className="h-4 w-4" />
                   Delete
+                </button>
+              )}
+              {(isReminder || isTodo) && onConvertKind && (
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                  onClick={() => { onConvertKind(event, isTodo ? 'reminder' : 'todo'); setShowKebabMenu(false) }}
+                >
+                  {isTodo ? 'Convert to reminder' : 'Convert to to-do'}
                 </button>
               )}
             </div>,
@@ -722,11 +755,24 @@ export function EventCard({
                   <Bell className="h-3 w-3" /> Reminder
                 </span>
               )}
-              {!isReminder && <StatusBadge status={event.event_status} size="sm" />}
-              {!isReminder && showRSVP && !isWatching && (
+              {!isLean && <StatusBadge status={event.event_status} size="sm" />}
+              {!isLean && showRSVP && !isWatching && (
                 <MyRsvpBadge eventId={event.id} showRSVP={showRSVP} refreshTrigger={rsvpVersion} />
               )}
-              <h3 className="text-base sm:text-lg font-semibold text-gray-900 break-words">{event.title}</h3>
+              {isTodo && (
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 shrink-0 accent-amber-600"
+                  checked={isDone}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={() => onToggleTodo?.(event)}
+                  aria-label={isDone ? 'Mark not done' : 'Mark done'}
+                />
+              )}
+              {isTodo && isOverdueTodo && (
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">overdue</span>
+              )}
+              <h3 className={`text-base sm:text-lg font-semibold text-gray-900 break-words${isDone ? ' line-through text-gray-400' : ''}`}>{event.title}</h3>
               {updateBadge}
               {event.parent_title && (
                 <button
@@ -753,7 +799,7 @@ export function EventCard({
               <p className="text-gray-600 text-xs sm:text-sm mb-2 line-clamp-1">{event.description}</p>
             )}
           </div>
-          {(showActions || onClone || !isReminder) && (
+          {(showActions || onClone || !isLean || kebabHasItems) && (
             <div className="flex gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
               {showActions && (
                 <>
@@ -831,7 +877,7 @@ export function EventCard({
                   <Trash2 className="h-4 w-4" />
                 </button>
               )}
-              {!isReminder && (
+              {kebabHasItems && (
                 <div className="relative" ref={kebabMenuRef}>
                   <button
                     ref={kebabTriggerRef}
@@ -899,7 +945,7 @@ export function EventCard({
               </a>
             </div>
           )}
-          {!isReminder && (showRSVP && !isWatching && event.end_date && new Date(event.start_date).getTime() < new Date(event.end_date).getTime() || event.enrollment_deadline || event.enrollment_start_date || event.enrollment_url) && (
+          {!isLean && (showRSVP && !isWatching && event.end_date && new Date(event.start_date).getTime() < new Date(event.end_date).getTime() || event.enrollment_deadline || event.enrollment_start_date || event.enrollment_url) && (
             <div className="flex flex-wrap items-center gap-x-1.5 text-xs min-w-0">
               {showRSVP && !isWatching && event.end_date && new Date(event.start_date).getTime() < new Date(event.end_date).getTime() && (
                 <PreferredVisitDate eventId={event.id} startDate={event.start_date} endDate={event.end_date} createdBy={event.created_by} showPicker={false} inline />
@@ -948,12 +994,12 @@ export function EventCard({
               </span>
             )}
           </div>
-          {!isReminder && showWatchButton && event.enrollment_url && (event.event_status === 'going') && (
+          {!isLean && showWatchButton && event.enrollment_url && (event.event_status === 'going') && (
             <div className="mt-2 pt-2 border-t border-gray-100" onClick={(e) => e.stopPropagation()}>
               <WatchForNextYearButton event={event} />
             </div>
           )}
-          {!isReminder && showRSVP && !isWatching && (
+          {!isLean && showRSVP && !isWatching && (
             <div className="mt-2 pt-2 border-t border-gray-100" onClick={(e) => e.stopPropagation()}>
               <RSVPButton
                 eventId={event.id}
@@ -965,7 +1011,7 @@ export function EventCard({
               </div>
             </div>
           )}
-          {showMemories && !isReminder && (
+          {showMemories && !isLean && (
             <div className="mt-2 pt-2 border-t border-gray-100" onClick={(e) => e.stopPropagation()}>
               <EventMemoryComponent eventId={event.id} />
             </div>
@@ -983,37 +1029,50 @@ export function EventCard({
           style={{ top: kebabMenuPosition.top, left: kebabMenuPosition.left }}
           onClick={(e) => e.stopPropagation()}
         >
-          <button
-            type="button"
-            onClick={() => {
-              downloadIcs(event, kebabVisitDate ? { visitDate: kebabVisitDate } : undefined)
-              setShowKebabMenu(false)
-            }}
-            className="w-full flex items-center gap-2 px-3 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50"
-          >
-            <Download className="h-4 w-4 text-gray-500" />
-            Download .ics
-          </button>
-          <a
-            href={getGoogleCalendarAddUrl(event, kebabVisitDate ? { visitDate: kebabVisitDate } : undefined)}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => setShowKebabMenu(false)}
-            className="w-full flex items-center gap-2 px-3 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50"
-          >
-            <CalendarPlus className="h-4 w-4 text-gray-500" />
-            Google Calendar
-          </a>
-          <a
-            href={getOutlookCalendarAddUrl(event, kebabVisitDate ? { visitDate: kebabVisitDate } : undefined)}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => setShowKebabMenu(false)}
-            className="w-full flex items-center gap-2 px-3 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50"
-          >
-            <CalendarPlus className="h-4 w-4 text-gray-500" />
-            Outlook
-          </a>
+          {!isLean && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  downloadIcs(event, kebabVisitDate ? { visitDate: kebabVisitDate } : undefined)
+                  setShowKebabMenu(false)
+                }}
+                className="w-full flex items-center gap-2 px-3 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <Download className="h-4 w-4 text-gray-500" />
+                Download .ics
+              </button>
+              <a
+                href={getGoogleCalendarAddUrl(event, kebabVisitDate ? { visitDate: kebabVisitDate } : undefined)}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setShowKebabMenu(false)}
+                className="w-full flex items-center gap-2 px-3 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <CalendarPlus className="h-4 w-4 text-gray-500" />
+                Google Calendar
+              </a>
+              <a
+                href={getOutlookCalendarAddUrl(event, kebabVisitDate ? { visitDate: kebabVisitDate } : undefined)}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setShowKebabMenu(false)}
+                className="w-full flex items-center gap-2 px-3 py-3 min-h-[44px] text-left text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <CalendarPlus className="h-4 w-4 text-gray-500" />
+                Outlook
+              </a>
+            </>
+          )}
+          {(isReminder || isTodo) && onConvertKind && (
+            <button
+              type="button"
+              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+              onClick={() => { onConvertKind(event, isTodo ? 'reminder' : 'todo'); setShowKebabMenu(false) }}
+            >
+              {isTodo ? 'Convert to reminder' : 'Convert to to-do'}
+            </button>
+          )}
         </div>,
         document.body
       )}
