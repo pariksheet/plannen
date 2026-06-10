@@ -118,6 +118,66 @@ export type PracticeCompletionRow = {
   completed_on: string
 }
 
+// ── attendances + derived obligations (unified scheduling, Phase 2/3) ────────
+// Persisted rows. Mirrors plannen.attendances / plannen.obligations.
+export type AttendanceRow = Record<string, unknown> & {
+  id: string
+  user_id: string
+  family_member_id: string
+  name: string
+  location_id: string | null
+  recurrence_rule: PracticeRecurrenceRule
+  dtstart: string // YYYY-MM-DD
+  recurrence_until: string | null // YYYY-MM-DD; NULL = open-ended
+  time_of_day: string | null
+  start_time: string | null // HH:MM
+  end_time: string | null // HH:MM
+  priority: number
+  active: boolean
+}
+
+export type ObligationRow = Record<string, unknown> & {
+  id: string
+  user_id: string
+  derived_from_attendance_id: string
+  role: 'drop' | 'pick'
+  anchor: 'start' | 'end'
+  offset_minutes: number
+  location_id: string | null
+  active: boolean
+}
+
+// Read-time projections returned by get_briefing_context (attendances_today /
+// obligations_today). These mirror the shapes computed server-side in
+// supabase/functions/_shared/scheduling.ts — keep in sync if those drift.
+//
+// An AttendanceInstance is INDICATIVE context (a member is somewhere on a
+// schedule). It must NOT be fed to the conflict/overlap checker — render muted.
+export type AttendanceInstanceRow = {
+  attendance_id: string
+  family_member_id: string
+  date: string // YYYY-MM-DD
+  name: string
+  location_id: string | null
+  start_time: string | null // HH:MM
+  end_time: string | null // HH:MM
+  priority: number
+  dtstart: string // YYYY-MM-DD
+  recurrence_until: string | null // YYYY-MM-DD
+}
+
+// A ResolvedObligation is an ACTIONABLE timed drop/pick task projected onto its
+// member's winning attendance instance for the day. Render like a timed item.
+export type ResolvedObligationRow = {
+  obligation_id: string
+  role: 'drop' | 'pick'
+  date: string // YYYY-MM-DD
+  time: string // HH:MM after anchor + offset
+  location_id: string | null // own, else inherited from the winning instance
+  source_attendance_id: string
+  source_name: string
+}
+
 export type DailyBriefingRow = {
   id: string
   briefing_date: string

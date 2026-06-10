@@ -299,3 +299,57 @@ describe('ScheduleOverview', () => {
     expect(within(monthList).queryByText('Pick up package')).not.toBeInTheDocument()
   })
 })
+
+describe('ScheduleOverview — today schedule card', () => {
+  function renderWithSchedule(props: {
+    attendancesToday?: Parameters<typeof ScheduleOverview>[0]['attendancesToday']
+    obligationsToday?: Parameters<typeof ScheduleOverview>[0]['obligationsToday']
+  }) {
+    return render(
+      <MemoryRouter>
+        <ScheduleOverview
+          events={[]}
+          onEdit={vi.fn()}
+          onDelete={vi.fn()}
+          onShareSuccess={vi.fn()}
+          onHashtagClick={vi.fn()}
+          preferredVisitDates={{}}
+          attendancesToday={props.attendancesToday}
+          obligationsToday={props.obligationsToday}
+        />
+      </MemoryRouter>
+    )
+  }
+
+  it('is absent when there are no attendances or obligations', () => {
+    renderWithSchedule({})
+    expect(screen.queryByTestId('today-schedule-card')).not.toBeInTheDocument()
+  })
+
+  it('renders indicative attendances muted and obligations as timed rows', () => {
+    renderWithSchedule({
+      attendancesToday: [{
+        attendance_id: 'a1', family_member_id: 'm1', date: todayIso(),
+        name: 'example school', location_id: null,
+        start_time: '08:30', end_time: '15:30', priority: 0,
+        dtstart: '2026-01-01', recurrence_until: null,
+      }],
+      obligationsToday: [{
+        obligation_id: 'o1', role: 'drop', date: todayIso(), time: '08:15',
+        location_id: null, source_attendance_id: 'a1', source_name: 'example school',
+      }],
+    })
+    const card = screen.getByTestId('today-schedule-card')
+    // Attendance is indicative (muted), labelled with its time range.
+    const attendance = within(card).getByTestId('attendance-row')
+    expect(attendance).toHaveTextContent('example school (08:30–15:30)')
+    expect(attendance).toHaveTextContent('indicative')
+    expect(attendance.className).toContain('text-gray-400')
+    // Obligation is actionable, labelled "drop · …" with its anchor time.
+    const obligation = within(card).getByTestId('obligation-row')
+    expect(obligation).toHaveTextContent('drop · example school')
+    expect(obligation).toHaveTextContent('08:15')
+    // No conflict/overlap marker on indicative attendances.
+    expect(within(card).queryByText(/overlaps/i)).not.toBeInTheDocument()
+  })
+})
