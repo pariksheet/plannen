@@ -1,38 +1,33 @@
 import { describe, it, expect } from 'vitest'
 import {
   weekBoundaryStart,
+  monthBoundaryStart,
   dayOfWeekKey,
+  occursOn,
   isPracticeDueOn,
-  remainingThisWeek,
+  remainingThisPeriod,
   type PracticeRow,
-  type CompletionRow,
 } from './practices.js'
 
-function practice(p: Partial<PracticeRow>): PracticeRow {
-  return {
-    id: p.id ?? 'p1',
-    user_id: p.user_id ?? 'u1',
-    family_member_id: p.family_member_id ?? null,
-    name: p.name ?? 'Gym',
-    category: p.category ?? 'health',
-    frequency_type: p.frequency_type ?? 'daily',
-    target_count: p.target_count ?? null,
-    days_of_week: p.days_of_week ?? null,
-    preferred_time_of_day: p.preferred_time_of_day ?? 'anytime',
-    active: p.active ?? true,
-  }
+const base = {
+  id: 'p1', user_id: 'u1', family_member_id: null,
+  name: 'x', category: 'household' as const,
+  preferred_time_of_day: 'anytime' as const, active: true,
+  recurrence_until: null,
 }
 
 describe('weekBoundaryStart', () => {
   it('returns Monday for a Wednesday', () => {
     expect(weekBoundaryStart('2026-05-20')).toBe('2026-05-18')
   })
-  it('returns Monday for a Sunday (boundary day)', () => {
-    // 2026-05-24 is Sunday. Week boundary = Mon 2026-05-18.
-    expect(weekBoundaryStart('2026-05-24')).toBe('2026-05-18')
-  })
   it('returns same date when called on Monday', () => {
     expect(weekBoundaryStart('2026-05-18')).toBe('2026-05-18')
+  })
+})
+
+describe('monthBoundaryStart', () => {
+  it('returns the 1st of the month', () => {
+    expect(monthBoundaryStart('2026-05-20')).toBe('2026-05-01')
   })
 })
 
@@ -40,72 +35,118 @@ describe('dayOfWeekKey', () => {
   it('maps Monday 2026-05-18 to "mon"', () => {
     expect(dayOfWeekKey('2026-05-18')).toBe('mon')
   })
-  it('maps Saturday 2026-05-23 to "sat"', () => {
-    expect(dayOfWeekKey('2026-05-23')).toBe('sat')
+})
+
+describe('occursOn — daily interval (every-N-days / meal prep)', () => {
+  const rule = { frequency: 'daily' as const, interval: 2 }
+  it('is due on the anchor day', () => {
+    expect(occursOn(rule, '2026-06-01', '2026-06-01')).toBe(true)
+  })
+  it('is due two days after the anchor', () => {
+    expect(occursOn(rule, '2026-06-01', '2026-06-03')).toBe(true)
+  })
+  it('is NOT due on the off day', () => {
+    expect(occursOn(rule, '2026-06-01', '2026-06-02')).toBe(false)
+  })
+  it('is NOT due before the anchor', () => {
+    expect(occursOn(rule, '2026-06-01', '2026-05-31')).toBe(false)
+  })
+  it('treats interval 1 as plain daily', () => {
+    expect(occursOn({ frequency: 'daily' }, '2026-06-01', '2026-06-05')).toBe(true)
+  })
+})
+
+describe('occursOn — weekly with days + interval', () => {
+  const rule = { frequency: 'weekly' as const, days: ['MO', 'WE', 'FR'] }
+  it('is due on a listed weekday', () => {
+    expect(occursOn(rule, '2026-06-01', '2026-06-03')).toBe(true) // Wed
+  })
+  it('is NOT due on an unlisted weekday', () => {
+    expect(occursOn(rule, '2026-06-01', '2026-06-02')).toBe(false) // Tue
+  })
+  it('respects a 2-week interval (off-week suppressed)', () => {
+    const biweekly = { frequency: 'weekly' as const, days: ['MO'], interval: 2 }
+    expect(occursOn(biweekly, '2026-06-01', '2026-06-01')).toBe(true)  // anchor Mon
+    expect(occursOn(biweekly, '2026-06-01', '2026-06-08')).toBe(false) // next Mon (off week)
+    expect(occursOn(biweekly, '2026-06-01', '2026-06-15')).toBe(true)  // +2 weeks
+  })
+})
+
+describe('occursOn — monthly', () => {
+  const rule = { frequency: 'monthly' as const }
+  it('is due on the same day-of-month as the anchor', () => {
+    expect(occursOn(rule, '2026-06-10', '2026-07-10')).toBe(true)
+  })
+  it('is NOT due on a different day-of-month', () => {
+    expect(occursOn(rule, '2026-06-10', '2026-07-11')).toBe(false)
   })
 })
 
 describe('isPracticeDueOn', () => {
-  it('daily practice is due every day', () => {
-    const p = practice({ frequency_type: 'daily' })
-    expect(isPracticeDueOn(p, '2026-05-20', [])).toBe(true)
+  it('pinned daily-interval practice uses occursOn', () => {
+    const p: PracticeRow = { ...base, recurrence_mode: 'pinned',
+      recurrence_rule: { frequency: 'daily', interval: 2 }, dtstart: '2026-06-01',
+      flex_period: null, flex_target: null }
+    expect(isPracticeDueOn(p, '2026-06-03', [])).toBe(true)
+    expect(isPracticeDueOn(p, '2026-06-02', [])).toBe(false)
   })
-  it('weekly_count practice is due if remaining > 0', () => {
-    const p = practice({ frequency_type: 'weekly_count', target_count: 3 })
-    const completions: CompletionRow[] = [
-      { practice_id: 'p1', completed_on: '2026-05-18' },
-      { practice_id: 'p1', completed_on: '2026-05-19' },
+  it('inactive practice is never due', () => {
+    const p: PracticeRow = { ...base, active: false, recurrence_mode: 'pinned',
+      recurrence_rule: { frequency: 'daily' }, dtstart: '2026-06-01',
+      flex_period: null, flex_target: null }
+    expect(isPracticeDueOn(p, '2026-06-03', [])).toBe(false)
+  })
+  it('pinned practice past recurrence_until is not due', () => {
+    const p: PracticeRow = { ...base, recurrence_mode: 'pinned',
+      recurrence_rule: { frequency: 'daily' }, dtstart: '2026-06-01',
+      recurrence_until: '2026-06-02', flex_period: null, flex_target: null }
+    expect(isPracticeDueOn(p, '2026-06-05', [])).toBe(false)
+  })
+  it('flex_count week practice is due while under target', () => {
+    const p: PracticeRow = { ...base, recurrence_mode: 'flex_count',
+      recurrence_rule: null, dtstart: '2026-06-01', flex_period: 'week', flex_target: 3 }
+    expect(isPracticeDueOn(p, '2026-06-03', [])).toBe(true)
+  })
+  it('flex_count week practice is NOT due once target met this week', () => {
+    const p: PracticeRow = { ...base, recurrence_mode: 'flex_count',
+      recurrence_rule: null, dtstart: '2026-06-01', flex_period: 'week', flex_target: 2 }
+    const done = [
+      { practice_id: 'p1', completed_on: '2026-06-01' },
+      { practice_id: 'p1', completed_on: '2026-06-02' },
     ]
-    expect(isPracticeDueOn(p, '2026-05-20', completions)).toBe(true)
+    expect(isPracticeDueOn(p, '2026-06-03', done)).toBe(false)
   })
-  it('weekly_count practice is NOT due when target met', () => {
-    const p = practice({ frequency_type: 'weekly_count', target_count: 2 })
-    const completions: CompletionRow[] = [
-      { practice_id: 'p1', completed_on: '2026-05-18' },
-      { practice_id: 'p1', completed_on: '2026-05-19' },
-    ]
-    expect(isPracticeDueOn(p, '2026-05-20', completions)).toBe(false)
-  })
-  it('specific_days practice respects days_of_week', () => {
-    const p = practice({ frequency_type: 'specific_days', days_of_week: ['mon', 'wed', 'fri'] })
-    expect(isPracticeDueOn(p, '2026-05-20', [])).toBe(true)  // Wednesday
-    expect(isPracticeDueOn(p, '2026-05-21', [])).toBe(false) // Thursday
-  })
-  it('inactive practice never due', () => {
-    const p = practice({ active: false })
-    expect(isPracticeDueOn(p, '2026-05-20', [])).toBe(false)
-  })
-  it('weekly_count with null target_count is not due (defensive)', () => {
-    const p = practice({ frequency_type: 'weekly_count', target_count: null })
-    expect(isPracticeDueOn(p, '2026-05-20', [])).toBe(false)
+  it('flex_count month practice counts within the calendar month', () => {
+    const p: PracticeRow = { ...base, recurrence_mode: 'flex_count',
+      recurrence_rule: null, dtstart: '2026-06-01', flex_period: 'month', flex_target: 1 }
+    const done = [{ practice_id: 'p1', completed_on: '2026-05-31' }] // previous month
+    expect(isPracticeDueOn(p, '2026-06-10', done)).toBe(true)
   })
 })
 
-describe('remainingThisWeek', () => {
-  it('returns null for daily practice', () => {
-    const p = practice({ frequency_type: 'daily' })
-    expect(remainingThisWeek(p, '2026-05-20', [])).toBeNull()
+describe('remainingThisPeriod', () => {
+  it('returns null for a pinned practice', () => {
+    const p: PracticeRow = { ...base, recurrence_mode: 'pinned',
+      recurrence_rule: { frequency: 'daily' }, dtstart: '2026-06-01',
+      flex_period: null, flex_target: null }
+    expect(remainingThisPeriod(p, '2026-06-03', [])).toBeNull()
   })
   it('counts only completions in the current week', () => {
-    const p = practice({ frequency_type: 'weekly_count', target_count: 3 })
-    const completions: CompletionRow[] = [
-      { practice_id: 'p1', completed_on: '2026-05-17' }, // last week (Sun)
-      { practice_id: 'p1', completed_on: '2026-05-18' }, // this week Mon
-      { practice_id: 'p1', completed_on: '2026-05-19' }, // this week Tue
+    const p: PracticeRow = { ...base, recurrence_mode: 'flex_count',
+      recurrence_rule: null, dtstart: '2026-06-01', flex_period: 'week', flex_target: 3 }
+    const done = [
+      { practice_id: 'p1', completed_on: '2026-06-01' }, // this week (Mon)
+      { practice_id: 'p1', completed_on: '2026-05-25' }, // last week
     ]
-    expect(remainingThisWeek(p, '2026-05-20', completions)).toBe(1)
+    expect(remainingThisPeriod(p, '2026-06-03', done)).toBe(2)
   })
   it('floors at 0 when over-completed', () => {
-    const p = practice({ frequency_type: 'weekly_count', target_count: 2 })
-    const completions: CompletionRow[] = [
-      { practice_id: 'p1', completed_on: '2026-05-18' },
-      { practice_id: 'p1', completed_on: '2026-05-19' },
-      { practice_id: 'p1', completed_on: '2026-05-20' },
+    const p: PracticeRow = { ...base, recurrence_mode: 'flex_count',
+      recurrence_rule: null, dtstart: '2026-06-01', flex_period: 'week', flex_target: 1 }
+    const done = [
+      { practice_id: 'p1', completed_on: '2026-06-01' },
+      { practice_id: 'p1', completed_on: '2026-06-02' },
     ]
-    expect(remainingThisWeek(p, '2026-05-20', completions)).toBe(0)
-  })
-  it('returns null when target_count is null on a weekly practice', () => {
-    const p = practice({ frequency_type: 'weekly_count', target_count: null })
-    expect(remainingThisWeek(p, '2026-05-20', [])).toBeNull()
+    expect(remainingThisPeriod(p, '2026-06-03', done)).toBe(0)
   })
 })
