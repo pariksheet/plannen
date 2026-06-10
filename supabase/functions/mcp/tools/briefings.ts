@@ -1,6 +1,6 @@
 import type { ToolDefinition, ToolHandler, ToolModule } from '../types.ts'
 import { isPracticeDueOn, remainingThisPeriod, weekBoundaryStart } from '../../_shared/practices.ts'
-import { expandAndSuppress, type AttendanceRow, type BlackoutWindow } from '../../_shared/scheduling.ts'
+import { expandAndSuppress, resolveOverride, projectObligation, type AttendanceRow, type AttendanceInstance, type BlackoutWindow, type ObligationRow } from '../../_shared/scheduling.ts'
 
 // ── Tool definitions (verbatim from mcp/src/index.ts:2422-2455) ───────────────
 
@@ -63,7 +63,7 @@ const getBriefingContext: ToolHandler = async (args, ctx) => {
   const monthStart = `${today.slice(0, 7)}-01`
   const completionsFrom = monthStart < wkStart ? monthStart : wkStart
 
-  const [userRow, circleRow, primaryCircleUsersRow, eventsTodayRow, eventsTomorrowRow, recentPastRow, practicesRow, completionsRow, locationsRow, attendancesRow, blackoutsRow] =
+  const [userRow, circleRow, primaryCircleUsersRow, eventsTodayRow, eventsTomorrowRow, recentPastRow, practicesRow, completionsRow, locationsRow, attendancesRow, blackoutsRow, obligationsRow] =
     await Promise.all([
       ctx.client.query(
         `SELECT u.id, u.full_name, u.preferred_language, up.timezone, up.primary_circle_group_ids
@@ -144,6 +144,14 @@ const getBriefingContext: ToolHandler = async (args, ctx) => {
          WHERE ab.user_id = $1`,
         [id],
       ),
+      ctx.client.query(
+        `SELECT o.id, o.user_id, o.derived_from_attendance_id, o.role, o.anchor,
+                o.offset_minutes, o.location_id, o.active, a.family_member_id AS member_id
+         FROM plannen.obligations o
+         JOIN plannen.attendances a ON a.id = o.derived_from_attendance_id
+         WHERE o.user_id = $1 AND o.active = true AND a.active = true`,
+        [id],
+      ),
     ])
 
   type CRow = { practice_id: string; completed_on: string }
@@ -173,6 +181,33 @@ const getBriefingContext: ToolHandler = async (args, ctx) => {
     expandAndSuppress(att, windowsMap.get(att.id) ?? [], today, today),
   )
 
+  // obligations_today are actionable commitments (treat like timed events for
+  // clash detection); attendances_today remain indicative context (excluded
+  // from conflict checks, like reminders).
+  // "Follow the child": project each obligation onto its MEMBER'S winning
+  // instance for today — not necessarily the attendance it was derived from.
+  // So when a bounded camp beats the open-ended school for that member/day,
+  // the school-derived drop/pick re-project onto the camp instance.
+  const instancesByMember = new Map<string, AttendanceInstance[]>()
+  for (const inst of attendancesToday) {
+    const list = instancesByMember.get(inst.family_member_id) ?? []
+    list.push(inst)
+    instancesByMember.set(inst.family_member_id, list)
+  }
+  const winnerByMember = new Map<string, AttendanceInstance>()
+  for (const [memberId, instances] of instancesByMember) {
+    const winner = resolveOverride(instances)
+    if (winner) winnerByMember.set(memberId, winner)
+  }
+  const obligationsToday = (obligationsRow.rows as (ObligationRow & { member_id: string })[])
+    .flatMap((ob) => {
+      const winner = winnerByMember.get(ob.member_id)
+      if (!winner) return []
+      const resolved = projectObligation(ob as ObligationRow, winner)
+      return resolved ? [resolved] : []
+    })
+    .filter((r) => r.date === today)
+
   return {
     date: today,
     weekday,
@@ -185,6 +220,7 @@ const getBriefingContext: ToolHandler = async (args, ctx) => {
     practices_due_today: practicesDue,
     locations: locationsRow.rows,
     attendances_today: attendancesToday,
+    obligations_today: obligationsToday,
   }
 }
 
