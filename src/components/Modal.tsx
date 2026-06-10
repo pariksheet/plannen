@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
 interface ModalProps {
@@ -83,7 +84,11 @@ export function Modal({ isOpen, onClose, title, children, showCloseButton = true
 
   if (!isOpen) return null
 
-  return (
+  // Render through a portal to document.body so the modal escapes any ancestor
+  // `opacity`/`transform` stacking context. Without this, a dimmed past-event
+  // row (e.g. `opacity-60` in ScheduleOverview) would cascade its opacity onto
+  // the fixed-position modal, washing it out.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-2 sm:p-4"
       onClick={onClose}
@@ -115,7 +120,8 @@ export function Modal({ isOpen, onClose, title, children, showCloseButton = true
         </div>
         <div className="px-4 py-4 sm:p-6">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

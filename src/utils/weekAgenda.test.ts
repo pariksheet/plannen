@@ -88,6 +88,14 @@ describe('overlappingIds', () => {
     ])
     expect(ids.size).toBe(0)
   })
+
+  it('excludes reminders — they never clash, nor make others clash', () => {
+    const ids = overlappingIds([
+      ev({ id: 'rem', event_kind: 'reminder', start_date: '2026-06-10T11:00:00', end_date: '2026-06-10T12:00:00' }),
+      ev({ id: 'evt', start_date: '2026-06-10T11:30:00', end_date: '2026-06-10T12:30:00' }),
+    ])
+    expect(ids.size).toBe(0)
+  })
 })
 
 describe('weekDays', () => {

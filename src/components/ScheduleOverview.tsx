@@ -70,9 +70,21 @@ function eventTimeState(event: Event, now: Date): EventTimeState {
   return 'now'
 }
 
+// An incomplete to-do whose date has already passed (before today). These are
+// pulled out of the week list into their own Overdue section.
+function isOverdueTodo(event: Event, todayKey: string): boolean {
+  if (event.event_kind !== 'todo') return false
+  if (event.completed_at) return false
+  return eventDateLocal(event) < todayKey
+}
+
 export function ScheduleOverview(props: ScheduleOverviewProps) {
   // Cancelled events don't belong on a schedule — filter once for every card.
   const events = props.events.filter((e) => e.event_status !== 'cancelled')
+  const todayKey = todayIso()
+  // Overdue to-dos live only in the Overdue section, never duplicated in the
+  // week list below.
+  const weekEvents = events.filter((e) => !isOverdueTodo(e, todayKey))
 
   async function handleToggleTodo(e: Event) {
     if (e.completed_at) await uncompleteTodo(e.id)
@@ -91,8 +103,17 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <RoutinesCard />
       </div>
-      <WeekCard
+      <OverdueCard
         events={events}
+        onEdit={props.onEdit}
+        onDelete={props.onDelete}
+        onShareSuccess={props.onShareSuccess}
+        onHashtagClick={props.onHashtagClick}
+        onToggleTodo={handleToggleTodo}
+        onConvertKind={handleConvertKind}
+      />
+      <WeekCard
+        events={weekEvents}
         onEdit={props.onEdit}
         onDelete={props.onDelete}
         onShareSuccess={props.onShareSuccess}
@@ -254,6 +275,81 @@ type WeekRow =
   | { kind: 'empty'; key: string }
   | { kind: 'event'; key: string; event: Event; isToday: boolean; isPast: boolean; clash: boolean }
 
+// Incomplete to-dos whose date has passed. Rendered above the week card and
+// only when there's at least one — otherwise the section is absent entirely.
+function OverdueCard({ events, ...actions }: { events: Event[] } & ActionProps) {
+  const now = useNow()
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const todayKey = ymd(now)
+  const overdue = events
+    .filter((e) => isOverdueTodo(e, todayKey))
+    .slice()
+    .sort((a, b) => a.start_date.localeCompare(b.start_date))
+  if (overdue.length === 0) return null
+
+  const toggle = (id: string) => setSelectedId((cur) => (cur === id ? null : id))
+
+  async function toggleTodo(e: Event) {
+    if (e.completed_at) await uncompleteTodo(e.id)
+    else await completeTodo(e.id)
+    actions.onShareSuccess()
+  }
+
+  async function handleConvert(e: Event, kind: 'reminder' | 'todo') {
+    await convertEventKind(e.id, kind)
+    actions.onShareSuccess()
+  }
+
+  return (
+    <section data-testid="overdue-card" className={`rounded-xl border-2 border-rose-300/70 bg-rose-50/60 p-4 ${sketchBody}`}>
+      <h3 className={`${sketchHand} text-3xl text-rose-900 mb-2`}>
+        Overdue
+        <span className="ml-2 align-middle text-sm font-sans not-italic bg-rose-100 text-rose-700 border border-rose-200 rounded-full px-2 py-0.5">
+          {overdue.length}
+        </span>
+      </h3>
+      <ul className="md:columns-2 gap-x-6">
+        {overdue.map((e) => (
+          <li key={e.id} className="break-inside-avoid mb-1">
+            <div className="flex items-center gap-1.5 w-full text-base leading-6 rounded px-1.5">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-amber-600 shrink-0"
+                checked={false}
+                onClick={(ev) => ev.stopPropagation()}
+                onChange={() => void toggleTodo(e)}
+                aria-label="Mark done"
+              />
+              <button
+                type="button"
+                aria-expanded={selectedId === e.id}
+                onClick={() => toggle(e.id)}
+                className="flex-1 text-left hover:text-indigo-700"
+              >
+                <span className="text-rose-600 text-sm whitespace-nowrap mr-2">{dayLabel(eventDateLocal(e))}</span>
+                <span className="text-gray-800">
+                  {e.title}
+                  <span className="ml-1.5 text-[11px] not-italic bg-amber-50 text-amber-700 border border-amber-100 rounded-full px-1.5 py-0.5">
+                    to-do
+                  </span>
+                </span>
+              </button>
+            </div>
+            {selectedId === e.id && (
+              <QuickEventCard
+                event={e}
+                {...actions}
+                onToggleTodo={(ev) => void toggleTodo(ev)}
+                onConvertKind={(ev, k) => void handleConvert(ev, k)}
+              />
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
   const now = useNow()
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -372,11 +468,12 @@ function isInCurrentMonth(iso: string | null): boolean {
   return iso.slice(0, 7) === `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 }
 
-// Month sidebar: all non-reminder events of the current month (past and
-// upcoming). Reminders are deliberately excluded here (noise) — they still
-// show on the calendar grid and on day-click; the week card carries them too.
+// Month sidebar: real events of the current month (past and upcoming).
+// Reminders and to-dos are deliberately excluded here (the sidebar reads as an
+// outings/events list) — they still show as dots on the calendar grid and on
+// day-click; to-dos also live in the week card and the Overdue section.
 function isInMonthList(event: Event): boolean {
-  if (event.event_kind === 'reminder') return false
+  if (event.event_kind === 'reminder' || event.event_kind === 'todo') return false
   if (event.recurrence_rule) return false
   return isInCurrentMonth(event.start_date)
 }

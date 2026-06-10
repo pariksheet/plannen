@@ -79,10 +79,12 @@ const DEFAULT_DURATION_MS = 2 * 60 * 60 * 1000 // assume 2h when no end_date
 
 // Ids of timed events whose clock ranges intersect another timed event in the
 // same list. Date-only (all-day) events never count as clashing, and back-to-
-// back events that merely touch (a.end === b.start) do not overlap.
+// back events that merely touch (a.end === b.start) do not overlap. Reminders
+// are nudges, not attendance commitments, so they're excluded entirely — a
+// reminder never clashes and never makes another event clash.
 export function overlappingIds(events: Event[]): Set<string> {
   const timed = events
-    .filter((e) => e.start_date.length > 10)
+    .filter((e) => e.event_kind !== 'reminder' && e.start_date.length > 10)
     .map((e) => {
       const start = new Date(e.start_date).getTime()
       const end = e.end_date ? new Date(e.end_date).getTime() : start + DEFAULT_DURATION_MS

@@ -90,6 +90,12 @@ function midWeekIso(): string {
 
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
+function daysAgoIso(n: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return d.toISOString().slice(0, 10)
+}
+
 describe('ScheduleOverview', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -225,6 +231,47 @@ describe('ScheduleOverview', () => {
     expect(within(monthList).getByTestId('quick-event-card')).toBeInTheDocument()
   })
 
+  it('has no Overdue section when there are no overdue to-dos', () => {
+    renderOverview([makeEvent({ id: 't1', title: 'Buy groceries', event_kind: 'todo', start_date: midWeekIso() })])
+    expect(screen.queryByTestId('overdue-card')).not.toBeInTheDocument()
+    expect(screen.queryByText('Overdue')).not.toBeInTheDocument()
+  })
+
+  it('shows past incomplete to-dos in an Overdue section above the week', () => {
+    renderOverview([
+      makeEvent({ id: 'od1', title: 'Renew permit', event_kind: 'todo', start_date: daysAgoIso(3) }),
+    ])
+    const overdue = screen.getByTestId('overdue-card')
+    expect(within(overdue).getByText('Renew permit')).toBeInTheDocument()
+    // Not duplicated in the week list.
+    const week = screen.getByTestId('week-card')
+    expect(within(week).queryByText('Renew permit')).not.toBeInTheDocument()
+  })
+
+  it('excludes completed and non-todo past events from Overdue', () => {
+    renderOverview([
+      makeEvent({ id: 'done', title: 'Done task', event_kind: 'todo', start_date: daysAgoIso(2), completed_at: daysAgoIso(1) }),
+      makeEvent({ id: 'evt', title: 'Past meeting', event_kind: 'event', start_date: daysAgoIso(2) }),
+    ])
+    expect(screen.queryByTestId('overdue-card')).not.toBeInTheDocument()
+  })
+
+  it('a today to-do is not overdue', () => {
+    renderOverview([makeEvent({ id: 'tt', title: 'Today task', event_kind: 'todo', start_date: todayIso() })])
+    expect(screen.queryByTestId('overdue-card')).not.toBeInTheDocument()
+  })
+
+  it('checking an overdue to-do calls completeTodo', async () => {
+    const user = userEvent.setup()
+    const { completeTodo } = await import('../services/eventService')
+    renderOverview([
+      makeEvent({ id: 'od9', title: 'Pay invoice', event_kind: 'todo', start_date: daysAgoIso(5) }),
+    ])
+    const overdue = screen.getByTestId('overdue-card')
+    await user.click(within(overdue).getByRole('checkbox', { name: /mark done/i }))
+    expect(vi.mocked(completeTodo)).toHaveBeenCalledWith('od9')
+  })
+
   it('renders a checkbox for a todo in the week list', async () => {
     renderOverview([
       makeEvent({ id: 't1', title: 'Buy groceries', event_kind: 'todo', start_date: midWeekIso() }),
@@ -237,21 +284,18 @@ describe('ScheduleOverview', () => {
     ).toBeInTheDocument()
   })
 
-  it('month-list revealed card receives onToggleTodo — clicking it calls completeTodo', async () => {
-    const user = userEvent.setup()
-    const { completeTodo } = await import('../services/eventService')
+  it('excludes to-dos from the month-list sidebar (grid-only)', () => {
     const today = new Date()
     const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
     const day = Math.min(today.getDate() + 1, lastDay)
     const thisMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
     const iso = `${thisMonth}-${String(day).padStart(2, '0')}`
-    const todo = makeEvent({ id: 'mtodo', title: 'Pick up package', event_kind: 'todo', start_date: iso })
-    renderOverview([todo])
+    renderOverview([
+      makeEvent({ id: 'mevt', title: 'Camp deadline', start_date: iso }),
+      makeEvent({ id: 'mtodo', title: 'Pick up package', event_kind: 'todo', start_date: iso }),
+    ])
     const monthList = screen.getByTestId('month-list')
-    await user.click(within(monthList).getByText('Pick up package'))
-    // QuickEventCard is now rendered with onToggleTodo
-    expect(within(monthList).getByTestId('quick-event-card')).toBeInTheDocument()
-    await user.click(within(monthList).getByRole('button', { name: 'Toggle todo' }))
-    expect(vi.mocked(completeTodo)).toHaveBeenCalledWith('mtodo')
+    expect(within(monthList).getByText('Camp deadline')).toBeInTheDocument()
+    expect(within(monthList).queryByText('Pick up package')).not.toBeInTheDocument()
   })
 })
