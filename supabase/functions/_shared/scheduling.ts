@@ -100,3 +100,86 @@ export function expandAndSuppress(
     (inst) => !isSuppressed(inst.date, windows),
   )
 }
+
+// ── Phase 3: override resolution + obligation projection ─────────────────────
+
+export type ObligationRow = {
+  id: string
+  user_id: string
+  derived_from_attendance_id: string
+  role: 'drop' | 'pick'
+  anchor: 'start' | 'end'
+  offset_minutes: number
+  location_id: string | null
+  active: boolean
+}
+
+export type ResolvedObligation = {
+  obligation_id: string
+  role: 'drop' | 'pick'
+  date: string
+  time: string // HH:MM after anchor+offset
+  location_id: string | null // obligation's own, else inherited from winning instance
+  source_attendance_id: string
+  source_name: string
+}
+
+/**
+ * Add `minutes` (may be negative) to an HH:MM clock time and re-format.
+ * No day-wrap is needed for the supported ranges, but to stay total we
+ * clamp the result into [0,1440) via modulo so a stray over/underflow
+ * still yields a valid HH:MM rather than a negative or out-of-range value.
+ */
+export function addMinutesToClock(hhmm: string, minutes: number): string {
+  const [h, m] = hhmm.split(':').map(Number)
+  const total = ((h * 60 + m + minutes) % 1440 + 1440) % 1440
+  const hh = Math.floor(total / 60)
+  const mm = total % 60
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+}
+
+/**
+ * Pick the single winning instance among all surviving instances for ONE
+ * member on ONE date. Comparator is total + deterministic:
+ *   (1) higher `priority` wins;
+ *   (2) bounded (`recurrence_until != null`) beats open-ended (`== null`);
+ *   (3) later `dtstart` wins (string compare);
+ *   (4) lower `attendance_id` wins (string compare).
+ */
+export function resolveOverride(
+  instances: AttendanceInstance[],
+): AttendanceInstance | null {
+  if (instances.length === 0) return null
+  return instances.reduce((best, cur) => (beats(cur, best) ? cur : best))
+}
+
+/** True iff `a` strictly outranks `b` under the override comparator. */
+function beats(a: AttendanceInstance, b: AttendanceInstance): boolean {
+  if (a.priority !== b.priority) return a.priority > b.priority
+  const aBounded = a.recurrence_until != null
+  const bBounded = b.recurrence_until != null
+  if (aBounded !== bBounded) return aBounded
+  if (a.dtstart !== b.dtstart) return a.dtstart > b.dtstart
+  return a.attendance_id < b.attendance_id
+}
+
+/**
+ * Project a linked obligation onto its winning instance. Returns null when
+ * the anchored time is absent (an all-day instance can't anchor a drop/pick).
+ */
+export function projectObligation(
+  ob: ObligationRow,
+  winner: AttendanceInstance,
+): ResolvedObligation | null {
+  const base = ob.anchor === 'start' ? winner.start_time : winner.end_time
+  if (base == null) return null
+  return {
+    obligation_id: ob.id,
+    role: ob.role,
+    date: winner.date,
+    time: addMinutesToClock(base, ob.offset_minutes),
+    location_id: ob.location_id ?? winner.location_id,
+    source_attendance_id: winner.attendance_id,
+    source_name: winner.name,
+  }
+}
