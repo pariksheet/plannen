@@ -20,6 +20,7 @@ import { generateSessionDates, parseInUserTz, type RecurrenceRule } from './recu
 import { whisperAvailable, transcribeAudioBytes, extFromContentType } from './transcribe.js'
 import { parseSourceUrl, normaliseTags, validateName, validateSourceType } from './sources.js'
 import { weekBoundaryStart, isPracticeDueOn, remainingThisPeriod } from './practices.js'
+import { expandAndSuppress, type AttendanceRow, type BlackoutWindow } from './scheduling.js'
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -2028,7 +2029,7 @@ async function getBriefingContext(args: { date?: string } = {}) {
   const completionsFrom = monthStart < wkStart ? monthStart : wkStart
 
   return await withUserContext(userId, async (c) => {
-    const [userRow, circleRow, primaryCircleUsersRow, eventsTodayRow, eventsTomorrowRow, recentPastRow, practicesRow, completionsRow, locationsRow] =
+    const [userRow, circleRow, primaryCircleUsersRow, eventsTodayRow, eventsTomorrowRow, recentPastRow, practicesRow, completionsRow, locationsRow, attendancesRow, blackoutsRow] =
       await Promise.all([
         c.query(
           `SELECT u.id, u.full_name, u.preferred_language, up.timezone, up.primary_circle_group_ids
@@ -2095,6 +2096,20 @@ async function getBriefingContext(args: { date?: string } = {}) {
            FROM plannen.user_locations WHERE user_id = $1`,
           [userId],
         ),
+        c.query(
+          `SELECT id, family_member_id, name, location_id, recurrence_rule,
+                  dtstart::text, recurrence_until::text, start_time, end_time, priority, active
+           FROM plannen.attendances WHERE user_id = $1 AND active = true`,
+          [userId],
+        ),
+        c.query(
+          `SELECT ab.attendance_id, w.calendar_id, w.starts_on::text AS starts_on,
+                  w.ends_on::text AS ends_on, w.label
+           FROM plannen.attendance_blackouts ab
+           JOIN plannen.blackout_windows w ON w.calendar_id = ab.calendar_id
+           WHERE ab.user_id = $1`,
+          [userId],
+        ),
       ])
 
     type CRow = { practice_id: string; completed_on: string }
@@ -2114,6 +2129,16 @@ async function getBriefingContext(args: { date?: string } = {}) {
       weekday: 'long', timeZone: 'UTC',
     })
 
+    const windowsMap = new Map<string, BlackoutWindow[]>()
+    for (const w of blackoutsRow.rows as (BlackoutWindow & { attendance_id: string })[]) {
+      const list = windowsMap.get(w.attendance_id) ?? []
+      list.push(w)
+      windowsMap.set(w.attendance_id, list)
+    }
+    const attendancesToday = (attendancesRow.rows as AttendanceRow[]).flatMap((att) =>
+      expandAndSuppress(att, windowsMap.get(att.id) ?? [], today, today),
+    )
+
     return {
       date: today,
       weekday,
@@ -2125,6 +2150,7 @@ async function getBriefingContext(args: { date?: string } = {}) {
       recent_past_events: recentPastRow.rows,
       practices_due_today: practicesDue,
       locations: locationsRow.rows,
+      attendances_today: attendancesToday,
     }
   })
 }
