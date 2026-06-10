@@ -22,9 +22,9 @@ Use when the user invokes `/plannen-today` or asks anything like "today's plan",
    - HH:MM — Event title (annotation if useful, e.g. "you driving")
 
    ## Practices today
-   - [ ] Practice name (N/M this week)   // for weekly_count
-   - [ ] Practice name (daily)            // for daily
-   - [ ] Practice name                    // for specific_days
+   - [ ] Practice name (N/M this week)   // flex_count → show remaining of target
+   - [ ] Practice name (daily)            // pinned daily → label the cadence
+   - [ ] Practice name                    // pinned on specific days → no count
 
    ## Circle
    - One-line items about your circle relevant to the day:
@@ -48,6 +48,31 @@ Use when the user invokes `/plannen-today` or asks anything like "today's plan",
 
 5. **Handle completion mentions.** If, in the same turn or a follow-up, the user mentions doing a practice ("did gym", "took vitamins", "done with dishes"), call `mark_practice_done({ practice_id })` for each — resolve the practice by name from the context. Confirm with one short line: "Logged: gym, vitamins."
 
+## Creating practices (recurrence model)
+
+A **practice** is a recurring personal routine with no precise clock time (gym, meal prep, vitamins, dishes). When the user asks to add one, call `create_practice` and pick **one** of two recurrence modes:
+
+- **`recurrence_mode: 'pinned'`** — fixed cadence on a calendar pattern. Set `recurrence_rule`:
+  - `{ frequency: 'daily' }` — plain daily.
+  - `{ frequency: 'daily', interval: 2 }` — every other day. `interval: N` = every N days; the cadence counts from `dtstart` if given.
+  - `{ frequency: 'weekly', days: ['MO','TU','WE','TH','FR'] }` — weekdays.
+  - `{ frequency: 'weekly', days: ['MO','WE','FR'] }` — specific days.
+  - `{ frequency: 'monthly' }` — once a month.
+  - Optional: `dtstart` (`YYYY-MM-DD` anchor) and `recurrence_until` (`YYYY-MM-DD` end date).
+- **`recurrence_mode: 'flex_count'`** — "N times per period, any day". Set `flex_period: 'week' | 'month'` and `flex_target: 1..31`. No specific days.
+
+Day codes are two-letter uppercase: `MO TU WE TH FR SA SU` (same as events). Practices also take a coarse `preferred_time_of_day`: `morning | afternoon | evening | anytime`.
+
+**Examples** (generic personas only):
+
+- "Milo and I meal-prep every other day" → pinned, `recurrence_rule: { frequency: 'daily', interval: 2 }`.
+- "Take vitamins every weekday morning" → pinned, `recurrence_rule: { frequency: 'weekly', days: ['MO','TU','WE','TH','FR'] }`, `preferred_time_of_day: 'morning'`.
+- "Gym 3× a week, whenever I can fit it" → flex_count, `flex_period: 'week'`, `flex_target: 3`.
+- "Do the dishes Mon/Wed/Fri evenings" → pinned, `recurrence_rule: { frequency: 'weekly', days: ['MO','WE','FR'] }`, `preferred_time_of_day: 'evening'`.
+- "Deep-clean the kitchen twice a month" → flex_count, `flex_period: 'month'`, `flex_target: 2` (or pinned `{ frequency: 'monthly' }` if it's a fixed once-a-month slot).
+
+**A time-pinned routine is NOT a practice.** If it has a precise clock time tied to a place — a school drop-off at 08:15, a standing 17:00 pickup — create a **recurring event/attendance** (`create_event` with a `recurrence_rule`), not a practice. Practices only carry the coarse `preferred_time_of_day`, never `HH:MM`.
+
 ## Anti-patterns
 
 - **Don't** call `list_events` separately — `get_briefing_context` already includes today's and tomorrow's events.
@@ -55,3 +80,4 @@ Use when the user invokes `/plannen-today` or asks anything like "today's plan",
 - **Don't** propose time slots for practices. Scheduling is out of scope for v1.
 - **Don't** invent practices. Only render what `practices_due_today` returns.
 - **Don't** auto-mark completions. Only when the user explicitly says they did something.
+- **Don't** give a practice an `HH:MM` time. Anything with a precise clock time is a recurring event, not a practice.
