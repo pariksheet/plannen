@@ -358,8 +358,15 @@ function OverdueCard({ events, ...actions }: { events: Event[] } & ActionProps) 
 
 function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
   const now = useNow()
+  const [range, setRange] = useState<'today' | 'this-week' | 'next-week'>('today')
+  const addDays = (d: Date, n: number): Date => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const buckets = buildWeekAgenda(events, now)
+  const buckets =
+    range === 'today'
+      ? buildWeekAgenda(events, now).filter((b) => b.isToday)
+      : range === 'next-week'
+        ? buildWeekAgenda(events, addDays(now, 7), now)
+        : buildWeekAgenda(events, now)
   const todayKey = todayIso()
   const { routines, toggle: toggleRoutine } = useTodayRoutines(todayKey)
   // Minutes-of-day for ordering today's rows; untimed events sort first (−1),
@@ -412,7 +419,27 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
   })
   return (
     <section data-testid="week-card" className={`rounded-xl border-2 border-emerald-200/70 bg-emerald-50/60 p-4 ${sketchBody}`}>
-      <h3 className={`${sketchHand} text-3xl text-gray-900 mb-2`}>This week</h3>
+      <div className="flex items-center gap-1 mb-2" role="tablist" aria-label="Schedule range">
+        {([['today', 'Today'], ['this-week', 'This Week'], ['next-week', 'Next Week']] as const).map(([val, label]) => (
+          <button
+            key={val}
+            type="button"
+            role="tab"
+            aria-selected={range === val}
+            onClick={() => setRange(val)}
+            className={`${sketchHand} text-2xl px-2 rounded ${
+              range === val ? 'text-gray-900 bg-yellow-100/70' : 'text-gray-400 hover:text-gray-600'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-base text-gray-500 px-1.5">
+          {range === 'next-week' ? 'Nothing scheduled next week.' : range === 'today' ? 'Nothing scheduled today.' : 'Nothing scheduled this week.'}
+        </p>
+      ) : (
       <ul className="md:columns-2 gap-x-6">
         {rows.map((row) => {
           if (row.kind === 'empty') {
@@ -509,6 +536,7 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
           )
         })}
       </ul>
+      )}
     </section>
   )
 }
