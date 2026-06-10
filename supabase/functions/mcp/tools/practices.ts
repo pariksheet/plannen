@@ -16,7 +16,7 @@ const definitions: ToolDefinition[] = [
   },
   {
     name: 'create_practice',
-    description: 'Create a recurring routine. recurrence_mode="pinned" for date-cadence routines (every other day, weekdays, monthly — set recurrence_rule); recurrence_mode="flex_count" for "N times per week/month, anytime" (gym 3×/week — set flex_period + flex_target). For time-pinned attendance like a school drop-off, use a recurring event/attendance instead, not a practice.',
+    description: 'Create an ongoing RECURRING routine the user wants to repeat going forward (gym 3×/week, vitamins every morning). Do NOT use this to record that the user DID something ONCE — "slept 8h yesterday", "ran 40 min today", "meditated this morning" are past one-off entries → call log_activity, never create_practice. Turning a one-off report into a daily routine is a bug. Only create a practice when the user explicitly asks to set up / track a repeating habit. recurrence_mode="pinned" for date-cadence routines (every other day, weekdays, monthly — set recurrence_rule); recurrence_mode="flex_count" for "N times per week/month, anytime" (set flex_period + flex_target). For time-pinned attendance like a school drop-off, use a recurring event/attendance instead, not a practice.',
     inputSchema: {
       type: 'object',
       properties: {
