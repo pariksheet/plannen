@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest'
 import { eventsModule } from './events.ts'
 
 describe('events module', () => {
-  it('registers exactly 5 tool definitions', () => {
-    expect(eventsModule.definitions).toHaveLength(5)
+  it('registers exactly 7 tool definitions', () => {
+    expect(eventsModule.definitions).toHaveLength(7)
   })
 
   it('definitions cover the expected tool names', () => {
     const names = eventsModule.definitions.map((d) => d.name).sort()
-    expect(names).toEqual(['create_event', 'get_event', 'list_events', 'rsvp_event', 'update_event'])
+    expect(names).toEqual(['complete_todo', 'create_event', 'get_event', 'list_events', 'rsvp_event', 'uncomplete_todo', 'update_event'])
   })
 
   it('every definition name has a matching dispatch entry', () => {
