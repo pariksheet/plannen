@@ -89,15 +89,24 @@ export type FactRow = Record<string, unknown> & {
   last_seen_at: string
 }
 
+export type PracticeRecurrenceRule = {
+  frequency: 'daily' | 'weekly' | 'monthly'
+  interval?: number
+  days?: string[] // MO,TU,WE,TH,FR,SA,SU
+}
+
 export type PracticeRow = Record<string, unknown> & {
   id: string
   user_id: string
   family_member_id: string | null
   name: string
   category: 'health' | 'household' | 'circle' | 'focus' | 'other'
-  frequency_type: 'daily' | 'weekly_count' | 'specific_days'
-  target_count: number | null
-  days_of_week: string[] | null
+  recurrence_mode: 'pinned' | 'flex_count'
+  recurrence_rule: PracticeRecurrenceRule | null
+  dtstart: string
+  recurrence_until: string | null
+  flex_period: 'week' | 'month' | null
+  flex_target: number | null
   preferred_time_of_day: 'morning' | 'afternoon' | 'evening' | 'anytime'
   active: boolean
   created_at: string
@@ -363,7 +372,7 @@ export type DbClient = {
   }
   practices: {
     list: (params?: { active_only?: boolean }) => Promise<PracticeRow[]>
-    create: (input: Partial<PracticeRow> & { name: string; category: PracticeRow['category']; frequency_type: PracticeRow['frequency_type'] }) => Promise<PracticeRow>
+    create: (input: Partial<PracticeRow> & { name: string; category: PracticeRow['category']; recurrence_mode: PracticeRow['recurrence_mode'] }) => Promise<PracticeRow>
     update: (id: string, patch: Partial<PracticeRow>) => Promise<PracticeRow>
     delete: (id: string) => Promise<void>
     markDone: (input: { practice_id: string; completed_on?: string; family_member_id?: string | null }) => Promise<void>
