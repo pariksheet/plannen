@@ -225,18 +225,39 @@ export function EventCard({
   }, [event.id, showRSVP, isWatching, isLean, rsvpVersion])
 
   useLayoutEffect(() => {
-    if (showKebabMenu && kebabTriggerRef.current) {
-      const rect = kebabTriggerRef.current.getBoundingClientRect()
-      const padding = 4
-      const menuWidth = 192
-      setKebabMenuPosition({
-        top: rect.bottom + padding,
-        left: Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8)),
-      })
-      getMyRsvp(event.id).then(({ data }) => setKebabVisitDate(data?.preferred_visit_date ?? null))
-    } else {
+    if (!showKebabMenu) {
       setKebabMenuPosition(null)
       setKebabVisitDate(null)
+      return
+    }
+    // Re-anchor the fixed-position portal to the trigger on every scroll/resize
+    // so it tracks the button instead of being stranded at its open-time spot.
+    // Flip above the trigger when there isn't room below.
+    const updatePosition = () => {
+      const trigger = kebabTriggerRef.current
+      if (!trigger) return
+      const rect = trigger.getBoundingClientRect()
+      const padding = 4
+      const menuWidth = 192
+      const menuHeight = kebabPortalRef.current?.offsetHeight ?? 0
+      const spaceBelow = window.innerHeight - rect.bottom
+      const openUp = menuHeight > 0 && spaceBelow < menuHeight + padding && rect.top > spaceBelow
+      const top = openUp
+        ? Math.max(8, rect.top - padding - menuHeight)
+        : rect.bottom + padding
+      setKebabMenuPosition({
+        top,
+        left: Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8)),
+      })
+    }
+    updatePosition()
+    getMyRsvp(event.id).then(({ data }) => setKebabVisitDate(data?.preferred_visit_date ?? null))
+    // capture-phase listener catches scrolling on any ancestor container too
+    window.addEventListener('scroll', updatePosition, true)
+    window.addEventListener('resize', updatePosition)
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true)
+      window.removeEventListener('resize', updatePosition)
     }
   }, [showKebabMenu, event.id])
 
@@ -592,7 +613,8 @@ export function EventCard({
           createPortal(
             <div
               ref={kebabPortalRef}
-              className="fixed z-[9999] py-1 w-56 bg-white rounded-md shadow-lg border border-gray-200"
+              data-overlay-menu
+              className="fixed z-[9999] py-1 w-56 max-h-[calc(100vh-1rem)] overflow-y-auto bg-white rounded-md shadow-lg border border-gray-200"
               style={{ top: kebabMenuPosition.top, left: kebabMenuPosition.left }}
               onClick={(e) => e.stopPropagation()}
             >
@@ -700,7 +722,7 @@ export function EventCard({
                   Delete
                 </button>
               )}
-              {(isReminder || isTodo) && onConvertKind && (
+              {onConvertKind && (
                 <button
                   type="button"
                   className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
@@ -1025,7 +1047,8 @@ export function EventCard({
       createPortal(
         <div
           ref={kebabPortalRef}
-          className="fixed z-[9999] py-1 w-48 bg-white rounded-md shadow-lg border border-gray-200"
+          data-overlay-menu
+          className="fixed z-[9999] py-1 w-48 max-h-[calc(100vh-1rem)] overflow-y-auto bg-white rounded-md shadow-lg border border-gray-200"
           style={{ top: kebabMenuPosition.top, left: kebabMenuPosition.left }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -1064,7 +1087,7 @@ export function EventCard({
               </a>
             </>
           )}
-          {(isReminder || isTodo) && onConvertKind && (
+          {onConvertKind && (
             <button
               type="button"
               className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
