@@ -54,6 +54,29 @@ function useNow(intervalMs = 60_000): Date {
   return now
 }
 
+// Collapse an expanded inline event card when the user clicks anywhere that
+// isn't an event row. Rows opt in by tagging their <li> with `data-event-row`;
+// clicks inside a row (the toggle button or the open card) are left alone so
+// the row's own onClick still handles toggling / switching between events.
+function useCollapseOnOutsideClick(
+  selectedId: string | null,
+  setSelectedId: (id: string | null) => void,
+): void {
+  useEffect(() => {
+    if (!selectedId) return
+    const onDown = (ev: MouseEvent) => {
+      const target = ev.target as HTMLElement | null
+      // Ignore clicks inside an event row, or inside an overlay that's portaled
+      // out of the row (the details modal and the kebab menu both render to
+      // document.body) — collapsing the row there would tear the overlay down.
+      if (target?.closest('[data-event-row], [role="dialog"], [data-overlay-menu]')) return
+      setSelectedId(null)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [selectedId, setSelectedId])
+}
+
 const DEFAULT_DURATION_MS = 2 * 60 * 60 * 1000
 
 type EventTimeState = 'past' | 'now' | 'upcoming'
@@ -286,6 +309,7 @@ type WeekRow =
 function OverdueCard({ events, ...actions }: { events: Event[] } & ActionProps) {
   const now = useNow()
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  useCollapseOnOutsideClick(selectedId, setSelectedId)
   const todayKey = ymd(now)
   const overdue = events
     .filter((e) => isOverdueTodo(e, todayKey))
@@ -316,7 +340,7 @@ function OverdueCard({ events, ...actions }: { events: Event[] } & ActionProps) 
       </h3>
       <ul className="md:columns-2 gap-x-6">
         {overdue.map((e) => (
-          <li key={e.id} className="break-inside-avoid mb-1">
+          <li key={e.id} data-event-row className="break-inside-avoid mb-1">
             <div className="flex items-center gap-1.5 w-full text-base leading-6 rounded px-1.5">
               <input
                 type="checkbox"
@@ -361,6 +385,7 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
   const [range, setRange] = useState<'today' | 'this-week' | 'next-week'>('today')
   const addDays = (d: Date, n: number): Date => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  useCollapseOnOutsideClick(selectedId, setSelectedId)
   const buckets =
     range === 'today'
       ? buildWeekAgenda(events, now).filter((b) => b.isToday)
@@ -452,8 +477,8 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
           if (row.kind === 'routine') {
             const r = row.routine
             return (
-              <li key={row.key} className="break-inside-avoid mb-1">
-                <label className="flex items-center gap-1.5 w-full text-base leading-6 rounded px-1.5 bg-yellow-100/60 cursor-pointer">
+              <li key={row.key} className="break-inside-avoid">
+                <label className="flex items-center gap-1.5 w-full text-base leading-6 px-1.5 py-0.5 bg-yellow-100/60 cursor-pointer">
                   <input
                     type="checkbox"
                     className="h-4 w-4 accent-amber-600 shrink-0"
@@ -476,9 +501,9 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
           const t = timeOf(e)
           const label = `${dayLabel(eventDateLocal(e))}${t ? ` ${t}` : ''}`
           return (
-            <li key={row.key} className={`break-inside-avoid mb-1 ${row.isPast ? 'opacity-60' : ''}`}>
-              <div className={`flex items-center gap-1.5 w-full text-base leading-6 rounded px-1.5 ${
-                row.isToday ? 'bg-yellow-100/60' : ''
+            <li key={row.key} data-event-row className={`break-inside-avoid ${row.isToday ? '' : 'mb-1'} ${row.isPast ? 'opacity-60' : ''}`}>
+              <div className={`flex items-center gap-1.5 w-full text-base leading-6 px-1.5 ${
+                row.isToday ? 'bg-yellow-100/60 py-0.5' : 'rounded'
               }`}>
                 {isTodo && (
                   <input
@@ -613,6 +638,7 @@ function ThisMonthCard({ events, preferredVisitDates, ...actions }: ThisMonthCar
   const monthList = buildMonthList(events)
   const [selectedDay, setSelectedDay] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  useCollapseOnOutsideClick(selectedId, setSelectedId)
   // Switching days clears any open reveal so a stale card can't carry over.
   const chooseDay = (day: string | null) => { setSelectedDay(day); setSelectedId(null) }
   const toggle = (id: string) => setSelectedId((cur) => (cur === id ? null : id))
@@ -656,7 +682,7 @@ function ThisMonthCard({ events, preferredVisitDates, ...actions }: ThisMonthCar
                   {dayEvents.map((e) => {
                     const time = timeOf(e)
                     return (
-                      <li key={e.id}>
+                      <li key={e.id} data-event-row>
                         <button
                           type="button"
                           aria-expanded={selectedId === e.id}
@@ -685,7 +711,7 @@ function ThisMonthCard({ events, preferredVisitDates, ...actions }: ThisMonthCar
                 const isPast = dayKey < todayIso()
                 const isToday = dayKey === todayIso()
                 return (
-                  <li key={entry.key} className={`break-inside-avoid ${isPast ? 'opacity-60' : ''}`}>
+                  <li key={entry.key} data-event-row className={`break-inside-avoid ${isPast ? 'opacity-60' : ''}`}>
                     <button
                       type="button"
                       aria-expanded={selectedId === entry.firstEvent.id}
