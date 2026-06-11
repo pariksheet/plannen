@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -136,6 +136,21 @@ function daysAgoIso(n: number): string {
   d.setDate(d.getDate() - n)
   return d.toISOString().slice(0, 10)
 }
+
+// Freeze "now" to a fixed Wednesday so the date-relative fixtures
+// (midWeekIso → Wednesday, otherDayThisWeek, etc.) are deterministic on any
+// day the suite runs — otherwise mid-week todos/reminders only land in the
+// default "Today" view when the real day happens to be Wednesday, and a
+// mid-week todo reads as overdue from Thursday on. Only Date is faked so
+// setInterval (useNow) and userEvent keep real timers.
+const FROZEN_NOW = new Date(2026, 5, 17, 12, 0, 0) // Wed 17 Jun 2026, local noon
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(FROZEN_NOW)
+})
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('ScheduleOverview', () => {
   beforeEach(() => {
