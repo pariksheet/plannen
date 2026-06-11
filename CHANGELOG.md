@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-06-11
+
+### Schedule card fixes
+
+- **The "⋮" card menu no longer gets clipped on scroll.** It now follows its button as the page scrolls, flips open upward when there isn't room below, and scrolls inside itself when it's taller than the screen — every option stays reachable.
+- **Turn any event into a to-do.** "Convert to to-do" is now offered on regular events from the card menu, not just on reminders and existing to-dos.
+- **Today's schedule reads as one block.** Today's items render as a single continuous highlighted strip instead of separate boxes with gaps between them.
+- **Click away to collapse an open event.** Clicking empty space — or anywhere outside an expanded card — now closes the inline event you opened in the schedule, so you no longer have to click the same row again. Opening the card's details popup or its menu no longer collapses the card by accident.
+
+### Logging
+
+- **A one-off activity no longer seeds a recurring routine.** Recording a single timed activity (e.g. a one-time "slept 8h") could be mistaken for a repeating habit and create a recurring routine; single entries now stay single unless you actually keep a matching routine.
+
 ## [0.6.0] - 2026-06-10
 
 ### Activity logging — capture anything you did or measured
