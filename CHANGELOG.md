@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-06-12
+
+### Mailbox sync
+
+- **"Open attachment" todos no longer land at 12:00 AM.** When an email's date is locked inside an attachment the sync can't read, the fallback todo used to be dated on the bare message date — which stored as local midnight and surfaced as a meaningless 12:00 AM slot. It now starts at the email's received time plus one hour, so it shows up in the day's actionable flow.
+
 ## [0.6.1] - 2026-06-11
 
 ### Schedule card fixes
