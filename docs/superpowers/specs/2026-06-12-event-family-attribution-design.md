@@ -101,13 +101,17 @@ counts toward clashes only when it's the owner's busy time, mirroring the existi
   e.start_date.length > 10)
 ```
 
-**Parity checks during implementation:** (a) confirm whether `overlappingIds` has a
-mirrored copy in the scheduling engine (`mcp/src/scheduling.ts` /
-`supabase/functions/_shared/scheduling.ts`) that must stay byte-identical under
-`scripts/check-engine-parity.mjs`; (b) confirm the `get_briefing_context` clash
-logic in `mcp/src/index.ts` (which treats obligations like timed events for clash
-detection) applies the same rule, so the briefing doesn't flag a subject event the
-owner isn't attending.
+**Mirror status (verified):** `overlappingIds` is defined only in
+`src/utils/weekAgenda.ts` and used only by the web (`ScheduleOverview.tsx`). It is
+**not** one of the byte-identical engine-parity files (`check-engine-parity.mjs`
+guards only `practices.ts`/`scheduling.ts` across runtimes), so this is a
+single-file edit with no parity constraint.
+
+**Still to handle:** `get_briefing_context` in `mcp/src/index.ts` does its **own**
+clash detection (it treats obligations like timed events). That is a separate
+hand-written path — not a mirror — and must apply the same "only the owner's busy
+time clashes" rule so the briefing doesn't flag a subject event the owner isn't
+attending.
 
 ### 3. Read + write plumbing (MCP parity-critical)
 
