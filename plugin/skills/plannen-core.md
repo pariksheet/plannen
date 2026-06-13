@@ -49,6 +49,14 @@ Before calling `create_event`, check whether the user has actually committed.
 
 **When unsure**, end the reply with: *"Want me to save this as a planned event, or are you still working it out?"* — then wait. Do not pre-emptively create and apologise after.
 
+### Whose event is it
+
+When an event clearly belongs to someone other than the account owner — "Milo's sports day", "the kids' dentist", "Sam's recital" — resolve that person and set the event's subject so it doesn't falsely block the owner's calendar:
+
+- Search `list_family_members` first, then accepted relationships via `list_relationships`. Pass `subject_kind` ('family_member' or 'user') and `subject_id` to `create_event`.
+- Set `owner_attends: true` only when the owner is also occupied for the whole event ("I take Milo to swimming and wait"). For drop-and-leave or just-tracking ("Milo has swimming Tuesdays"), leave it false — the default. When it's genuinely unclear, default to false (don't nag the owner with overlap warnings).
+- A subject event with `owner_attends: false` is excluded from the owner's clash detection, so don't also warn about overlaps for it.
+
 ### Logging (the `/log` journal override)
 
 The intent gate above is for *planning ahead*. **Capture is different.** When the user is recording something — they ran `/log` / `/plannen-log`, opened with a logging lead-in ("log…", "note that…", "jot…", "record…"), or made a **clear past-tense report of something done** ("finished the parking", "kids are in bed", "just met our new neighbour", "took my vitamins") — switch to the `plannen-log` skill and **act immediately, then print a one-line receipt ending in `undo?`**. Do **not** ask "want me to save this?" — this is the one sanctioned exception to the gate.
