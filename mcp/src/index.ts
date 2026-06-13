@@ -80,7 +80,7 @@ function extractDomain(url: string): string | null {
 // updated_at, gcal_event_id, event_type, shared_with_*, enrollment_start_date,
 // which are rarely needed by callers and balloon token usage.
 const SLIM_EVENT_COLUMNS =
-  'id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, recurrence_rule, parent_event_id, completed_at, assigned_to, subject_kind, subject_id, owner_attends'
+  'id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, recurrence_rule, parent_event_id, completed_at, assigned_to, group_id, list_label, subject_kind, subject_id, owner_attends'
 
 function slimEvent<T extends Record<string, unknown>>(e: T) {
   return {
@@ -97,6 +97,8 @@ function slimEvent<T extends Record<string, unknown>>(e: T) {
     enrollment_deadline: e.enrollment_deadline,
     completed_at: e.completed_at ?? null,
     assigned_to: e.assigned_to ?? null,
+    group_id: e.group_id ?? null,
+    list_label: e.list_label ?? null,
     subject_kind: e.subject_kind ?? null,
     subject_id: e.subject_id ?? null,
     owner_attends: e.owner_attends ?? false,
@@ -121,7 +123,7 @@ async function listEvents(args: { status?: string; limit?: number; from_date?: s
     if (args.to_date) { params.push(args.to_date + 'T24:00:00'); where.push(`start_date < $${params.length}`) }
     if (args.group_id) { params.push(args.group_id); where.push(`group_id = $${params.length}`) }
     params.push(args.limit ?? 10)
-    const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, subject_kind, subject_id, owner_attends
+    const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, subject_kind, subject_id, owner_attends, group_id, list_label
                  FROM plannen.events
                  WHERE ${where.join(' AND ')}
                  ORDER BY start_date ASC
