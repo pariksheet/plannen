@@ -80,7 +80,7 @@ function extractDomain(url: string): string | null {
 // updated_at, gcal_event_id, event_type, shared_with_*, enrollment_start_date,
 // which are rarely needed by callers and balloon token usage.
 const SLIM_EVENT_COLUMNS =
-  'id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, recurrence_rule, parent_event_id, completed_at, assigned_to'
+  'id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, recurrence_rule, parent_event_id, completed_at, assigned_to, subject_kind, subject_id, owner_attends'
 
 function slimEvent<T extends Record<string, unknown>>(e: T) {
   return {
@@ -97,6 +97,9 @@ function slimEvent<T extends Record<string, unknown>>(e: T) {
     enrollment_deadline: e.enrollment_deadline,
     completed_at: e.completed_at ?? null,
     assigned_to: e.assigned_to ?? null,
+    subject_kind: e.subject_kind ?? null,
+    subject_id: e.subject_id ?? null,
+    owner_attends: e.owner_attends ?? false,
   }
 }
 
@@ -117,7 +120,7 @@ async function listEvents(args: { status?: string; limit?: number; from_date?: s
     if (args.from_date) { params.push(args.from_date); where.push(`start_date >= $${params.length}`) }
     if (args.to_date) { params.push(args.to_date + 'T24:00:00'); where.push(`start_date < $${params.length}`) }
     params.push(args.limit ?? 10)
-    const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline
+    const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, subject_kind, subject_id, owner_attends
                  FROM plannen.events
                  WHERE ${where.join(' AND ')}
                  ORDER BY start_date ASC
@@ -229,6 +232,9 @@ async function createEvent(args: {
   event_status?: string
   recurrence_rule?: RecurrenceRule
   assigned_to?: string
+  subject_kind?: 'family_member' | 'user'
+  subject_id?: string
+  owner_attends?: boolean
 }) {
   const id = await uid()
   const tz = await getUserTimezone()
@@ -246,8 +252,9 @@ async function createEvent(args: {
       `INSERT INTO plannen.events
          (title, description, start_date, end_date, location, event_kind,
           enrollment_url, hashtags, event_type, event_status, created_by,
-          assigned_to, shared_with_friends, recurrence_rule)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'personal', $9, $10, $11, 'none', $12)
+          assigned_to, shared_with_friends, recurrence_rule,
+          subject_kind, subject_id, owner_attends)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'personal', $9, $10, $11, 'none', $12, $13, $14, $15)
        RETURNING *`,
       [
         args.title,
@@ -262,6 +269,9 @@ async function createEvent(args: {
         id,
         args.event_kind === 'todo' ? (args.assigned_to ?? id) : null,
         args.recurrence_rule ?? null,
+        args.subject_kind ?? null,
+        args.subject_id ?? null,
+        args.owner_attends ?? false,
       ],
     )
     if (rows.length === 0) throw new Error('Insert failed')
@@ -309,6 +319,9 @@ async function updateEvent(args: {
   location?: string
   event_status?: string
   enrollment_url?: string
+  subject_kind?: 'family_member' | 'user' | null
+  subject_id?: string | null
+  owner_attends?: boolean
 }) {
   const id = await uid()
   const { id: _id, ...rest } = args
@@ -2350,7 +2363,7 @@ async function getBriefingContext(args: { date?: string } = {}) {
           [userId],
         ),
         c.query(
-          `SELECT id, title, start_date, end_date, location, event_kind, hashtags
+          `SELECT id, title, start_date, end_date, location, event_kind, hashtags, subject_kind, subject_id, owner_attends
            FROM plannen.events
            WHERE created_by = $1 AND start_date::date = $2::date
              AND event_status <> 'cancelled'
@@ -2358,7 +2371,7 @@ async function getBriefingContext(args: { date?: string } = {}) {
           [userId, today],
         ),
         c.query(
-          `SELECT id, title, start_date, end_date, location, event_kind, hashtags
+          `SELECT id, title, start_date, end_date, location, event_kind, hashtags, subject_kind, subject_id, owner_attends
            FROM plannen.events
            WHERE created_by = $1 AND start_date::date = $2::date
              AND event_status <> 'cancelled'
@@ -2571,6 +2584,9 @@ const TOOLS: Tool[] = [
         location: { type: 'string' },
         event_kind: { type: 'string', enum: ['event', 'reminder', 'todo'] },
         assigned_to: { type: 'string', description: 'User UUID to assign a todo to (defaults to creator). Only meaningful for event_kind=todo.' },
+        subject_kind: { type: 'string', enum: ['family_member', 'user'], description: "Whose time this event is, if not the owner's. 'family_member' → a family_members id; 'user' → a connected friend's user id. Set together with subject_id." },
+        subject_id: { type: 'string', description: 'Id of the subject person (family member or connected user). Set together with subject_kind.' },
+        owner_attends: { type: 'boolean', description: "True if the owner is also occupied during this event (so it still counts as a clash). Default false. Only meaningful when a subject is set." },
         enrollment_url: { type: 'string' },
         hashtags: { type: 'array', items: { type: 'string' }, description: 'Tags without # (max 5)' },
         event_status: { type: 'string', enum: ['watching', 'planned', 'interested', 'going', 'cancelled', 'past', 'missed'], description: 'Initial status (default: going for future, past for past dates)' },
@@ -2605,6 +2621,9 @@ const TOOLS: Tool[] = [
         location: { type: 'string' },
         event_status: { type: 'string', enum: ['watching', 'planned', 'interested', 'going', 'cancelled', 'past', 'missed'] },
         enrollment_url: { type: 'string' },
+        subject_kind: { type: 'string', enum: ['family_member', 'user'], description: "Whose time this event is, if not the owner's. 'family_member' → a family_members id; 'user' → a connected friend's user id. Set together with subject_id." },
+        subject_id: { type: 'string', description: 'Id of the subject person (family member or connected user). Set together with subject_kind.' },
+        owner_attends: { type: 'boolean', description: "True if the owner is also occupied during this event (so it still counts as a clash). Default false. Only meaningful when a subject is set." },
       },
       required: ['id'],
     },
