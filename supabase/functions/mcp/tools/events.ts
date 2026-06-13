@@ -205,7 +205,7 @@ const listEvents: ToolHandler = async (args, ctx) => {
   if (a.from_date) { params.push(a.from_date); where.push(`start_date >= $${params.length}`) }
   if (a.to_date) { params.push(a.to_date + 'T24:00:00'); where.push(`start_date < $${params.length}`) }
   params.push(a.limit ?? 10)
-  const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline
+  const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, subject_kind, subject_id, owner_attends
                FROM plannen.events
                WHERE ${where.join(' AND ')}
                ORDER BY start_date ASC
