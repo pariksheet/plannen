@@ -28,6 +28,9 @@ export interface Event {
   parent_event_id?: string | null
   completed_at?: string | null
   assigned_to?: string | null
+  subject_kind?: 'family_member' | 'user' | null
+  subject_id?: string | null
+  owner_attends?: boolean
   // Enriched at query time — not DB columns
   parent_title?: string | null
   sessions_summary?: { total: number; past: number; missed: number; next_date: string | null } | null

@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-06-13
+
+### Event attribution — someone else's event stops blocking your calendar
+
+- **Mark an event as someone else's.** An event can now be attributed to a family member or a connected friend, so it still appears on your calendar but no longer counts as *you* being busy. A child's class or a friend's party you're just tracking stops raising false "⚠ overlaps" warnings against your own plans.
+- **Say when you're actually there.** Attribution and "is this my time" are independent: if you also attend — you stay rather than drop off — the event keeps normal clash detection, so a genuine double-booking still flags. When it's unclear, the safe default is "not my time" so you aren't nagged with overlaps.
+- **A name chip shows whose event it is.** Attributed events display a small muted chip with the person's name in the schedule. The subject and whether you attend are set conversationally — the assistant infers them from how you describe the event — and both server runtimes accept the new fields (a forward-only migration adds them).
+
 ## [0.6.2] - 2026-06-12
 
 ### Mailbox sync

@@ -75,6 +75,9 @@ const definitions: ToolDefinition[] = [
         location: { type: 'string' },
         event_kind: { type: 'string', enum: ['event', 'reminder', 'todo'] },
         assigned_to: { type: 'string', description: 'User UUID to assign a todo to (defaults to creator). Only meaningful for event_kind=todo.' },
+        subject_kind: { type: 'string', enum: ['family_member', 'user'], description: "Whose time this event is, if not the owner's. 'family_member' → a family_members id; 'user' → a connected friend's user id. Set together with subject_id." },
+        subject_id: { type: 'string', description: 'Id of the subject person (family member or connected user). Set together with subject_kind.' },
+        owner_attends: { type: 'boolean', description: "True if the owner is also occupied during this event (so it still counts as a clash). Default false. Only meaningful when a subject is set." },
         enrollment_url: { type: 'string' },
         hashtags: { type: 'array', items: { type: 'string' }, description: 'Tags without # (max 5)' },
         event_status: {
@@ -120,6 +123,9 @@ const definitions: ToolDefinition[] = [
           enum: ['watching', 'planned', 'interested', 'going', 'cancelled', 'past', 'missed'],
         },
         enrollment_url: { type: 'string' },
+        subject_kind: { type: 'string', enum: ['family_member', 'user'], description: "Whose time this event is, if not the owner's. 'family_member' → a family_members id; 'user' → a connected friend's user id. Set together with subject_id." },
+        subject_id: { type: 'string', description: 'Id of the subject person (family member or connected user). Set together with subject_kind.' },
+        owner_attends: { type: 'boolean', description: "True if the owner is also occupied during this event (so it still counts as a clash). Default false. Only meaningful when a subject is set." },
       },
       required: ['id'],
     },
@@ -199,7 +205,7 @@ const listEvents: ToolHandler = async (args, ctx) => {
   if (a.from_date) { params.push(a.from_date); where.push(`start_date >= $${params.length}`) }
   if (a.to_date) { params.push(a.to_date + 'T24:00:00'); where.push(`start_date < $${params.length}`) }
   params.push(a.limit ?? 10)
-  const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline
+  const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, subject_kind, subject_id, owner_attends
                FROM plannen.events
                WHERE ${where.join(' AND ')}
                ORDER BY start_date ASC
@@ -274,6 +280,9 @@ const createEvent: ToolHandler = async (args, ctx) => {
     location?: string
     event_kind?: string
     assigned_to?: string
+    subject_kind?: 'family_member' | 'user'
+    subject_id?: string
+    owner_attends?: boolean
     enrollment_url?: string
     hashtags?: string[]
     event_status?: string
@@ -296,8 +305,9 @@ const createEvent: ToolHandler = async (args, ctx) => {
     `INSERT INTO plannen.events
        (title, description, start_date, end_date, location, event_kind,
         enrollment_url, hashtags, event_type, event_status, created_by,
-        assigned_to, shared_with_friends, recurrence_rule)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'personal', $9, $10, $11, 'none', $12)
+        assigned_to, shared_with_friends, recurrence_rule,
+        subject_kind, subject_id, owner_attends)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'personal', $9, $10, $11, 'none', $12, $13, $14, $15)
      RETURNING *`,
     [
       a.title,
@@ -312,6 +322,9 @@ const createEvent: ToolHandler = async (args, ctx) => {
       ctx.userId,
       a.event_kind === 'todo' ? (a.assigned_to ?? ctx.userId) : null,
       a.recurrence_rule ?? null,
+      a.subject_kind ?? null,
+      a.subject_id ?? null,
+      a.owner_attends ?? false,
     ],
   )
   if (rows.length === 0) throw new Error('Insert failed')
@@ -359,6 +372,9 @@ const updateEvent: ToolHandler = async (args, ctx) => {
     location?: string
     event_status?: string
     enrollment_url?: string
+    subject_kind?: 'family_member' | 'user' | null
+    subject_id?: string | null
+    owner_attends?: boolean
   }
   const { id: _id, ...rest } = a
   // Naive timestamps mean wall-clock time in the user's tz — never the server tz.

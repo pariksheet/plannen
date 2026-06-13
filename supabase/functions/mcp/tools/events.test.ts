@@ -40,4 +40,43 @@ describe('events module', () => {
       eventsModule.dispatch.create_event({ start_date: '2026-06-15T10:00:00Z' }, ctx),
     ).rejects.toThrow(/title/i)
   })
+
+  it('create_event round-trips subject attribution fields', async () => {
+    const subjectId = '11111111-1111-4111-8111-111111111111'
+    const ctx = {
+      client: {
+        query: async (sql: string) => {
+          // timezone lookup → empty (defaults UTC); INSERT → echo a row.
+          if (/INSERT INTO plannen\.events/i.test(sql)) {
+            return {
+              rows: [{
+                id: 'e1',
+                title: 'Swim lesson',
+                start_date: '2026-06-15T10:00:00Z',
+                subject_kind: 'family_member',
+                subject_id: subjectId,
+                owner_attends: false,
+              }],
+              rowCount: 1,
+            }
+          }
+          return { rows: [], rowCount: 0 }
+        },
+      } as any,
+      userId: 'u1',
+    }
+    const result = await eventsModule.dispatch.create_event(
+      {
+        title: 'Swim lesson',
+        start_date: '2026-06-15T10:00:00Z',
+        subject_kind: 'family_member',
+        subject_id: subjectId,
+        owner_attends: false,
+      },
+      ctx,
+    ) as Record<string, unknown>
+    expect(result.subject_kind).toBe('family_member')
+    expect(result.subject_id).toBe(subjectId)
+    expect(result.owner_attends).toBe(false)
+  })
 })

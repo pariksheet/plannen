@@ -88,7 +88,7 @@ const getBriefingContext: ToolHandler = async (args, ctx) => {
         [id],
       ),
       ctx.client.query(
-        `SELECT id, title, start_date, end_date, location, event_kind, hashtags
+        `SELECT id, title, start_date, end_date, location, event_kind, hashtags, subject_kind, subject_id, owner_attends
          FROM plannen.events
          WHERE created_by = $1 AND start_date::date = $2::date
            AND event_status <> 'cancelled'
@@ -96,7 +96,7 @@ const getBriefingContext: ToolHandler = async (args, ctx) => {
         [id, today],
       ),
       ctx.client.query(
-        `SELECT id, title, start_date, end_date, location, event_kind, hashtags
+        `SELECT id, title, start_date, end_date, location, event_kind, hashtags, subject_kind, subject_id, owner_attends
          FROM plannen.events
          WHERE created_by = $1 AND start_date::date = $2::date
            AND event_status <> 'cancelled'

@@ -426,6 +426,23 @@ describe('ScheduleOverview', () => {
     ).toBeInTheDocument()
   })
 
+  it('renders a subject name chip when subjectNames contains the event subject_id', () => {
+    render(
+      <MemoryRouter>
+        <ScheduleOverview
+          events={[makeEvent({ id: 'sub1', title: 'Weekly call', start_date: todayIso(), subject_id: 'fm1' })]}
+          onEdit={vi.fn()}
+          onDelete={vi.fn()}
+          onShareSuccess={vi.fn()}
+          onHashtagClick={vi.fn()}
+          preferredVisitDates={{}}
+          subjectNames={{ fm1: 'Milo' }}
+        />
+      </MemoryRouter>
+    )
+    expect(screen.getByText('Milo')).toBeInTheDocument()
+  })
+
   it('excludes to-dos from the month-list sidebar (grid-only)', () => {
     const today = new Date()
     const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()

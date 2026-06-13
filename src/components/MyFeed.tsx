@@ -10,6 +10,7 @@ import { EventForm } from './EventForm'
 import { DiscoverButton } from './DiscoverButton'
 import { ScheduleOverview } from './ScheduleOverview'
 import { projectScheduleForDay } from '../services/schedulingService'
+import { dbClient } from '../lib/dbClient'
 import type { AttendanceInstanceRow, ResolvedObligationRow } from '../lib/dbClient/types'
 import { ConfirmModal, PromptModal } from './Modal'
 import { Plus, ChevronUp, Calendar, X } from 'lucide-react'
@@ -64,6 +65,7 @@ export function MyFeed() {
   const [preferredVisitDates, setPreferredVisitDates] = useState<Record<string, string | null>>({})
   const [attendancesToday, setAttendancesToday] = useState<AttendanceInstanceRow[]>([])
   const [obligationsToday, setObligationsToday] = useState<ResolvedObligationRow[]>([])
+  const [subjectNames, setSubjectNames] = useState<Record<string, string>>({})
   const [pastVisibleCount, setPastVisibleCount] = useState(5)
   const [showPast, setShowPast] = useState(false)
   const [activeHashtag, setActiveHashtag] = useState<string | null>(null)
@@ -148,6 +150,26 @@ export function MyFeed() {
       .catch((err) => {
         console.error('MyFeed: failed to project schedule', err)
       })
+    return () => { cancelled = true }
+  }, [])
+
+  // Build subject-id → display-name map for event attribution chips.
+  // Populated from family members (dbClient.relationships.listFamilyMembers).
+  // TODO friends: RelationshipRow has no display-name column; extend once the
+  // related_user profile is joinable from the web dbClient.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const members = await dbClient.relationships.listFamilyMembers()
+        if (cancelled) return
+        const map: Record<string, string> = {}
+        for (const m of members) map[m.id] = m.name
+        setSubjectNames(map)
+      } catch (err) {
+        console.error('MyFeed: failed to load subject names', err)
+      }
+    })()
     return () => { cancelled = true }
   }, [])
 
@@ -488,6 +510,7 @@ export function MyFeed() {
               preferredVisitDates={preferredVisitDates}
               attendancesToday={attendancesToday}
               obligationsToday={obligationsToday}
+              subjectNames={subjectNames}
               onEdit={handleEdit}
               onDelete={handleDeleteClick}
               onShareSuccess={loadEvents}
