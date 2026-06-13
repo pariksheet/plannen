@@ -96,6 +96,24 @@ describe('overlappingIds', () => {
     ])
     expect(ids.size).toBe(0)
   })
+
+  it("excludes a subject event the owner isn't attending — it never clashes", () => {
+    const ids = overlappingIds([
+      ev({ id: 'mine', start_date: '2026-06-10T11:00:00', end_date: '2026-06-10T12:00:00' }),
+      ev({ id: 'kid', subject_kind: 'family_member', subject_id: 'fm1', owner_attends: false,
+           start_date: '2026-06-10T11:30:00', end_date: '2026-06-10T12:30:00' }),
+    ])
+    expect(ids.size).toBe(0)
+  })
+
+  it('includes a subject event when the owner attends — it clashes normally', () => {
+    const ids = overlappingIds([
+      ev({ id: 'mine', start_date: '2026-06-10T11:00:00', end_date: '2026-06-10T12:00:00' }),
+      ev({ id: 'swim', subject_kind: 'family_member', subject_id: 'fm1', owner_attends: true,
+           start_date: '2026-06-10T11:30:00', end_date: '2026-06-10T12:30:00' }),
+    ])
+    expect(ids).toEqual(new Set(['mine', 'swim']))
+  })
 })
 
 describe('weekDays', () => {

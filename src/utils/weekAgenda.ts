@@ -88,7 +88,10 @@ const DEFAULT_DURATION_MS = 2 * 60 * 60 * 1000 // assume 2h when no end_date
 // reminder never clashes and never makes another event clash.
 export function overlappingIds(events: Event[]): Set<string> {
   const timed = events
-    .filter((e) => e.event_kind !== 'reminder' && e.start_date.length > 10)
+    .filter((e) =>
+      e.event_kind !== 'reminder' &&
+      (e.subject_id == null || e.owner_attends) && // a subject's event isn't the owner's busy time unless they attend
+      e.start_date.length > 10)
     .map((e) => {
       const start = new Date(e.start_date).getTime()
       const end = e.end_date ? new Date(e.end_date).getTime() : start + DEFAULT_DURATION_MS
