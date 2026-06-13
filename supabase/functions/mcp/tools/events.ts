@@ -316,13 +316,15 @@ const createEvent: ToolHandler = async (args, ctx) => {
 
   const hashtags = (a.hashtags ?? []).slice(0, 5)
 
+  // Default sharing; overridden by inheritance when joining a container.
+  // (shared_with_family was dropped in 20260520130000 — sharing is event_type
+  // + shared_with_friends; group-based sharing lives in junction tables.)
   let eventType = 'personal'
-  let sharedWithFamily = false
   let sharedWithFriends = 'none'
   if (a.group_id != null) {
     if (resolvedKind === 'container') throw new Error('a container cannot belong to another container')
     const { rows: cont } = await ctx.client.query(
-      `SELECT event_kind, event_type, shared_with_family, shared_with_friends
+      `SELECT event_kind, event_type, shared_with_friends
        FROM plannen.events WHERE id = $1 AND created_by = $2`,
       [a.group_id, ctx.userId],
     )
@@ -330,7 +332,6 @@ const createEvent: ToolHandler = async (args, ctx) => {
       throw new Error('group_id must reference a container you own')
     }
     eventType = cont[0].event_type
-    sharedWithFamily = cont[0].shared_with_family
     sharedWithFriends = cont[0].shared_with_friends
   }
 
@@ -338,9 +339,9 @@ const createEvent: ToolHandler = async (args, ctx) => {
     `INSERT INTO plannen.events
        (title, description, start_date, end_date, location, event_kind,
         enrollment_url, hashtags, event_type, event_status, created_by,
-        assigned_to, shared_with_family, shared_with_friends, recurrence_rule,
+        assigned_to, shared_with_friends, recurrence_rule,
         subject_kind, subject_id, owner_attends, group_id, list_label)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
      RETURNING *`,
     [
       a.title,
@@ -355,7 +356,6 @@ const createEvent: ToolHandler = async (args, ctx) => {
       event_status,
       ctx.userId,
       resolvedKind === 'todo' ? (a.assigned_to ?? ctx.userId) : null,
-      sharedWithFamily,
       sharedWithFriends,
       a.recurrence_rule ?? null,
       a.subject_kind ?? null,
