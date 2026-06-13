@@ -28,6 +28,10 @@ export interface ScheduleOverviewProps {
   // Optional so other callers keep working; the card hides when both are empty.
   attendancesToday?: AttendanceInstanceRow[]
   obligationsToday?: ResolvedObligationRow[]
+  // Maps an event's subject_id → display name (family member or connected friend),
+  // built by the parent (MyFeed) from already-loaded people. Used to label a chip
+  // on events that represent someone else's time. Optional → no chip when absent.
+  subjectNames?: Record<string, string>
 }
 
 const sketchHand = "font-['Caveat'] tracking-tight"
@@ -149,6 +153,7 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
         onHashtagClick={props.onHashtagClick}
         onToggleTodo={handleToggleTodo}
         onConvertKind={handleConvertKind}
+        subjectNames={props.subjectNames}
       />
       <ThisMonthCard
         events={events}
@@ -380,7 +385,7 @@ function OverdueCard({ events, ...actions }: { events: Event[] } & ActionProps) 
   )
 }
 
-function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
+function WeekCard({ events, subjectNames, ...actions }: { events: Event[]; subjectNames?: Record<string, string> } & ActionProps) {
   const now = useNow()
   const [range, setRange] = useState<'today' | 'this-week' | 'next-week'>('today')
   const addDays = (d: Date, n: number): Date => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
@@ -544,6 +549,11 @@ function WeekCard({ events, ...actions }: { events: Event[] } & ActionProps) {
                     {row.clash && (
                       <span className="ml-1.5 text-[11px] not-italic whitespace-nowrap bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-1.5 py-0.5">
                         ⚠ overlaps
+                      </span>
+                    )}
+                    {e.subject_id && subjectNames?.[e.subject_id] && (
+                      <span className="ml-1.5 text-[11px] not-italic whitespace-nowrap bg-slate-100 text-slate-600 border border-slate-200 rounded-full px-1.5 py-0.5">
+                        {subjectNames[e.subject_id]}
                       </span>
                     )}
                   </span>
