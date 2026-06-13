@@ -273,7 +273,7 @@ export function MyFeed() {
   }
 
   const filteredEvents = events
-    .filter((e) => activeKindFilter.has(e.event_kind === 'session' ? 'event' : e.event_kind))
+    .filter((e) => activeKindFilter.has(e.event_kind === 'session' || e.event_kind === 'container' ? 'event' : e.event_kind))
     .filter((e) => !activeHashtag || (e.hashtags ?? []).includes(activeHashtag))
     .filter((e) => {
       if (!selectedDate) return true
