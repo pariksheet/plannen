@@ -2389,7 +2389,7 @@ async function getBriefingContext(args: { date?: string } = {}) {
   const completionsFrom = monthStart < wkStart ? monthStart : wkStart
 
   return await withUserContext(userId, async (c) => {
-    const [userRow, circleRow, primaryCircleUsersRow, eventsTodayRow, eventsTomorrowRow, recentPastRow, practicesRow, completionsRow, locationsRow, attendancesRow, blackoutsRow, obligationsRow] =
+    const [userRow, circleRow, primaryCircleUsersRow, eventsTodayRow, eventsTomorrowRow, recentPastRow, practicesRow, completionsRow, locationsRow, attendancesRow, blackoutsRow, obligationsRow, overdueRow] =
       await Promise.all([
         c.query(
           `SELECT u.id, u.full_name, u.preferred_language, up.timezone, up.primary_circle_group_ids
@@ -2478,6 +2478,18 @@ async function getBriefingContext(args: { date?: string } = {}) {
            WHERE o.user_id = $1 AND o.active = true AND a.active = true`,
           [userId],
         ),
+        c.query(
+          `SELECT id, title, start_date, location, event_kind
+           FROM plannen.events
+           WHERE created_by = $1
+             AND event_kind = 'todo'
+             AND completed_at IS NULL
+             AND event_status <> 'cancelled'
+             AND start_date::date BETWEEN ($2::date - INTERVAL '30 days')::date
+                                      AND ($2::date - INTERVAL '1 day')::date
+           ORDER BY start_date ASC`,
+          [userId, today],
+        ),
       ])
 
     type CRow = { practice_id: string; completed_on: string }
@@ -2547,6 +2559,7 @@ async function getBriefingContext(args: { date?: string } = {}) {
       locations: locationsRow.rows,
       attendances_today: attendancesToday,
       obligations_today: obligationsToday,
+      overdue_todos: overdueRow.rows,
     }
   })
 }
