@@ -70,19 +70,43 @@ export async function setPrimaryGroupId(groupId: string | null): Promise<{ error
 }
 
 /**
- * Rename a group (only creator). Group update is not surfaced via the v0
- * REST contract — return a no-op success for now.
+ * Rename a group (only creator). Tier 1+ updates plannen.friend_groups
+ * directly via supabase-js (RLS limits the row to the creator). Tier 0 has
+ * no group concept.
  */
 export async function updateGroup(id: string, name: string): Promise<{ data: FriendGroup | null; error: Error | null }> {
-  void name
-  void id
-  return { data: null, error: new Error('updateGroup is not supported in this backend version') }
+  if (isTierZero()) return { data: null, error: new Error('Groups are not available in single-user mode.') }
+  try {
+    const { data, error } = await supabase
+      .from('friend_groups')
+      .update({ name: name.trim() })
+      .eq('id', id)
+      .select()
+      .single()
+    if (error) throw new Error(error.message)
+    return { data: data as unknown as FriendGroup, error: null }
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e : new Error('Rename group failed') }
+  }
 }
 
-/** Delete a group (only creator). Not surfaced via v0 REST. */
+/** Delete a group (only creator). Members and event/story share rows cascade
+ *  on the friend_groups FK. Clears the user's primary pointer first if it
+ *  references this group. Tier 1+ only. */
 export async function deleteGroup(id: string): Promise<{ error: Error | null }> {
-  void id
-  return { error: new Error('deleteGroup is not supported in this backend version') }
+  if (isTierZero()) return { error: new Error('Groups are not available in single-user mode.') }
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      // Best-effort: drop a dangling primary_group_id before the delete.
+      await supabase.from('users').update({ primary_group_id: null }).eq('id', user.id).eq('primary_group_id', id)
+    }
+    const { error } = await supabase.from('friend_groups').delete().eq('id', id)
+    if (error) throw new Error(error.message)
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e : new Error('Delete group failed') }
+  }
 }
 
 /** Member user IDs for a group. Tier-1 reads friend_group_members via supabase-js. */
@@ -161,6 +185,26 @@ export async function setEventSharedWithGroups(eventId: string, groupIds: string
     return { error: null }
   } catch (e) {
     return { error: e instanceof Error ? e : new Error('setEventSharedWithGroups failed') }
+  }
+}
+
+/** Set which users an event is shared with directly. Tier-1 writes
+ *  event_shared_with_users via supabase-js (mirror of the group writer). */
+export async function setEventSharedWithUsers(eventId: string, userIds: string[]): Promise<{ error: Error | null }> {
+  if (isTierZero()) return { error: null }
+  try {
+    const { error: delErr } = await supabase
+      .from('event_shared_with_users')
+      .delete()
+      .eq('event_id', eventId)
+    if (delErr) throw new Error(delErr.message)
+    if (userIds.length === 0) return { error: null }
+    const rows = userIds.map((user_id) => ({ event_id: eventId, user_id }))
+    const { error: insErr } = await supabase.from('event_shared_with_users').insert(rows)
+    if (insErr) throw new Error(insErr.message)
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e : new Error('setEventSharedWithUsers failed') }
   }
 }
 

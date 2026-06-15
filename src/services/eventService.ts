@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { isTierZero } from '../lib/tier'
 import { Event, EventFormData, EventStatus, resolveEventStatus } from '../types/event'
 import { createRecurringTask, createEnrollmentMonitorTask } from './agentTaskService'
-import { setEventSharedWithGroups } from './groupService'
+import { setEventSharedWithGroups, setEventSharedWithUsers } from './groupService'
 import { generateSessionDates, RecurrenceRule } from '../utils/recurrence'
 import { extractDomain } from '../utils/eventSource'
 import { notifyEventShared } from '../lib/notify'
@@ -110,8 +110,7 @@ export async function createEvent(
     await createEnrollmentMonitorTask(event.id)
   }
   if (data.shared_with_friends === 'selected' && data.shared_with_user_ids?.length) {
-    // event_shared_with_users is not yet surfaced via REST — skip in Tier 0;
-    // setEventSharedWithGroups below handles the group-share path.
+    await setEventSharedWithUsers(event.id, data.shared_with_user_ids)
   }
   if (data.shared_with_group_ids?.length) {
     await setEventSharedWithGroups(event.id, data.shared_with_group_ids)
@@ -144,6 +143,7 @@ export async function updateEvent(
   }
   delete payload.event_status
   const sharedWithGroupIds = payload.shared_with_group_ids as string[] | undefined
+  const sharedWithUserIds = payload.shared_with_user_ids as string[] | undefined
   delete payload.shared_with_user_ids
   delete payload.shared_with_group_ids
 
@@ -162,6 +162,15 @@ export async function updateEvent(
     await setEventSharedWithGroups(id, sharedWithGroupIds)
     if (sharedWithGroupIds.length > 0) {
       notifyEventShared(id, { group_ids: sharedWithGroupIds })
+    }
+  }
+  if (sharedWithUserIds !== undefined) {
+    // Only persist direct user-shares when sharing mode is "selected";
+    // switching to none/all clears the per-user rows.
+    const ids = data.shared_with_friends === 'selected' ? sharedWithUserIds : []
+    await setEventSharedWithUsers(id, ids)
+    if (ids.length > 0) {
+      notifyEventShared(id, { user_ids: ids })
     }
   }
   if (data.enrollment_url) {
@@ -193,9 +202,19 @@ export async function getEvent(id: string): Promise<{ data: Event | null; error:
   }
 }
 
-export async function getEventSharedWithUserIds(_eventId: string): Promise<{ data: string[]; error: Error | null }> {
-  // event_shared_with_users is not surfaced via REST yet — return empty list.
-  return { data: [], error: null }
+export async function getEventSharedWithUserIds(eventId: string): Promise<{ data: string[]; error: Error | null }> {
+  // Tier 0 is single-user — no direct user-shares to read.
+  if (isTierZero()) return { data: [], error: null }
+  try {
+    const { data, error } = await supabase
+      .from('event_shared_with_users')
+      .select('user_id')
+      .eq('event_id', eventId)
+    if (error) throw new Error(error.message)
+    return { data: (data ?? []).map((r) => r.user_id as string), error: null }
+  } catch (e) {
+    return { data: [], error: e instanceof Error ? e : new Error('getEventSharedWithUserIds failed') }
+  }
 }
 
 export { getEventSharedWithGroupIds } from './groupService'
