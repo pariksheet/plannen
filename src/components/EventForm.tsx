@@ -785,7 +785,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
                 onClick={() => extractPhotoFileInputRef.current?.click()}
                 disabled={scraping || extractingFromImage}
                 title="Upload a flyer or poster to auto-fill the details"
-                className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-md border border-indigo-200 bg-indigo-50 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 flex-shrink-0"
+                className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-md border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex-shrink-0"
               >
                 {extractingFromImage ? <Loader className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                 <span className="hidden sm:inline">{extractingFromImage ? 'Scanning…' : 'Scan flyer'}</span>
