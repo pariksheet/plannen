@@ -9,6 +9,7 @@ import { ProfileFamilyMembers } from '../components/ProfileFamilyMembers'
 import { ProfileRoutines } from '../components/ProfileRoutines'
 import { ProfileStoryLanguages } from '../components/ProfileStoryLanguages'
 import { ProfileFacts } from '../components/ProfileFacts'
+import { ProfileSources } from '../components/ProfileSources'
 import { ProfilePasskeys } from '../components/ProfilePasskeys'
 
 export function Profile() {
@@ -39,6 +40,7 @@ export function Profile() {
           <ProfileStoryLanguages />
           <ProfilePasskeys />
           <ProfileFacts />
+          <ProfileSources />
         </div>
       </div>
     </div>

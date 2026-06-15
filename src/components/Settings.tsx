@@ -6,6 +6,7 @@ import { pushSupported, getPushSubscription, enablePush, disablePush, sendTestPu
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { SettingsTokens } from './SettingsTokens'
+import { IgnoreRulesManager } from './IgnoreRulesManager'
 
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL ?? '') as string
 
@@ -417,6 +418,10 @@ export function Settings() {
           <SettingsTokens jwt={sessionJwt} supabaseUrl={SUPABASE_URL} />
         </div>
       )}
+
+      <div className="mt-6">
+        <IgnoreRulesManager />
+      </div>
     </div>
   )
 }
