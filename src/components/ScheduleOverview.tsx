@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bell, Calendar } from 'lucide-react'
+import { Bell, Calendar, Briefcase } from 'lucide-react'
 import { Event } from '../types/event'
 import { getTodayWeather, TodayWeather } from '../services/weatherService'
 import { getLocations } from '../services/profileService'
@@ -501,6 +501,7 @@ function WeekCard({ events, subjectNames, ...actions }: { events: Event[]; subje
           const e = row.event
           const isReminder = e.event_kind === 'reminder'
           const isTodo = e.event_kind === 'todo'
+          const isContainer = e.event_kind === 'container'
           const isDone = isTodo && !!e.completed_at
           const state = row.isToday ? eventTimeState(e, now) : null
           const t = timeOf(e)
@@ -521,6 +522,8 @@ function WeekCard({ events, subjectNames, ...actions }: { events: Event[]; subje
                   />
                 ) : isReminder ? (
                   <Bell className="h-4 w-4 text-green-600 shrink-0" aria-hidden />
+                ) : isContainer ? (
+                  <Briefcase className="h-4 w-4 text-violet-600 shrink-0" aria-hidden />
                 ) : (
                   <Calendar className="h-4 w-4 text-blue-600 shrink-0" aria-hidden />
                 )}
@@ -536,7 +539,7 @@ function WeekCard({ events, subjectNames, ...actions }: { events: Event[]; subje
                       isDone ? 'line-through text-gray-400'
                         : state === 'now' ? 'font-semibold text-gray-900'
                           : 'text-gray-800'
-                    } ${isReminder ? 'italic text-gray-600' : ''}`}
+                    } ${isReminder ? 'italic text-gray-600' : ''} ${isContainer ? 'text-violet-800' : ''}`}
                   >
                     {state === 'now' && <span className="text-indigo-600 font-bold mr-1">→</span>}
                     {e.title}
@@ -548,6 +551,11 @@ function WeekCard({ events, subjectNames, ...actions }: { events: Event[]; subje
                     {isTodo && (
                       <span className="ml-1.5 text-[11px] not-italic bg-amber-50 text-amber-700 border border-amber-100 rounded-full px-1.5 py-0.5">
                         to-do
+                      </span>
+                    )}
+                    {isContainer && (
+                      <span className="ml-1.5 text-[11px] not-italic bg-violet-50 text-violet-700 border border-violet-100 rounded-full px-1.5 py-0.5">
+                        trip
                       </span>
                     )}
                     {row.clash && (
@@ -702,6 +710,7 @@ function ThisMonthCard({ events, preferredVisitDates, ...actions }: ThisMonthCar
                     const time = timeOf(e)
                     const isReminder = e.event_kind === 'reminder'
                     const isTodo = e.event_kind === 'todo'
+                    const isContainer = e.event_kind === 'container'
                     const isDone = isTodo && !!e.completed_at
                     return (
                       <li key={e.id} data-event-row>
@@ -717,6 +726,8 @@ function ThisMonthCard({ events, preferredVisitDates, ...actions }: ThisMonthCar
                             />
                           ) : isReminder ? (
                             <Bell className="h-4 w-4 text-green-600 shrink-0" aria-hidden />
+                          ) : isContainer ? (
+                            <Briefcase className="h-4 w-4 text-violet-600 shrink-0" aria-hidden />
                           ) : (
                             <Calendar className="h-4 w-4 text-blue-600 shrink-0" aria-hidden />
                           )}
@@ -727,9 +738,14 @@ function ThisMonthCard({ events, preferredVisitDates, ...actions }: ThisMonthCar
                             className="flex-1 text-left text-base hover:text-indigo-700"
                           >
                             {time && <span className="text-gray-500 mr-2 text-sm">{time}</span>}
-                            <span className={`${isDone ? 'line-through text-gray-400' : 'font-semibold text-gray-900'} ${isReminder ? 'italic text-gray-600' : ''}`}>
+                            <span className={`${isDone ? 'line-through text-gray-400' : 'font-semibold text-gray-900'} ${isReminder ? 'italic text-gray-600' : ''} ${isContainer ? 'text-violet-800' : ''}`}>
                               {e.title}
                             </span>
+                            {isContainer && (
+                              <span className="ml-1.5 text-[11px] font-normal not-italic bg-violet-50 text-violet-700 border border-violet-100 rounded-full px-1.5 py-0.5">
+                                trip
+                              </span>
+                            )}
                           </button>
                         </div>
                         {selectedId === e.id && <QuickEventCard event={e} {...actions} />}
@@ -764,6 +780,11 @@ function ThisMonthCard({ events, preferredVisitDates, ...actions }: ThisMonthCar
                         {dateLabel}{time ? ` ${time}` : ''}
                       </span>
                       {entry.title}{suffix && <span className="text-gray-500 font-normal">{suffix}</span>}
+                      {entry.firstEvent.event_kind === 'container' && (
+                        <span className="ml-1.5 text-[11px] font-normal whitespace-nowrap bg-violet-50 text-violet-700 border border-violet-100 rounded-full px-1.5 py-0.5">
+                          trip
+                        </span>
+                      )}
                       {isToday && (
                         <span className="ml-1.5 text-[11px] font-normal whitespace-nowrap bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-1.5 py-0.5">
                           today
