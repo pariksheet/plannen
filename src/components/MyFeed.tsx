@@ -15,12 +15,12 @@ import { projectScheduleForDay } from '../services/schedulingService'
 import { dbClient } from '../lib/dbClient'
 import type { AttendanceInstanceRow, ResolvedObligationRow } from '../lib/dbClient/types'
 import { ConfirmModal, PromptModal } from './Modal'
-import { Plus, ChevronUp, ChevronDown, Calendar, X, Eye, Briefcase, Pencil, Trash2 } from 'lucide-react'
+import { Plus, ChevronUp, ChevronDown, Calendar, X, Eye, Briefcase, Pencil, Trash2, Share2 } from 'lucide-react'
 import { format } from 'date-fns'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { deleteEvent, completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
-import { deleteContainer } from '../services/containerService'
+import { deleteContainer, syncTripSharing } from '../services/containerService'
 import { supabase } from '../lib/supabase'
 
 // Identifies events auto-created by the mailbox-sync routine.
@@ -248,6 +248,17 @@ export function MyFeed() {
     setFeedError(null)
     const { error } = await deleteContainer(trip.id)
     if (error) { setFeedError(error.message); return }
+    loadEvents()
+  }
+
+  const handleSyncTrip = async (trip: Event) => {
+    const ids = events.filter((e) => e.group_id === trip.id).map((e) => e.id)
+    if (ids.length === 0) return
+    if (!window.confirm(`Share all ${ids.length} item${ids.length === 1 ? '' : 's'} in "${trip.title}" with the same people as the trip?`)) return
+    setFeedError(null)
+    const { error } = await syncTripSharing(trip.id, ids)
+    if (error) { setFeedError(error.message); return }
+    showToast(`Shared ${ids.length} item${ids.length === 1 ? '' : 's'} like the trip`)
     loadEvents()
   }
 
@@ -486,6 +497,17 @@ export function MyFeed() {
                         <p className="text-xs text-gray-500">{range}</p>
                       </div>
                       <div className="flex items-center flex-shrink-0">
+                        {members.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handleSyncTrip(t)}
+                            className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center text-gray-400 hover:text-indigo-600"
+                            aria-label={`Share items in ${t.title} like the trip`}
+                            title="Share everything in this trip with the same people as the trip"
+                          >
+                            <Share2 className="h-4 w-4" />
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => handleEdit(t)}
