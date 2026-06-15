@@ -80,13 +80,13 @@ describe('EventForm – To-do kind', () => {
     const titleInput = screen.getByLabelText(/title/i)
     await user.type(titleInput, 'Renew passport')
 
-    // Fill start date (lean flow shows start date on step 1). The field is now
-    // pre-seeded with a default, so clear it before typing the test value.
-    const startInput = screen.getByLabelText(/start date/i)
+    // Fill the due date (to-dos are a single step with a "Due date" field,
+    // pre-seeded with a default, so clear it before typing the test value).
+    const startInput = screen.getByLabelText(/due date/i)
     await user.clear(startInput)
     await user.type(startInput, '2026-12-01T10:00')
 
-    // The lean "Create" fast-path button should be available on step 1
+    // To-dos are single-step, so the footer button is "Create".
     const createBtn = screen.getByRole('button', { name: /^create$/i })
     await user.click(createBtn)
 
@@ -117,17 +117,26 @@ describe('date helpers', () => {
 })
 
 describe('EventForm – smart defaults & validation', () => {
-  it('pre-seeds a default start (top-of-hour) and end on create', async () => {
+  it('pre-seeds a default start (top-of-hour) and end on create (event)', async () => {
     const user = userEvent.setup()
     renderForm()
-    // Switch to To-do so the date fields render on step 1.
-    await user.click(screen.getByRole('button', { name: /^to-do$/i }))
+    // Event is the default kind; its date fields live on step 2.
+    await user.type(screen.getByLabelText(/title/i), 'Picnic')
+    await user.click(screen.getByRole('button', { name: /^next$/i }))
     const startInput = screen.getByLabelText(/start date/i) as HTMLInputElement
     const endInput = screen.getByLabelText(/end date/i) as HTMLInputElement
     expect(startInput.value).not.toBe('')
     expect(startInput.value.endsWith(':00')).toBe(true)
-    // End defaults to one hour after the start.
+    // Events default the end to one hour after the start.
     expect(endInput.value).toBe(plusOneHourLocal(startInput.value))
+  })
+
+  it('does not give a to-do an end field', async () => {
+    const user = userEvent.setup()
+    renderForm()
+    await user.click(screen.getByRole('button', { name: /^to-do$/i }))
+    expect(screen.getByLabelText(/due date/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/end (date|time)/i)).toBeNull()
   })
 
   it('shows a soft note when a pasted link cannot be read', async () => {
@@ -165,13 +174,14 @@ describe('EventForm – smart defaults & validation', () => {
     const user = userEvent.setup()
     mockCreateEvent.mockResolvedValue({ data: { id: 'x' }, error: null })
     renderForm()
-    await user.click(screen.getByRole('button', { name: /^to-do$/i }))
+    // Reminder is single-step and has an optional end field.
+    await user.click(screen.getByRole('button', { name: /^reminder$/i }))
     await user.type(screen.getByLabelText(/title/i), 'Bad range')
 
-    const startInput = screen.getByLabelText(/start date/i)
+    const startInput = screen.getByLabelText(/date & time/i)
     await user.clear(startInput)
     await user.type(startInput, '2026-12-01T10:00')
-    const endInput = screen.getByLabelText(/end date/i)
+    const endInput = screen.getByLabelText(/end time/i)
     await user.clear(endInput)
     await user.type(endInput, '2026-12-01T09:00')
 

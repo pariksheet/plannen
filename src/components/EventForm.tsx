@@ -117,7 +117,6 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
   const coverFileInputRef = useRef<HTMLInputElement>(null)
   const modalContentRef = useRef<HTMLDivElement>(null)
   const submitButtonRef = useRef<HTMLButtonElement>(null)
-  const createReminderButtonRef = useRef<HTMLButtonElement>(null)
   const [error, setError] = useState('')
   const [recurrenceFreq, setRecurrenceFreq] = useState<'none' | 'daily' | 'weekly' | 'monthly'>('none')
   const [recurrenceCount, setRecurrenceCount] = useState(8)
@@ -151,10 +150,12 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
     // Smart defaults on create: seed the start to the next round hour and the
     // end to an hour later, so the most-used fields aren't empty. On edit the
     // effect below overwrites these from the event, so leave them blank.
+    const kind = raw.event_kind ?? base.event_kind
     const rawStart = raw.start_date ? toDateTimeLocal(raw.start_date) : ''
     const rawEnd = raw.end_date ? toDateTimeLocal(raw.end_date) : ''
     const start_date = rawStart || (event ? base.start_date : nextRoundedHourLocal())
-    const end_date = rawEnd || (event ? base.end_date : (start_date ? plusOneHourLocal(start_date) : base.end_date))
+    // Only events get an auto end (start + 1h). Reminders/to-dos start blank.
+    const end_date = rawEnd || (event || kind !== 'event' ? base.end_date : (start_date ? plusOneHourLocal(start_date) : base.end_date))
     return {
       ...base,
       ...raw,
@@ -213,7 +214,9 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
     new Date(formData.start_date).getTime() < new Date(formData.end_date).getTime()
   )
 
-  const effectiveSteps = isLeanKind ? 2 : WIZARD_STEPS
+  // Reminders and to-dos are a single screen — everything fits on step 1, so
+  // there's no wizard for them. Only full events use the 4-step flow.
+  const effectiveSteps = isLeanKind ? 1 : WIZARD_STEPS
   const canProceedStep1 = () => (formData.title ?? '').trim() !== ''
   const canProceedStep2 = () => (formData.start_date ?? '').trim() !== ''
   const canSubmitLeanFromStep1 = () => canProceedStep1() && canProceedStep2()
@@ -232,18 +235,19 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
   }
   const goBack = () => setStep((s) => Math.max(s - 1, 1))
 
-  // Keep the end coherent with the start: when the start changes, bump the end
-  // to an hour later if it's empty or would otherwise fall on/before the new
-  // start (which would be an invalid range).
+  // Keep the end coherent with the start. To-dos have no end. Events auto-fill
+  // an end an hour later (and bump it if the start moves past it). Reminders
+  // never get an auto end, but a manually-set one is bumped if it'd invert.
   const handleStartChange = (value: string) => {
     setFormData((prev) => {
-      const endInvalid =
-        !prev.end_date ||
-        (value && new Date(prev.end_date).getTime() <= new Date(value).getTime())
+      if (prev.event_kind === 'todo') return { ...prev, start_date: value, end_date: '' }
+      const hasEnd = !!prev.end_date
+      const endBeforeStart = hasEnd && !!value && new Date(prev.end_date).getTime() <= new Date(value).getTime()
+      const fill = prev.event_kind === 'event' ? (!hasEnd || endBeforeStart) : endBeforeStart
       return {
         ...prev,
         start_date: value,
-        end_date: endInvalid && value ? plusOneHourLocal(value) : prev.end_date,
+        end_date: fill && value ? plusOneHourLocal(value) : prev.end_date,
       }
     })
   }
@@ -345,7 +349,12 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
       return
     }
     const native = e.nativeEvent as SubmitEvent
-    if (native.submitter != null && native.submitter !== submitButtonRef.current && native.submitter !== createReminderButtonRef.current) return
+    if (native.submitter != null && native.submitter !== submitButtonRef.current) return
+    // Single-step lean kinds skip the Next gates, so validate here.
+    if (isLeanKind && !canSubmitLeanFromStep1()) {
+      setError(!(formData.title ?? '').trim() ? 'Please enter a title.' : 'Please enter a date and time.')
+      return
+    }
     // Guard against an inverted range before it silently reaches the DB.
     if (
       formData.start_date &&
@@ -451,10 +460,14 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               <X className="h-6 w-6" />
             </button>
           </div>
-          <p className="text-xs text-gray-500 mt-1">Step {step} of {effectiveSteps}</p>
-          <div className="mt-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-            <div className="h-full bg-indigo-600 rounded-full transition-all duration-200" style={{ width: `${(step / effectiveSteps) * 100}%` }} />
-          </div>
+          {effectiveSteps > 1 && (
+            <>
+              <p className="text-xs text-gray-500 mt-1">Step {step} of {effectiveSteps}</p>
+              <div className="mt-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                <div className="h-full bg-indigo-600 rounded-full transition-all duration-200" style={{ width: `${(step / effectiveSteps) * 100}%` }} />
+              </div>
+            </>
+          )}
         </div>
         <form onSubmit={handleSubmit} className="p-4 sm:p-6 min-w-0 flex flex-col min-h-0">
           {error && (
@@ -469,7 +482,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => setFormData((prev) => ({ ...prev, event_kind: 'event' }))}
+                onClick={() => setFormData((prev) => ({ ...prev, event_kind: 'event', end_date: prev.end_date || (prev.start_date ? plusOneHourLocal(prev.start_date) : '') }))}
                 className={`min-h-[44px] flex-1 px-4 py-2.5 rounded-md text-sm font-medium border-2 transition-colors ${
                   formData.event_kind === 'event'
                     ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
@@ -480,7 +493,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               </button>
               <button
                 type="button"
-                onClick={() => { setFormData((prev) => ({ ...prev, event_kind: 'reminder' })); setStep(1) }}
+                onClick={() => { setFormData((prev) => ({ ...prev, event_kind: 'reminder', end_date: '' })); setStep(1) }}
                 className={`min-h-[44px] flex-1 px-4 py-2.5 rounded-md text-sm font-medium border-2 transition-colors ${
                   formData.event_kind === 'reminder'
                     ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
@@ -491,7 +504,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               </button>
               <button
                 type="button"
-                onClick={() => { setFormData((prev) => ({ ...prev, event_kind: 'todo' })); setStep(1) }}
+                onClick={() => { setFormData((prev) => ({ ...prev, event_kind: 'todo', end_date: '' })); setStep(1) }}
                 className={`min-h-[44px] flex-1 px-4 py-2.5 rounded-md text-sm font-medium border-2 transition-colors ${
                   formData.event_kind === 'todo'
                     ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
@@ -533,9 +546,11 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
             />
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className={`grid grid-cols-1 ${formData.event_kind === 'todo' ? '' : 'md:grid-cols-2'} gap-4`}>
             <div>
-              <label htmlFor="start_date" className="block text-sm font-medium text-gray-700 mb-1">Start Date & Time *</label>
+              <label htmlFor="start_date" className="block text-sm font-medium text-gray-700 mb-1">
+                {formData.event_kind === 'todo' ? 'Due date & time *' : 'Date & time *'}
+              </label>
               <input
                 type="datetime-local"
                 id="start_date"
@@ -545,16 +560,18 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
                 className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
               />
             </div>
-            <div>
-              <label htmlFor="end_date" className="block text-sm font-medium text-gray-700 mb-1">End Date & Time</label>
-              <input
-                type="datetime-local"
-                id="end_date"
-                value={formData.end_date}
-                onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
-                className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              />
-            </div>
+            {formData.event_kind === 'reminder' && (
+              <div>
+                <label htmlFor="end_date" className="block text-sm font-medium text-gray-700 mb-1">End time (optional)</label>
+                <input
+                  type="datetime-local"
+                  id="end_date"
+                  value={formData.end_date}
+                  onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
+                  className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+            )}
           </div>
           <div>
             <label htmlFor="hashtags" className="block text-sm font-medium text-gray-700 mb-1">Hashtags</label>
@@ -857,32 +874,32 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               </p>
             </div>
           )}
-          {formData.event_kind === 'event' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="enrollment_start_date" className="block text-sm font-medium text-gray-700 mb-1">Registration opens</label>
-              <input
-                type="datetime-local"
-                id="enrollment_start_date"
-                value={formData.enrollment_start_date}
-                onChange={(e) => setFormData({ ...formData, enrollment_start_date: e.target.value })}
-                className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              />
+          {formData.event_kind === 'event' && !!(formData.enrollment_url?.trim() || formData.enrollment_start_date || formData.enrollment_deadline) && (
+          <div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="enrollment_start_date" className="block text-sm font-medium text-gray-700 mb-1">Registration opens</label>
+                <input
+                  type="datetime-local"
+                  id="enrollment_start_date"
+                  value={formData.enrollment_start_date}
+                  onChange={(e) => setFormData({ ...formData, enrollment_start_date: e.target.value })}
+                  className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+              <div>
+                <label htmlFor="enrollment_deadline" className="block text-sm font-medium text-gray-700 mb-1">Registration deadline</label>
+                <input
+                  type="datetime-local"
+                  id="enrollment_deadline"
+                  value={formData.enrollment_deadline}
+                  onChange={(e) => setFormData({ ...formData, enrollment_deadline: e.target.value })}
+                  className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
             </div>
-            <div>
-              <label htmlFor="enrollment_deadline" className="block text-sm font-medium text-gray-700 mb-1">Registration deadline</label>
-              <input
-                type="datetime-local"
-                id="enrollment_deadline"
-                value={formData.enrollment_deadline}
-                onChange={(e) => setFormData({ ...formData, enrollment_deadline: e.target.value })}
-                className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              />
-            </div>
+            <p className="text-xs text-gray-500 mt-1">Optional. Leave both blank for walk-in events.</p>
           </div>
-          )}
-          {formData.event_kind === 'event' && (
-          <p className="text-xs text-gray-500 -mt-2 mb-2">Optional. Leave both blank for walk-in events.</p>
           )}
           </>
           )}
@@ -1035,35 +1052,23 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               </button>
             )}
             {step < effectiveSteps ? (
-              <>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    goNext()
-                  }}
-                  className="min-h-[44px] px-4 py-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 inline-flex items-center gap-1.5"
-                >
-                  Next
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-                {isLeanKind && step === 1 && !event && (
-                  <button
-                    ref={createReminderButtonRef}
-                    type="submit"
-                    disabled={loading || !canSubmitLeanFromStep1()}
-                    className="min-h-[44px] px-4 py-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
-                  >
-                    {loading ? 'Creating...' : 'Create'}
-                  </button>
-                )}
-              </>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  goNext()
+                }}
+                className="min-h-[44px] px-4 py-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 inline-flex items-center gap-1.5"
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </button>
             ) : (
               <button
                 ref={submitButtonRef}
                 type="submit"
-                disabled={loading}
+                disabled={loading || (isLeanKind && !canSubmitLeanFromStep1())}
                 className="min-h-[44px] px-4 py-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
               >
                 {loading ? 'Saving...' : event ? 'Update' : 'Create'}
