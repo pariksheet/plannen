@@ -25,9 +25,32 @@ describe('briefings module', () => {
     }
     await briefingsModule.dispatch.get_briefing_context({ date: '2026-06-04' }, ctx)
     const eventQueries = queries.filter((q) => /FROM plannen\.events/i.test(q.sql))
-    expect(eventQueries).toHaveLength(3) // today, tomorrow, recent past
+    expect(eventQueries).toHaveLength(4) // today, tomorrow, recent past, overdue todos
     for (const q of eventQueries) {
       expect(q.sql).toMatch(/event_status\s*<>\s*'cancelled'/i)
     }
+  })
+
+  it('get_briefing_context queries overdue todos: open, not cancelled, todo-kind, 30d window', async () => {
+    const queries: { sql: string; params: unknown[] }[] = []
+    const ctx = {
+      client: {
+        query: async (sql: string, params: unknown[] = []) => {
+          queries.push({ sql, params })
+          return { rows: [], rowCount: 0 }
+        },
+      } as any,
+      userId: 'u1',
+    }
+    await briefingsModule.dispatch.get_briefing_context({ date: '2026-06-15' }, ctx)
+    const overdue = queries.find(
+      (q) => /FROM plannen\.events/i.test(q.sql) && /completed_at IS NULL/i.test(q.sql),
+    )
+    expect(overdue).toBeDefined()
+    expect(overdue!.sql).toMatch(/event_kind\s*=\s*'todo'/i)
+    expect(overdue!.sql).toMatch(/event_status\s*<>\s*'cancelled'/i)
+    expect(overdue!.sql).toMatch(/INTERVAL\s*'30 days'/i)
+    expect(overdue!.sql).toMatch(/INTERVAL\s*'1 day'/i)
+    expect(overdue!.params).toEqual(['u1', '2026-06-15'])
   })
 })
