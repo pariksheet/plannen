@@ -63,7 +63,7 @@ const getBriefingContext: ToolHandler = async (args, ctx) => {
   const monthStart = `${today.slice(0, 7)}-01`
   const completionsFrom = monthStart < wkStart ? monthStart : wkStart
 
-  const [userRow, circleRow, primaryCircleUsersRow, eventsTodayRow, eventsTomorrowRow, recentPastRow, practicesRow, completionsRow, locationsRow, attendancesRow, blackoutsRow, obligationsRow] =
+  const [userRow, circleRow, primaryCircleUsersRow, eventsTodayRow, eventsTomorrowRow, recentPastRow, practicesRow, completionsRow, locationsRow, attendancesRow, blackoutsRow, obligationsRow, overdueRow] =
     await Promise.all([
       ctx.client.query(
         `SELECT u.id, u.full_name, u.preferred_language, up.timezone, up.primary_circle_group_ids
@@ -152,6 +152,18 @@ const getBriefingContext: ToolHandler = async (args, ctx) => {
          WHERE o.user_id = $1 AND o.active = true AND a.active = true`,
         [id],
       ),
+      ctx.client.query(
+        `SELECT id, title, start_date, location, event_kind
+         FROM plannen.events
+         WHERE created_by = $1
+           AND event_kind = 'todo'
+           AND completed_at IS NULL
+           AND event_status <> 'cancelled'
+           AND start_date::date BETWEEN ($2::date - INTERVAL '30 days')::date
+                                    AND ($2::date - INTERVAL '1 day')::date
+         ORDER BY start_date ASC`,
+        [id, today],
+      ),
     ])
 
   type CRow = { practice_id: string; completed_on: string }
@@ -221,6 +233,7 @@ const getBriefingContext: ToolHandler = async (args, ctx) => {
     locations: locationsRow.rows,
     attendances_today: attendancesToday,
     obligations_today: obligationsToday,
+    overdue_todos: overdueRow.rows,
   }
 }
 
