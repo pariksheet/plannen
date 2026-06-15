@@ -190,13 +190,13 @@ describe('EventForm – smart defaults & validation', () => {
     expect(rule.days?.length).toBe(1)
   })
 
-  it('shows the visit-day field only for multi-day events, defaulting to the start day', async () => {
+  it('offers a one-day checkbox only for multi-day events; picker defaults to the start day', async () => {
     const user = userEvent.setup()
     renderForm()
     await user.type(screen.getByLabelText(/title/i), 'Festival')
     await user.click(screen.getByRole('button', { name: /^next$/i }))
-    // Default start/end are the same day → no visit-day field.
-    expect(screen.queryByLabelText(/which day will you go/i)).toBeNull()
+    // Default start/end are the same day → no one-day option at all.
+    expect(screen.queryByRole('checkbox', { name: /only going on one day/i })).toBeNull()
 
     const startInput = screen.getByLabelText(/start date/i)
     await user.clear(startInput)
@@ -205,7 +205,11 @@ describe('EventForm – smart defaults & validation', () => {
     await user.clear(endInput)
     await user.type(endInput, '2026-07-05T18:00')
 
-    const visit = (await screen.findByLabelText(/which day will you go/i)) as HTMLInputElement
+    // Multi-day now → the checkbox appears, but the picker is hidden until ticked.
+    const checkbox = await screen.findByRole('checkbox', { name: /only going on one day/i })
+    expect(screen.queryByLabelText(/visit day/i)).toBeNull()
+    await user.click(checkbox)
+    const visit = (await screen.findByLabelText(/visit day/i)) as HTMLInputElement
     expect(visit.value).toBe('2026-07-01T10:00')
   })
 

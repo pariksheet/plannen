@@ -125,6 +125,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
   const [missedEvent, setMissedEvent] = useState(false)
   const [convertFromWatching, setConvertFromWatching] = useState(false)
   const [visitDateTime, setVisitDateTime] = useState('')
+  const [visitOnSpecificDay, setVisitOnSpecificDay] = useState(false)
   const [trips, setTrips] = useState<Trip[]>([])
   const [tripId, setTripId] = useState('')
   const [newTripName, setNewTripName] = useState('')
@@ -201,6 +202,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
       })
       getMyRsvp(event.id).then(({ data }) => {
         setVisitDateTime(data?.preferred_visit_date ? toDateTimeLocal(data.preferred_visit_date) : '')
+        setVisitOnSpecificDay(!!data?.preferred_visit_date)
       })
       setWatchForNextOccurrence(event.event_status === 'watching' || event.event_status === 'missed')
       setTripId(event.group_id ?? '')
@@ -239,17 +241,18 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
     new Date(formData.end_date).getTime() > new Date(formData.start_date).getTime()
   )
 
-  // On create, default the visit date to the first day of the span once the
-  // event becomes multi-day (the user can still change it).
-  useEffect(() => {
-    if (!event && isMultiDay && !visitDateTime) setVisitDateTime(formData.start_date)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMultiDay])
+  // Toggle the "drop in on one day" option; default the day to the first day
+  // of the span when turning it on, clear it when turning it off.
+  const handleVisitToggle = (on: boolean) => {
+    setVisitOnSpecificDay(on)
+    setVisitDateTime(on ? (visitDateTime || formData.start_date) : '')
+  }
 
-  // The visit date to persist: null unless the event is multi-day, and clamped
-  // into the [start, end] range so a later date edit can't leave it dangling.
+  // The visit date to persist: null unless it's a multi-day event the user is
+  // dropping into on a specific day, clamped into [start, end] so a later date
+  // edit can't leave it dangling.
   const clampedVisitIso = (): string | null => {
-    if (!isMultiDay || !visitDateTime) return null
+    if (!isMultiDay || !visitOnSpecificDay || !visitDateTime) return null
     let v = visitDateTime
     if (v < formData.start_date) v = formData.start_date
     if (formData.end_date && v > formData.end_date) v = formData.end_date
@@ -935,19 +938,28 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
           )}
           {isMultiDay && (
             <div>
-              <label htmlFor="visit_date_time" className="block text-sm font-medium text-gray-700 mb-1">
-                Which day will you go? (optional)
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={visitOnSpecificDay}
+                  onChange={(e) => handleVisitToggle(e.target.checked)}
+                  className="mt-1 h-4 w-4 text-indigo-600 rounded"
+                />
+                <span className="text-sm font-medium text-gray-700">I&apos;m only going on one day</span>
               </label>
-              <input
-                type="datetime-local"
-                id="visit_date_time"
-                value={visitDateTime}
-                min={formData.start_date || undefined}
-                max={formData.end_date || undefined}
-                onChange={(e) => setVisitDateTime(e.target.value)}
-                className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              />
-              <p className="text-xs text-gray-500 mt-1">This event runs over several days — pick the day you plan to attend. Defaults to the first day.</p>
+              <p className="text-xs text-gray-500 mt-1 ml-6">For something that runs several days where you drop in once (a fair, an open day). Leave unchecked for a holiday you&apos;re on the whole time.</p>
+              {visitOnSpecificDay && (
+                <input
+                  type="datetime-local"
+                  id="visit_date_time"
+                  aria-label="Visit day"
+                  value={visitDateTime}
+                  min={formData.start_date || undefined}
+                  max={formData.end_date || undefined}
+                  onChange={(e) => setVisitDateTime(e.target.value)}
+                  className="mt-2 w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              )}
             </div>
           )}
           {formData.event_kind === 'event' && !!(formData.enrollment_url?.trim() || formData.enrollment_start_date || formData.enrollment_deadline) && (
