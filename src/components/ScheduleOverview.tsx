@@ -656,6 +656,11 @@ function ThisMonthCard({ events, preferredVisitDates, ...actions }: ThisMonthCar
   // Switching days clears any open reveal so a stale card can't carry over.
   const chooseDay = (day: string | null) => { setSelectedDay(day); setSelectedId(null) }
   const toggle = (id: string) => setSelectedId((cur) => (cur === id ? null : id))
+  async function toggleTodo(e: Event) {
+    if (e.completed_at) await uncompleteTodo(e.id)
+    else await completeTodo(e.id)
+    actions.onShareSuccess()
+  }
   const dayEvents = selectedDay ? eventsOnDate(events, selectedDay) : []
   return (
     <section className={`rounded-xl border-2 border-violet-200/70 bg-violet-50/50 p-4 ${sketchBody}`}>
@@ -695,17 +700,38 @@ function ThisMonthCard({ events, preferredVisitDates, ...actions }: ThisMonthCar
                 <ul className="space-y-0.5">
                   {dayEvents.map((e) => {
                     const time = timeOf(e)
+                    const isReminder = e.event_kind === 'reminder'
+                    const isTodo = e.event_kind === 'todo'
+                    const isDone = isTodo && !!e.completed_at
                     return (
                       <li key={e.id} data-event-row>
-                        <button
-                          type="button"
-                          aria-expanded={selectedId === e.id}
-                          onClick={() => toggle(e.id)}
-                          className="block w-full text-left text-base font-semibold text-gray-900 hover:text-indigo-700"
-                        >
-                          {time && <span className="text-gray-500 mr-2 font-normal">{time}</span>}
-                          {e.title}
-                        </button>
+                        <div className="flex items-center gap-1.5 w-full">
+                          {isTodo ? (
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 accent-amber-600 shrink-0"
+                              checked={isDone}
+                              onClick={(ev) => ev.stopPropagation()}
+                              onChange={() => void toggleTodo(e)}
+                              aria-label={isDone ? 'Mark not done' : 'Mark done'}
+                            />
+                          ) : isReminder ? (
+                            <Bell className="h-4 w-4 text-green-600 shrink-0" aria-hidden />
+                          ) : (
+                            <Calendar className="h-4 w-4 text-blue-600 shrink-0" aria-hidden />
+                          )}
+                          <button
+                            type="button"
+                            aria-expanded={selectedId === e.id}
+                            onClick={() => toggle(e.id)}
+                            className="flex-1 text-left text-base hover:text-indigo-700"
+                          >
+                            {time && <span className="text-gray-500 mr-2 text-sm">{time}</span>}
+                            <span className={`${isDone ? 'line-through text-gray-400' : 'font-semibold text-gray-900'} ${isReminder ? 'italic text-gray-600' : ''}`}>
+                              {e.title}
+                            </span>
+                          </button>
+                        </div>
                         {selectedId === e.id && <QuickEventCard event={e} {...actions} />}
                       </li>
                     )
