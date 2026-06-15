@@ -182,7 +182,7 @@ describe('EventForm – smart defaults & validation', () => {
     const user = userEvent.setup()
     renderForm()
     // Default kind is "event", so the URL field is on step 1.
-    const urlInput = screen.getByLabelText(/event or registration url/i)
+    const urlInput = screen.getByLabelText(/event link/i)
     await user.type(urlInput, 'https://example.org/x')
     expect(await screen.findByText(/couldn't read that link/i)).toBeInTheDocument()
   })

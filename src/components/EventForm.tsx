@@ -115,6 +115,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
   const [scrapeNote, setScrapeNote] = useState('')
   const [coverUploading, setCoverUploading] = useState(false)
   const [coverError, setCoverError] = useState('')
+  const [showCoverUrl, setShowCoverUrl] = useState(false)
   const coverFileInputRef = useRef<HTMLInputElement>(null)
   const modalContentRef = useRef<HTMLDivElement>(null)
   const submitButtonRef = useRef<HTMLButtonElement>(null)
@@ -682,6 +683,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               type="text"
               id="title"
               required
+              autoFocus
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
               className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
@@ -751,30 +753,26 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
           <>
           {!isContainer && (
           <div>
-            <label htmlFor="enrollment_url" className="block text-sm font-medium text-gray-700 mb-1">Event or registration URL</label>
-            <div className="relative">
-              <input
-                type="url"
-                id="enrollment_url"
-                value={formData.enrollment_url}
-                onChange={(e) => handleUrlChange(e.target.value)}
-                placeholder="https://www.example.com/event"
-                className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                disabled={scraping || extractingFromImage}
-              />
-              {(scraping || extractingFromImage) && (
-                <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                  <Loader className="h-5 w-5 animate-spin text-indigo-600" />
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              {scraping ? 'Fetching event information...' : extractingFromImage ? 'Extracting event details…' : "Optional. Add a link to sign up or get tickets. Leave blank for walk-in / first-come-first-serve events."}
-            </p>
-            {scrapeNote && !scraping && (
-              <p className="text-xs text-amber-600 mt-1">{scrapeNote}</p>
-            )}
-            <div className="mt-2 flex items-center gap-2">
+            <label htmlFor="enrollment_url" className="block text-sm font-medium text-gray-700 mb-1">
+              Event link <span className="font-normal text-gray-400">— optional</span>
+            </label>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1 min-w-0">
+                <input
+                  type="url"
+                  id="enrollment_url"
+                  value={formData.enrollment_url}
+                  onChange={(e) => handleUrlChange(e.target.value)}
+                  placeholder="https://…/event"
+                  className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  disabled={scraping || extractingFromImage}
+                />
+                {(scraping || extractingFromImage) && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <Loader className="h-5 w-5 animate-spin text-indigo-600" />
+                  </div>
+                )}
+              </div>
               <input
                 ref={extractPhotoFileInputRef}
                 type="file"
@@ -787,22 +785,19 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
                 type="button"
                 onClick={() => extractPhotoFileInputRef.current?.click()}
                 disabled={scraping || extractingFromImage}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-indigo-200 bg-indigo-50 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+                title="Upload a flyer or poster to auto-fill the details"
+                className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-md border border-indigo-200 bg-indigo-50 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 flex-shrink-0"
               >
-                {extractingFromImage ? (
-                  <>
-                    <Loader className="h-4 w-4 animate-spin" />
-                    Extracting…
-                  </>
-                ) : (
-                  <>
-                    <Upload className="h-4 w-4" />
-                    Upload photo to extract
-                  </>
-                )}
+                {extractingFromImage ? <Loader className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                <span className="hidden sm:inline">{extractingFromImage ? 'Scanning…' : 'Scan flyer'}</span>
               </button>
-              <span className="text-xs text-gray-500">Or upload a flyer or poster to auto-fill details.</span>
             </div>
+            <p className="text-xs text-gray-500 mt-1">
+              {scraping ? 'Fetching event information…' : extractingFromImage ? 'Extracting event details…' : 'Paste a sign-up or tickets link, or scan a flyer to auto-fill.'}
+            </p>
+            {scrapeNote && !scraping && (
+              <p className="text-xs text-amber-600 mt-1">{scrapeNote}</p>
+            )}
           </div>
           )}
           <div>
@@ -811,6 +806,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               type="text"
               id="title"
               required
+              autoFocus
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
               className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
@@ -834,57 +830,68 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
           </div>
           )}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Cover image</label>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <input
-                  ref={coverFileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0]
-                    if (!file) return
-                    setCoverError('')
-                    setCoverUploading(true)
-                    const { data: url, error: uploadErr } = await uploadEventCover(file)
-                    setCoverUploading(false)
-                    if (coverFileInputRef.current) coverFileInputRef.current.value = ''
-                    if (uploadErr) {
-                      setCoverError(uploadErr.message)
-                      return
-                    }
-                    if (url) setFormData((prev) => ({ ...prev, image_url: url }))
-                  }}
-                />
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Cover image <span className="font-normal text-gray-400">— optional</span>
+            </label>
+            <input
+              ref={coverFileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0]
+                if (!file) return
+                setCoverError('')
+                setCoverUploading(true)
+                const { data: url, error: uploadErr } = await uploadEventCover(file)
+                setCoverUploading(false)
+                if (coverFileInputRef.current) coverFileInputRef.current.value = ''
+                if (uploadErr) {
+                  setCoverError(uploadErr.message)
+                  return
+                }
+                if (url) setFormData((prev) => ({ ...prev, image_url: url }))
+              }}
+            />
+            {formData.image_url ? (
+              <div className="flex items-center gap-3">
+                <img src={formData.image_url} alt="" className="h-14 w-14 rounded object-cover border border-gray-200" onError={() => setFormData((prev) => ({ ...prev, image_url: '' }))} />
+                <button
+                  type="button"
+                  onClick={() => { setFormData((prev) => ({ ...prev, image_url: '' })); setShowCoverUrl(false) }}
+                  className="text-sm text-gray-600 hover:text-red-600"
+                >
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => coverFileInputRef.current?.click()}
                   disabled={coverUploading}
+                  title="max 500KB, compressed automatically"
                   className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                 >
                   <Upload className="h-4 w-4" />
-                  {coverUploading ? 'Uploading…' : 'Upload from device'}
+                  {coverUploading ? 'Uploading…' : 'Upload'}
                 </button>
-                <span className="text-xs text-gray-500">max 500KB, compressed automatically</span>
+                {showCoverUrl ? (
+                  <input
+                    type="url"
+                    id="image_url"
+                    aria-label="Image URL"
+                    value={formData.image_url}
+                    onChange={(e) => { setCoverError(''); setFormData({ ...formData, image_url: e.target.value }) }}
+                    placeholder="Paste image URL"
+                    className="flex-1 min-w-[160px] px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                ) : (
+                  <button type="button" onClick={() => setShowCoverUrl(true)} className="text-sm text-indigo-600 hover:underline">or paste a link</button>
+                )}
               </div>
-              <p className="text-xs text-gray-500">Or paste image URL:</p>
-              <input
-                type="url"
-                id="image_url"
-                value={formData.image_url}
-                onChange={(e) => { setCoverError(''); setFormData({ ...formData, image_url: e.target.value }) }}
-                placeholder="https://example.com/event-image.jpg"
-                className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              />
-              {coverError && <p className="text-xs text-red-600">{coverError}</p>}
-              {formData.image_url && (
-                <div className="mt-1">
-                  <img src={formData.image_url} alt="" className="h-24 w-auto rounded border border-gray-200 object-cover" onError={() => setFormData((prev) => ({ ...prev, image_url: '' }))} />
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-gray-500 mt-1">Optional. Shows a photo on the card.</p>
+            )}
+            {coverError && <p className="text-xs text-red-600 mt-1">{coverError}</p>}
           </div>
           <div>
             <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">Description</label>
