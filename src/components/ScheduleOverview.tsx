@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Bell, Calendar } from 'lucide-react'
 import { Event } from '../types/event'
 import { getTodayWeather, TodayWeather } from '../services/weatherService'
 import { getLocations } from '../services/profileService'
@@ -502,7 +503,6 @@ function WeekCard({ events, subjectNames, ...actions }: { events: Event[]; subje
           const isTodo = e.event_kind === 'todo'
           const isDone = isTodo && !!e.completed_at
           const state = row.isToday ? eventTimeState(e, now) : null
-          const done = state === 'past'
           const t = timeOf(e)
           const label = `${dayLabel(eventDateLocal(e))}${t ? ` ${t}` : ''}`
           return (
@@ -510,7 +510,7 @@ function WeekCard({ events, subjectNames, ...actions }: { events: Event[]; subje
               <div className={`flex items-center gap-1.5 w-full text-base leading-6 px-1.5 ${
                 row.isToday ? 'bg-yellow-100/60 py-0.5' : 'rounded'
               }`}>
-                {isTodo && (
+                {isTodo ? (
                   <input
                     type="checkbox"
                     className="h-4 w-4 accent-amber-600 shrink-0"
@@ -519,6 +519,10 @@ function WeekCard({ events, subjectNames, ...actions }: { events: Event[]; subje
                     onChange={() => void toggleTodo(e)}
                     aria-label={isDone ? 'Mark not done' : 'Mark done'}
                   />
+                ) : isReminder ? (
+                  <Bell className="h-4 w-4 text-green-600 shrink-0" aria-hidden />
+                ) : (
+                  <Calendar className="h-4 w-4 text-blue-600 shrink-0" aria-hidden />
                 )}
                 <button
                   type="button"
@@ -529,7 +533,7 @@ function WeekCard({ events, subjectNames, ...actions }: { events: Event[]; subje
                   <span className="text-gray-500 text-sm whitespace-nowrap mr-2">{label}</span>
                   <span
                     className={`${
-                      isDone || done ? 'line-through text-gray-400'
+                      isDone ? 'line-through text-gray-400'
                         : state === 'now' ? 'font-semibold text-gray-900'
                           : 'text-gray-800'
                     } ${isReminder ? 'italic text-gray-600' : ''}`}
