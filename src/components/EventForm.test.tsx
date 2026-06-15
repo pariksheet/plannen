@@ -29,6 +29,12 @@ vi.mock('../services/rsvpService', () => ({
 vi.mock('../services/eventCoverService', () => ({
   uploadEventCover: vi.fn(async () => ({ data: null, error: null })),
 }))
+const mockAssignToContainer = vi.fn(async () => ({ error: null }))
+vi.mock('../services/containerService', () => ({
+  listContainers: vi.fn(async () => ({ data: [{ id: 't1', title: 'Italy', start_date: '2026-07-01T00:00:00Z', end_date: null }], error: null })),
+  createContainer: vi.fn(async () => ({ data: null, error: null })),
+  assignToContainer: (...args: unknown[]) => mockAssignToContainer(...args),
+}))
 vi.mock('../hooks/useAgent', () => ({
   useAgent: () => ({
     scrapeUrl: vi.fn(async () => ({ data: null, error: null })),
@@ -96,6 +102,20 @@ describe('EventForm – To-do kind', () => {
 
     const [submittedData] = mockCreateEvent.mock.calls[0] as [Record<string, unknown>, ...unknown[]]
     expect(submittedData.event_kind).toBe('todo')
+  })
+
+  it('assigns the event to a chosen trip after create', async () => {
+    const user = userEvent.setup()
+    mockCreateEvent.mockResolvedValue({ data: { id: 'new-9', event_kind: 'todo' }, error: null })
+    renderForm()
+    await user.click(screen.getByRole('button', { name: /^to-do$/i }))
+    await user.type(screen.getByLabelText(/title/i), 'Pack bags')
+    // Trip picker is in the shared step-1 area.
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Italy' })).toBeInTheDocument())
+    await user.selectOptions(screen.getByLabelText(/part of a trip/i), 't1')
+    await user.click(screen.getByRole('button', { name: /^create$/i }))
+
+    await waitFor(() => expect(mockAssignToContainer).toHaveBeenCalledWith('new-9', 't1'))
   })
 })
 

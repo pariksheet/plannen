@@ -6,6 +6,7 @@ import { getMyConnections, type FriendUser } from '../services/relationshipServi
 import { getMyGroups } from '../services/groupService'
 import { getMyRsvp, setPreferredVisitDate } from '../services/rsvpService'
 import { uploadEventCover } from '../services/eventCoverService'
+import { listContainers, createContainer, assignToContainer, type Trip } from '../services/containerService'
 import { useAgent } from '../hooks/useAgent'
 import { isTierZero } from '../lib/tier'
 import { displayUserLabel } from '../utils/displayName'
@@ -124,6 +125,10 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
   const [missedEvent, setMissedEvent] = useState(false)
   const [convertFromWatching, setConvertFromWatching] = useState(false)
   const [visitDateTime, setVisitDateTime] = useState('')
+  const [trips, setTrips] = useState<Trip[]>([])
+  const [tripId, setTripId] = useState('')
+  const [newTripName, setNewTripName] = useState('')
+  const [creatingTrip, setCreatingTrip] = useState(false)
   const [hashtagsInput, setHashtagsInput] = useState<string>(() => {
     const raw = (initialData as Partial<EventFormData> | undefined)?.hashtags ?? []
     return raw && raw.length ? raw.map((tag) => `#${tag}`).join(' ') : ''
@@ -198,8 +203,24 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
         setVisitDateTime(data?.preferred_visit_date ? toDateTimeLocal(data.preferred_visit_date) : '')
       })
       setWatchForNextOccurrence(event.event_status === 'watching' || event.event_status === 'missed')
+      setTripId(event.group_id ?? '')
     }
   }, [event])
+
+  // Load the user's trips (containers) to populate the "Part of a trip" picker.
+  useEffect(() => {
+    listContainers().then(({ data }) => setTrips(data))
+  }, [])
+
+  const handleCreateTrip = async () => {
+    const name = newTripName.trim()
+    if (!name) return
+    const { data, error: e } = await createContainer(name)
+    if (e) { setError(e.message); return }
+    if (data) { setTrips((prev) => [...prev, data]); setTripId(data.id) }
+    setNewTripName('')
+    setCreatingTrip(false)
+  }
 
   useEffect(() => {
     modalContentRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
@@ -432,6 +453,12 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
         }
         if (createdEvent) result = { event: createdEvent, created: true }
       }
+      // Attach to / detach from a trip if the selection changed (skip when
+      // editing a container itself — it can't belong to another trip).
+      if (result?.event && event?.event_kind !== 'container' && tripId !== (event?.group_id ?? '')) {
+        const { error: tripErr } = await assignToContainer(result.event.id, tripId || null)
+        if (tripErr) throw tripErr
+      }
       onSuccess(result)
       onClose()
     } catch (err) {
@@ -522,6 +549,37 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
                   : 'Event with optional link, RSVP, and sharing. Use Next to set date, sharing, and options.'}
             </p>
           </div>
+          {!(event && event.event_kind === 'container') && (
+            <div>
+              <label htmlFor="trip" className="block text-sm font-medium text-gray-700 mb-1">Part of a trip (optional)</label>
+              {creatingTrip ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    aria-label="New trip name"
+                    placeholder="e.g. Summer in Italy"
+                    value={newTripName}
+                    onChange={(e) => setNewTripName(e.target.value)}
+                    className="flex-1 min-w-0 px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <button type="button" onClick={handleCreateTrip} disabled={!newTripName.trim()} className="min-h-[44px] px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50">Create</button>
+                  <button type="button" onClick={() => { setCreatingTrip(false); setNewTripName('') }} className="min-h-[44px] px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md">Cancel</button>
+                </div>
+              ) : (
+                <select
+                  id="trip"
+                  value={tripId}
+                  onChange={(e) => { if (e.target.value === '__new__') setCreatingTrip(true); else setTripId(e.target.value) }}
+                  className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  <option value="">Not part of a trip</option>
+                  {trips.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+                  <option value="__new__">＋ New trip…</option>
+                </select>
+              )}
+              <p className="text-xs text-gray-500 mt-1">Group this under a trip to see everything for it together.</p>
+            </div>
+          )}
           {isLeanKind ? (
           <>
           <div>

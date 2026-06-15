@@ -15,7 +15,7 @@ import { projectScheduleForDay } from '../services/schedulingService'
 import { dbClient } from '../lib/dbClient'
 import type { AttendanceInstanceRow, ResolvedObligationRow } from '../lib/dbClient/types'
 import { ConfirmModal, PromptModal } from './Modal'
-import { Plus, ChevronUp, ChevronDown, Calendar, X, Eye } from 'lucide-react'
+import { Plus, ChevronUp, ChevronDown, Calendar, X, Eye, Briefcase } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { deleteEvent, completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
@@ -69,6 +69,7 @@ export function MyFeed() {
   const [preferredVisitDates, setPreferredVisitDates] = useState<Record<string, string | null>>({})
   const [watchQueue, setWatchQueue] = useState<Event[]>([])
   const [showWatchQueue, setShowWatchQueue] = useState(false)
+  const [showTrips, setShowTrips] = useState(false)
   const [attendancesToday, setAttendancesToday] = useState<AttendanceInstanceRow[]>([])
   const [obligationsToday, setObligationsToday] = useState<ResolvedObligationRow[]>([])
   const [subjectNames, setSubjectNames] = useState<Record<string, string>>({})
@@ -282,6 +283,8 @@ export function MyFeed() {
   }
 
   const filteredEvents = events
+    // Containers are shown in the Trips section, not as standalone timeline cards.
+    .filter((e) => e.event_kind !== 'container')
     .filter((e) => activeKindFilter.has(e.event_kind === 'session' || e.event_kind === 'container' ? 'event' : e.event_kind))
     .filter((e) => !activeHashtag || (e.hashtags ?? []).includes(activeHashtag))
     .filter((e) => {
@@ -291,6 +294,13 @@ export function MyFeed() {
       // Compare local-day keys so a multi-day event matches any day in its range.
       return ymd(start) <= selectedDate && selectedDate <= ymd(end)
     })
+  const trips = events
+    .filter((e) => e.event_kind === 'container')
+    .sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime())
+  const tripMembers = (tripId: string) =>
+    events
+      .filter((e) => e.group_id === tripId)
+      .sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime())
   const futureTimeline = buildFutureTimeline(filteredEvents, preferredVisitDates)
   const past = filteredEvents
     .filter((e) => e.event_status === 'past')
@@ -429,6 +439,54 @@ export function MyFeed() {
                 showWatchButton={false}
                 viewMode="compact"
               />
+            </div>
+          )}
+        </div>
+      )}
+
+      {trips.length > 0 && (
+        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowTrips((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 text-left"
+            aria-expanded={showTrips}
+          >
+            <span className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900">
+              <Briefcase className="h-4 w-4 text-indigo-500" />
+              Trips
+              <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-semibold">
+                {trips.length}
+              </span>
+            </span>
+            {showTrips ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
+          </button>
+          {showTrips && (
+            <div className="px-4 pb-4 border-t border-gray-100 pt-3 space-y-4">
+              {trips.map((t) => {
+                const members = tripMembers(t.id)
+                return (
+                  <div key={t.id}>
+                    <p className="text-sm font-semibold text-gray-900">{t.title}</p>
+                    {members.length === 0 ? (
+                      <p className="text-xs text-gray-500 mt-1">Nothing in this trip yet. Add a trip when creating an event.</p>
+                    ) : (
+                      <EventList
+                        events={members}
+                        onEdit={handleEdit}
+                        onDelete={handleDeleteClick}
+                        onShareSuccess={loadEvents}
+                        onToggleTodo={handleToggleTodo}
+                        onConvertKind={handleConvertKind}
+                        onHashtagClick={(tag) => { setActiveHashtag(tag); setShowPast(true) }}
+                        showActions
+                        showWatchButton={false}
+                        viewMode="compact"
+                      />
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
