@@ -7,6 +7,8 @@ import { ProfileLocations } from '../components/ProfileLocations'
 import { ProfileInterestsGoals } from '../components/ProfileInterestsGoals'
 import { ProfileFamilyMembers } from '../components/ProfileFamilyMembers'
 import { ProfileRoutines } from '../components/ProfileRoutines'
+import { ProfileAttendances } from '../components/ProfileAttendances'
+import { ProfileBlackouts } from '../components/ProfileBlackouts'
 import { ProfileStoryLanguages } from '../components/ProfileStoryLanguages'
 import { ProfileFacts } from '../components/ProfileFacts'
 import { ProfileSources } from '../components/ProfileSources'
@@ -38,6 +40,8 @@ export function Profile() {
           <ProfileInterestsGoals />
           <ProfileFamilyMembers />
           <ProfileRoutines />
+          <ProfileAttendances />
+          <ProfileBlackouts />
           <ProfileStoryLanguages />
           <ProfilePasskeys />
           <ProfileFacts />
