@@ -246,6 +246,16 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMultiDay])
 
+  // The visit date to persist: null unless the event is multi-day, and clamped
+  // into the [start, end] range so a later date edit can't leave it dangling.
+  const clampedVisitIso = (): string | null => {
+    if (!isMultiDay || !visitDateTime) return null
+    let v = visitDateTime
+    if (v < formData.start_date) v = formData.start_date
+    if (formData.end_date && v > formData.end_date) v = formData.end_date
+    return new Date(v).toISOString()
+  }
+
   // Reminders and to-dos are a single screen — everything fits on step 1, so
   // there's no wizard for them. Only full events use the 4-step flow.
   const effectiveSteps = isLeanKind ? 1 : WIZARD_STEPS
@@ -448,18 +458,20 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
         if (updatedEvent && watchForNextOccurrence && (dataToSubmit.enrollment_url || event.enrollment_url)) {
           await createRecurringTask(updatedEvent.id, (dataToSubmit.enrollment_url || event.enrollment_url)!.trim())
         }
-        if (updatedEvent && isMultiDay) {
-          const preferredVisitIso = visitDateTime ? new Date(visitDateTime).toISOString() : null
-          const { error: visitErr } = await setPreferredVisitDate(updatedEvent.id, preferredVisitIso)
+        // Reconcile the visit date for every event edit: clamped when multi-day,
+        // cleared (null) when the event is now single-day, so no stale value
+        // survives shrinking the range. (No-op for events with no RSVP.)
+        if (updatedEvent && formData.event_kind === 'event') {
+          const { error: visitErr } = await setPreferredVisitDate(updatedEvent.id, clampedVisitIso())
           if (visitErr) throw visitErr
         }
         if (updatedEvent) result = { event: updatedEvent, created: false }
       } else {
         const { data: createdEvent, error: err } = await createEvent(dataToSubmit, watchForNextOccurrence, missedEvent)
         if (err) throw err
-        if (createdEvent && isMultiDay && visitDateTime) {
-          const preferredVisitIso = new Date(visitDateTime).toISOString()
-          const { error: visitErr } = await setPreferredVisitDate(createdEvent.id, preferredVisitIso)
+        const visitIso = clampedVisitIso()
+        if (createdEvent && visitIso) {
+          const { error: visitErr } = await setPreferredVisitDate(createdEvent.id, visitIso)
           if (visitErr) throw visitErr
         }
         if (createdEvent) result = { event: createdEvent, created: true }
