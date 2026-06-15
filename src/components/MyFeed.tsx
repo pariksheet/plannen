@@ -15,6 +15,7 @@ import type { AttendanceInstanceRow, ResolvedObligationRow } from '../lib/dbClie
 import { ConfirmModal, PromptModal } from './Modal'
 import { Plus, ChevronUp, Calendar, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { deleteEvent, completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
 import { supabase } from '../lib/supabase'
 
@@ -53,6 +54,7 @@ function formatHumanDate(iso: string): string {
 
 export function MyFeed() {
   const { user } = useAuth()
+  const { showToast } = useToast()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const [events, setEvents] = useState<Event[]>([])
@@ -578,6 +580,17 @@ export function MyFeed() {
         </div>
       )}
 
+      {!showForm && (
+        <button
+          type="button"
+          onClick={handleCreate}
+          aria-label="Create event"
+          className="sm:hidden fixed bottom-5 right-5 z-40 inline-flex items-center justify-center h-14 w-14 rounded-full bg-indigo-600 text-white shadow-lg hover:bg-indigo-700 active:scale-95 transition-transform"
+        >
+          <Plus className="h-7 w-7" />
+        </button>
+      )}
+
       {showForm && (
         <EventForm
           event={editingEvent}
@@ -587,10 +600,24 @@ export function MyFeed() {
             setEditingEvent(undefined)
             setInitialFormData(null)
           }}
-          onSuccess={() => {
+          onSuccess={(result) => {
+            const wasEdit = !!editingEvent
             setShowForm(false)
             setEditingEvent(undefined)
             setInitialFormData(null)
+            if (result?.event) {
+              // Guarantee the saved event is within the fetch window so it's
+              // actually visible after the reload (e.g. a far-future camp).
+              const startYmd = ymd(new Date(result.event.start_date))
+              if (!windowExpandedRef.current && (startYmd < fromIso || startYmd > toIso)) {
+                windowExpandedRef.current = true
+              }
+              const kind = result.event.event_kind
+              const label = kind === 'todo' ? 'To-do' : kind === 'reminder' ? 'Reminder' : 'Event'
+              showToast(`${label} ${result.created ? 'created' : 'updated'}`)
+            } else {
+              showToast(wasEdit ? 'Saved' : 'Created')
+            }
             loadEvents()
           }}
         />

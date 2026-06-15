@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { CalendarGrid } from './CalendarGrid'
 import { Event } from '../types/event'
 
@@ -76,5 +77,16 @@ describe('CalendarGrid compact dot cap (DOT_CAP = 11)', () => {
     // The overflow "+" marker must be present
     const allText = container.textContent ?? ''
     expect(allText).toContain('+')
+  })
+})
+
+describe('CalendarGrid – create from day', () => {
+  it('opens the event form when the sidebar Add button is clicked', async () => {
+    const user = userEvent.setup()
+    render(<CalendarGrid events={[]} preferredVisitDates={{}} />)
+    // Empty-day Add affordance (no events selected by default)
+    expect(screen.queryByTestId('event-form')).toBeNull()
+    await user.click(screen.getByRole('button', { name: /add event on this day/i }))
+    expect(screen.getByTestId('event-form')).toBeInTheDocument()
   })
 })

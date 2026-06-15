@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { EventForm } from './EventForm'
+import { EventForm, nextRoundedHourLocal, plusOneHourLocal } from './EventForm'
 
 // --- service mocks -----------------------------------------------------------
 
@@ -80,8 +80,10 @@ describe('EventForm – To-do kind', () => {
     const titleInput = screen.getByLabelText(/title/i)
     await user.type(titleInput, 'Renew passport')
 
-    // Fill start date (lean flow shows start date on step 1)
+    // Fill start date (lean flow shows start date on step 1). The field is now
+    // pre-seeded with a default, so clear it before typing the test value.
     const startInput = screen.getByLabelText(/start date/i)
+    await user.clear(startInput)
     await user.type(startInput, '2026-12-01T10:00')
 
     // The lean "Create" fast-path button should be available on step 1
@@ -94,5 +96,66 @@ describe('EventForm – To-do kind', () => {
 
     const [submittedData] = mockCreateEvent.mock.calls[0] as [Record<string, unknown>, ...unknown[]]
     expect(submittedData.event_kind).toBe('todo')
+  })
+})
+
+describe('date helpers', () => {
+  it('nextRoundedHourLocal returns the next top-of-hour with zero minutes', () => {
+    const v = nextRoundedHourLocal(new Date(2026, 0, 5, 14, 23))
+    expect(v).toBe('2026-01-05T15:00')
+  })
+
+  it('nextRoundedHourLocal advances to the next hour even when already on the hour', () => {
+    const v = nextRoundedHourLocal(new Date(2026, 0, 5, 14, 0))
+    expect(v).toBe('2026-01-05T15:00')
+  })
+
+  it('plusOneHourLocal adds an hour to a datetime-local string', () => {
+    expect(plusOneHourLocal('2026-01-05T15:00')).toBe('2026-01-05T16:00')
+    expect(plusOneHourLocal('')).toBe('')
+  })
+})
+
+describe('EventForm – smart defaults & validation', () => {
+  it('pre-seeds a default start (top-of-hour) and end on create', async () => {
+    const user = userEvent.setup()
+    renderForm()
+    // Switch to To-do so the date fields render on step 1.
+    await user.click(screen.getByRole('button', { name: /^to-do$/i }))
+    const startInput = screen.getByLabelText(/start date/i) as HTMLInputElement
+    const endInput = screen.getByLabelText(/end date/i) as HTMLInputElement
+    expect(startInput.value).not.toBe('')
+    expect(startInput.value.endsWith(':00')).toBe(true)
+    // End defaults to one hour after the start.
+    expect(endInput.value).toBe(plusOneHourLocal(startInput.value))
+  })
+
+  it('shows a soft note when a pasted link cannot be read', async () => {
+    const user = userEvent.setup()
+    renderForm()
+    // Default kind is "event", so the URL field is on step 1.
+    const urlInput = screen.getByLabelText(/event or registration url/i)
+    await user.type(urlInput, 'https://example.org/x')
+    expect(await screen.findByText(/couldn't read that link/i)).toBeInTheDocument()
+  })
+
+  it('blocks submit when the end is not after the start', async () => {
+    const user = userEvent.setup()
+    mockCreateEvent.mockResolvedValue({ data: { id: 'x' }, error: null })
+    renderForm()
+    await user.click(screen.getByRole('button', { name: /^to-do$/i }))
+    await user.type(screen.getByLabelText(/title/i), 'Bad range')
+
+    const startInput = screen.getByLabelText(/start date/i)
+    await user.clear(startInput)
+    await user.type(startInput, '2026-12-01T10:00')
+    const endInput = screen.getByLabelText(/end date/i)
+    await user.clear(endInput)
+    await user.type(endInput, '2026-12-01T09:00')
+
+    await user.click(screen.getByRole('button', { name: /^create$/i }))
+
+    expect(await screen.findByText(/end time must be after the start time/i)).toBeInTheDocument()
+    expect(mockCreateEvent).not.toHaveBeenCalled()
   })
 })

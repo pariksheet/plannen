@@ -13,6 +13,16 @@ import { X, Loader, Upload, ChevronLeft, ChevronRight } from 'lucide-react'
 
 const WIZARD_STEPS = 4
 
+/** A Date as a local-time datetime-local string: yyyy-MM-ddThh:mm (no Z). */
+function fmtDateTimeLocal(d: Date): string {
+  const y = d.getFullYear()
+  const mo = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  const h = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${y}-${mo}-${day}T${h}:${min}`
+}
+
 /** Format a date string for <input type="datetime-local">: yyyy-MM-ddThh:mm (local time, no Z) */
 function toDateTimeLocal(value: string): string {
   if (!value || !value.trim()) return ''
@@ -26,12 +36,24 @@ function toDateTimeLocal(value: string): string {
     d = new Date(s)
   }
   if (isNaN(d.getTime())) return ''
-  const y = d.getFullYear()
-  const mo = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  const h = String(d.getHours()).padStart(2, '0')
-  const min = String(d.getMinutes()).padStart(2, '0')
-  return `${y}-${mo}-${day}T${h}:${min}`
+  return fmtDateTimeLocal(d)
+}
+
+/** The next top-of-hour after `now`, as a datetime-local string. A sensible
+ *  default start time so the user isn't hand-building a date from scratch. */
+export function nextRoundedHourLocal(now: Date = new Date()): string {
+  const d = new Date(now)
+  d.setHours(d.getHours() + 1, 0, 0, 0)
+  return fmtDateTimeLocal(d)
+}
+
+/** Add one hour to a datetime-local string (used to default an end time). */
+export function plusOneHourLocal(local: string): string {
+  if (!local) return ''
+  const d = new Date(local)
+  if (isNaN(d.getTime())) return ''
+  d.setHours(d.getHours() + 1)
+  return fmtDateTimeLocal(d)
 }
 
 function PeoplePicker({ selectedIds, onChange }: { selectedIds: string[]; onChange: (ids: string[]) => void }) {
@@ -81,7 +103,7 @@ function GroupPicker({ selectedIds, onChange }: { selectedIds: string[]; onChang
 interface EventFormProps {
   event?: Event
   onClose: () => void
-  onSuccess: () => void
+  onSuccess: (result?: { event: Event; created: boolean }) => void
   initialData?: Partial<EventFormData>
 }
 
@@ -89,6 +111,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [scraping, setScraping] = useState(false)
+  const [scrapeNote, setScrapeNote] = useState('')
   const [coverUploading, setCoverUploading] = useState(false)
   const [coverError, setCoverError] = useState('')
   const coverFileInputRef = useRef<HTMLInputElement>(null)
@@ -123,11 +146,18 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
       shared_with_group_ids: [],
     }
     const raw = initialData ?? {}
+    // Smart defaults on create: seed the start to the next round hour and the
+    // end to an hour later, so the most-used fields aren't empty. On edit the
+    // effect below overwrites these from the event, so leave them blank.
+    const rawStart = raw.start_date ? toDateTimeLocal(raw.start_date) : ''
+    const rawEnd = raw.end_date ? toDateTimeLocal(raw.end_date) : ''
+    const start_date = rawStart || (event ? base.start_date : nextRoundedHourLocal())
+    const end_date = rawEnd || (event ? base.end_date : (start_date ? plusOneHourLocal(start_date) : base.end_date))
     return {
       ...base,
       ...raw,
-      start_date: raw.start_date ? toDateTimeLocal(raw.start_date) : base.start_date,
-      end_date: raw.end_date ? toDateTimeLocal(raw.end_date) : base.end_date,
+      start_date,
+      end_date,
       enrollment_deadline: raw.enrollment_deadline ? toDateTimeLocal(raw.enrollment_deadline) : base.enrollment_deadline,
       enrollment_start_date: raw.enrollment_start_date ? toDateTimeLocal(raw.enrollment_start_date) : base.enrollment_start_date,
     }
@@ -200,13 +230,33 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
   }
   const goBack = () => setStep((s) => Math.max(s - 1, 1))
 
+  // Keep the end coherent with the start: when the start changes, bump the end
+  // to an hour later if it's empty or would otherwise fall on/before the new
+  // start (which would be an invalid range).
+  const handleStartChange = (value: string) => {
+    setFormData((prev) => {
+      const endInvalid =
+        !prev.end_date ||
+        (value && new Date(prev.end_date).getTime() <= new Date(value).getTime())
+      return {
+        ...prev,
+        start_date: value,
+        end_date: endInvalid && value ? plusOneHourLocal(value) : prev.end_date,
+      }
+    })
+  }
+
   const handleUrlChange = async (url: string) => {
     setFormData((prev) => ({ ...prev, enrollment_url: url }))
+    setScrapeNote('')
     if (!event && url && url.startsWith('http')) {
       setScraping(true)
       setError('')
       try {
         const { data } = await scrapeUrl(url)
+        if (!data?.extracted) {
+          setScrapeNote("Couldn't read that link — add the details manually below.")
+        }
         if (data?.extracted) {
           const ex = data.extracted
           const updates: Partial<EventFormData> = {}
@@ -230,6 +280,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
         }
       } catch (err) {
         console.warn('Scrape failed', err)
+        setScrapeNote("Couldn't read that link — add the details manually below.")
       } finally {
         setScraping(false)
       }
@@ -293,6 +344,16 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
     }
     const native = e.nativeEvent as SubmitEvent
     if (native.submitter != null && native.submitter !== submitButtonRef.current && native.submitter !== createReminderButtonRef.current) return
+    // Guard against an inverted range before it silently reaches the DB.
+    if (
+      formData.start_date &&
+      formData.end_date &&
+      new Date(formData.end_date).getTime() <= new Date(formData.start_date).getTime()
+    ) {
+      setError('End time must be after the start time.')
+      if (!isLeanKind) setStep(2)
+      return
+    }
     setLoading(true)
     setError('')
     try {
@@ -321,6 +382,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
           statusOption = { newStatus: 'watching' }
         }
       }
+      let result: { event: Event; created: boolean } | undefined
       if (event) {
         const { data: updatedEvent, error: err } = await updateEvent(event.id, dataToSubmit, statusOption)
         if (err) throw err
@@ -332,6 +394,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
           const { error: visitErr } = await setPreferredVisitDate(updatedEvent.id, preferredVisitIso)
           if (visitErr) throw visitErr
         }
+        if (updatedEvent) result = { event: updatedEvent, created: false }
       } else {
         const { data: createdEvent, error: err } = await createEvent(dataToSubmit, watchForNextOccurrence, missedEvent)
         if (err) throw err
@@ -340,8 +403,9 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
           const { error: visitErr } = await setPreferredVisitDate(createdEvent.id, preferredVisitIso)
           if (visitErr) throw visitErr
         }
+        if (createdEvent) result = { event: createdEvent, created: true }
       }
-      onSuccess()
+      onSuccess(result)
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
@@ -459,7 +523,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
                 id="start_date"
                 required
                 value={formData.start_date}
-                onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
+                onChange={(e) => handleStartChange(e.target.value)}
                 className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
               />
             </div>
@@ -519,6 +583,9 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
             <p className="text-xs text-gray-500 mt-1">
               {scraping ? 'Fetching event information...' : extractingFromImage ? 'Extracting event details…' : "Optional. Add a link to sign up or get tickets. Leave blank for walk-in / first-come-first-serve events."}
             </p>
+            {scrapeNote && !scraping && (
+              <p className="text-xs text-amber-600 mt-1">{scrapeNote}</p>
+            )}
             <div className="mt-2 flex items-center gap-2">
               <input
                 ref={extractPhotoFileInputRef}
@@ -683,7 +750,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
                 id="start_date"
                 required
                 value={formData.start_date}
-                onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
+                onChange={(e) => handleStartChange(e.target.value)}
                 className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
               />
             </div>

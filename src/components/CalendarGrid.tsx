@@ -13,8 +13,9 @@ import {
   startOfWeek,
   subMonths,
 } from 'date-fns'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { Event } from '../types/event'
+import { ChevronLeft, ChevronRight, Plus } from 'lucide-react'
+import { Event, EventFormData } from '../types/event'
+import { useToast } from '../context/ToastContext'
 import { completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
 import { EventList } from './EventList'
 import { EventDetailsModal } from './EventDetailsModal'
@@ -45,7 +46,16 @@ function toDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
+/** A datetime-local string for `day` at a sensible default hour (the next
+ *  round hour from now), used to seed the create form from a calendar day. */
+function dayAtDefaultHour(day: Date): string {
+  const hour = (new Date().getHours() + 1) % 24
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}T${pad(hour)}:00`
+}
+
 export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuccess, onDataChange, onClone, onHashtagClick, onDateSelect, showActions, showSidebar = true, compact = false }: CalendarGridProps) {
+  const { showToast } = useToast()
   const [currentMonth, setCurrentMonth] = useState<Date>(startOfMonth(new Date()))
   const [selectedDate, setSelectedDate] = useState<Date>(new Date())
   const selectDay = (day: Date) => {
@@ -56,6 +66,13 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
   const [rsvpVersion, setRsvpVersion] = useState(0)
   const [showForm, setShowForm] = useState(false)
   const [editingEvent, setEditingEvent] = useState<Event | undefined>()
+  const [createInitial, setCreateInitial] = useState<Partial<EventFormData> | undefined>()
+
+  const handleCreateOnDay = (day: Date) => {
+    setEditingEvent(undefined)
+    setCreateInitial({ start_date: dayAtDefaultHour(day) })
+    setShowForm(true)
+  }
 
   const currentYear = new Date().getFullYear()
   const yearOptions = Array.from({ length: 11 }, (_, i) => currentYear - 5 + i)
@@ -302,14 +319,30 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
 
         {showSidebar && (
           <aside className="space-y-3 lg:sticky lg:top-24">
-            <div className="bg-white rounded-lg border border-gray-200 p-3">
+            <div className="bg-white rounded-lg border border-gray-200 p-3 flex items-center justify-between gap-2">
               <h4 className="text-sm font-semibold text-gray-700">
                 {format(selectedDate, 'EEEE, MMM d, yyyy')}
               </h4>
+              <button
+                type="button"
+                onClick={() => handleCreateOnDay(selectedDate)}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 min-h-[36px] rounded-md bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700"
+              >
+                <Plus className="h-4 w-4" />
+                Add
+              </button>
             </div>
             {selectedEvents.length === 0 ? (
               <div className="text-center py-8 bg-white rounded-lg border border-gray-200">
                 <p className="text-gray-500 text-sm">No events on this day.</p>
+                <button
+                  type="button"
+                  onClick={() => handleCreateOnDay(selectedDate)}
+                  className="mt-3 inline-flex items-center gap-1 px-3 py-2 min-h-[40px] rounded-md border border-indigo-200 bg-indigo-50 text-indigo-700 text-sm font-medium hover:bg-indigo-100"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add event on this day
+                </button>
               </div>
             ) : (
               <EventList
@@ -348,13 +381,20 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
       {showForm && (
         <EventForm
           event={editingEvent}
+          initialData={editingEvent ? undefined : createInitial}
           onClose={() => {
             setShowForm(false)
             setEditingEvent(undefined)
+            setCreateInitial(undefined)
           }}
-          onSuccess={() => {
+          onSuccess={(result) => {
+            const wasEdit = !!editingEvent
             setShowForm(false)
             setEditingEvent(undefined)
+            setCreateInitial(undefined)
+            const kind = result?.event.event_kind
+            const label = kind === 'todo' ? 'To-do' : kind === 'reminder' ? 'Reminder' : 'Event'
+            showToast(result ? `${label} ${result.created ? 'created' : 'updated'}` : (wasEdit ? 'Saved' : 'Created'))
             onDataChange?.()
           }}
         />
