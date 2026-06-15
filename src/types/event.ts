@@ -1,6 +1,6 @@
 export type EventType = 'personal' | 'friends' | 'family' | 'group'
 export type EventStatus = 'watching' | 'planned' | 'interested' | 'going' | 'cancelled' | 'past' | 'missed'
-export type EventKind = 'event' | 'reminder' | 'session' | 'todo'
+export type EventKind = 'event' | 'reminder' | 'session' | 'todo' | 'container'
 export type SharedWithFriends = 'none' | 'all' | 'selected'
 export type EventViewMode = 'detailed' | 'compact' | 'calendar' | 'schedule'
 
@@ -28,6 +28,8 @@ export interface Event {
   parent_event_id?: string | null
   completed_at?: string | null
   assigned_to?: string | null
+  group_id?: string | null
+  list_label?: string | null
   subject_kind?: 'family_member' | 'user' | null
   subject_id?: string | null
   owner_attends?: boolean

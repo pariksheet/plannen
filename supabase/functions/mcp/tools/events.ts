@@ -41,6 +41,7 @@ const definitions: ToolDefinition[] = [
           description:
             'summary (default) truncates description to 200 chars; full returns the untruncated description.',
         },
+        group_id: { type: 'string', description: 'Return only members of this container/trip (its child events + todos). Pass the container event id. Remember to also raise limit (default 10 truncates).' },
       },
     },
   },
@@ -64,7 +65,7 @@ const definitions: ToolDefinition[] = [
   },
   {
     name: 'create_event',
-    description: 'Create a new event or reminder in Plannen',
+    description: 'Create an event, reminder, todo, or container (a multi-day "Trip" that groups child events + todos via their group_id) in Plannen',
     inputSchema: {
       type: 'object',
       properties: {
@@ -73,13 +74,15 @@ const definitions: ToolDefinition[] = [
         start_date: { type: 'string', description: 'ISO 8601. Timezone-naive values (e.g. 2026-06-15T10:00:00) are interpreted in your profile timezone; explicit offsets/Z are respected.' },
         end_date: { type: 'string', description: 'ISO 8601 (naive = profile timezone) or omit' },
         location: { type: 'string' },
-        event_kind: { type: 'string', enum: ['event', 'reminder', 'todo'] },
+        event_kind: { type: 'string', enum: ['event', 'reminder', 'todo', 'container'] },
         assigned_to: { type: 'string', description: 'User UUID to assign a todo to (defaults to creator). Only meaningful for event_kind=todo.' },
         subject_kind: { type: 'string', enum: ['family_member', 'user'], description: "Whose time this event is, if not the owner's. 'family_member' → a family_members id; 'user' → a connected friend's user id. Set together with subject_id." },
         subject_id: { type: 'string', description: 'Id of the subject person (family member or connected user). Set together with subject_kind.' },
         owner_attends: { type: 'boolean', description: "True if the owner is also occupied during this event (so it still counts as a clash). Default false. Only meaningful when a subject is set." },
         enrollment_url: { type: 'string' },
         hashtags: { type: 'array', items: { type: 'string' }, description: 'Tags without # (max 5)' },
+        group_id: { type: 'string', description: 'Container/trip this event or todo belongs to (a container event id). Child inherits the container event_type + sharing unless this event is itself a container. A container cannot have a group_id.' },
+        list_label: { type: 'string', description: 'For event_kind=todo inside a container: which named list it belongs to (e.g. Packing, To-do, Shopping). Ignored for non-todos.' },
         event_status: {
           type: 'string',
           enum: ['watching', 'planned', 'interested', 'going', 'cancelled', 'past', 'missed'],
@@ -126,6 +129,8 @@ const definitions: ToolDefinition[] = [
         subject_kind: { type: 'string', enum: ['family_member', 'user'], description: "Whose time this event is, if not the owner's. 'family_member' → a family_members id; 'user' → a connected friend's user id. Set together with subject_id." },
         subject_id: { type: 'string', description: 'Id of the subject person (family member or connected user). Set together with subject_kind.' },
         owner_attends: { type: 'boolean', description: "True if the owner is also occupied during this event (so it still counts as a clash). Default false. Only meaningful when a subject is set." },
+        group_id: { type: 'string', description: 'Assign this event/todo into a container/trip (pass the container event id), or null to remove it from its trip. Cannot be set on a container itself.' },
+        list_label: { type: 'string', description: 'For a todo inside a container: its named list bucket (e.g. Packing). null clears it.' },
       },
       required: ['id'],
     },
@@ -197,6 +202,7 @@ const listEvents: ToolHandler = async (args, ctx) => {
     from_date?: string
     to_date?: string
     fields?: 'summary' | 'full'
+    group_id?: string
   }
   const tz = await getUserTimezone(ctx.client, ctx.userId)
   const where: string[] = ['created_by = $1']
@@ -204,8 +210,9 @@ const listEvents: ToolHandler = async (args, ctx) => {
   if (a.status) { params.push(a.status); where.push(`event_status = $${params.length}`) }
   if (a.from_date) { params.push(a.from_date); where.push(`start_date >= $${params.length}`) }
   if (a.to_date) { params.push(a.to_date + 'T24:00:00'); where.push(`start_date < $${params.length}`) }
+  if (a.group_id) { params.push(a.group_id); where.push(`group_id = $${params.length}`) }
   params.push(a.limit ?? 10)
-  const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, subject_kind, subject_id, owner_attends
+  const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, subject_kind, subject_id, owner_attends, group_id, list_label
                FROM plannen.events
                WHERE ${where.join(' AND ')}
                ORDER BY start_date ASC
@@ -287,6 +294,8 @@ const createEvent: ToolHandler = async (args, ctx) => {
     hashtags?: string[]
     event_status?: string
     recurrence_rule?: RecurrenceRule
+    group_id?: string | null
+    list_label?: string
   }
   if (!a.title) throw new Error('title is required')
   if (!a.start_date) throw new Error('start_date is required')
@@ -300,14 +309,39 @@ const createEvent: ToolHandler = async (args, ctx) => {
       ? (a.event_status as EventStatus)
       : startDate < new Date() ? 'past' : 'going'
 
+  const resolvedKind =
+    a.event_kind === 'reminder' || a.event_kind === 'todo' || a.event_kind === 'container'
+      ? a.event_kind
+      : 'event'
+
   const hashtags = (a.hashtags ?? []).slice(0, 5)
+
+  // Default sharing; overridden by inheritance when joining a container.
+  // (shared_with_family was dropped in 20260520130000 — sharing is event_type
+  // + shared_with_friends; group-based sharing lives in junction tables.)
+  let eventType = 'personal'
+  let sharedWithFriends = 'none'
+  if (a.group_id != null) {
+    if (resolvedKind === 'container') throw new Error('a container cannot belong to another container')
+    const { rows: cont } = await ctx.client.query(
+      `SELECT event_kind, event_type, shared_with_friends
+       FROM plannen.events WHERE id = $1 AND created_by = $2`,
+      [a.group_id, ctx.userId],
+    )
+    if (cont.length === 0 || cont[0].event_kind !== 'container') {
+      throw new Error('group_id must reference a container you own')
+    }
+    eventType = cont[0].event_type
+    sharedWithFriends = cont[0].shared_with_friends
+  }
+
   const { rows } = await ctx.client.query(
     `INSERT INTO plannen.events
        (title, description, start_date, end_date, location, event_kind,
         enrollment_url, hashtags, event_type, event_status, created_by,
         assigned_to, shared_with_friends, recurrence_rule,
-        subject_kind, subject_id, owner_attends)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'personal', $9, $10, $11, 'none', $12, $13, $14, $15)
+        subject_kind, subject_id, owner_attends, group_id, list_label)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
      RETURNING *`,
     [
       a.title,
@@ -315,16 +349,20 @@ const createEvent: ToolHandler = async (args, ctx) => {
       startDate.toISOString(),
       endDate ? endDate.toISOString() : null,
       a.location ?? null,
-      a.event_kind === 'reminder' || a.event_kind === 'todo' ? a.event_kind : 'event',
+      resolvedKind,
       a.enrollment_url ?? null,
       hashtags,
+      eventType,
       event_status,
       ctx.userId,
-      a.event_kind === 'todo' ? (a.assigned_to ?? ctx.userId) : null,
+      resolvedKind === 'todo' ? (a.assigned_to ?? ctx.userId) : null,
+      sharedWithFriends,
       a.recurrence_rule ?? null,
       a.subject_kind ?? null,
       a.subject_id ?? null,
       a.owner_attends ?? false,
+      a.group_id ?? null,
+      resolvedKind === 'todo' ? (a.list_label ?? null) : null,
     ],
   )
   if (rows.length === 0) throw new Error('Insert failed')
@@ -375,8 +413,25 @@ const updateEvent: ToolHandler = async (args, ctx) => {
     subject_kind?: 'family_member' | 'user' | null
     subject_id?: string | null
     owner_attends?: boolean
+    group_id?: string | null
+    list_label?: string | null
   }
   const { id: _id, ...rest } = a
+  if (rest.group_id != null) {
+    const { rows: tgt } = await ctx.client.query(
+      `SELECT event_kind FROM plannen.events WHERE id = $1 AND created_by = $2`,
+      [a.id, ctx.userId],
+    )
+    if (tgt.length === 0) throw new Error('Not found')
+    if (tgt[0].event_kind === 'container') throw new Error('a container cannot belong to another container')
+    const { rows: cont } = await ctx.client.query(
+      `SELECT event_kind FROM plannen.events WHERE id = $1 AND created_by = $2`,
+      [rest.group_id, ctx.userId],
+    )
+    if (cont.length === 0 || cont[0].event_kind !== 'container') {
+      throw new Error('group_id must reference a container you own')
+    }
+  }
   // Naive timestamps mean wall-clock time in the user's tz — never the server tz.
   if (rest.start_date || rest.end_date) {
     const tz = await getUserTimezone(ctx.client, ctx.userId)

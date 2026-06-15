@@ -6,7 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-## [0.6.3] - 2026-06-13
+## [0.6.4] - 2026-06-15
+
+### Trips — group related plans under one container (data model)
+
+- **A new "container" event type bundles related plans.** A trip (or any multi-day umbrella) is now its own kind of event that spans a date range and acts as a hub: child events, named to-do lists, and memories can hang off it via a shared group. This release lays the foundation at the data and assistant-tool layer — the dedicated trip hub in the web app comes next.
+- **Group events together and label to-do lists.** Events can now reference the container they belong to, and a to-do can carry a list label so checklists under a trip stay organised. The grouping survives deleting the container — children simply detach rather than disappearing.
+- **Integrity guaranteed at the database.** A container can't be nested inside another container, and list labels are restricted to to-dos. These rules are enforced by the database itself on every write path, so the invariants hold no matter how an event is created or edited.
+
+### Fixes
+
+- **Creating an event no longer fails after the family-sharing change.** A leftover reference to a removed `shared_with_family` column would cause every event-creation call to error; event creation now uses the current set of columns and works again.
 
 ### Event attribution — someone else's event stops blocking your calendar
 

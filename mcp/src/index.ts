@@ -80,7 +80,7 @@ function extractDomain(url: string): string | null {
 // updated_at, gcal_event_id, event_type, shared_with_*, enrollment_start_date,
 // which are rarely needed by callers and balloon token usage.
 const SLIM_EVENT_COLUMNS =
-  'id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, recurrence_rule, parent_event_id, completed_at, assigned_to, subject_kind, subject_id, owner_attends'
+  'id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, recurrence_rule, parent_event_id, completed_at, assigned_to, group_id, list_label, subject_kind, subject_id, owner_attends'
 
 function slimEvent<T extends Record<string, unknown>>(e: T) {
   return {
@@ -97,6 +97,8 @@ function slimEvent<T extends Record<string, unknown>>(e: T) {
     enrollment_deadline: e.enrollment_deadline,
     completed_at: e.completed_at ?? null,
     assigned_to: e.assigned_to ?? null,
+    group_id: e.group_id ?? null,
+    list_label: e.list_label ?? null,
     subject_kind: e.subject_kind ?? null,
     subject_id: e.subject_id ?? null,
     owner_attends: e.owner_attends ?? false,
@@ -111,7 +113,7 @@ function truncateDescription(desc: unknown, maxLen = 200): string | null {
 
 // ── Tool implementations ──────────────────────────────────────────────────────
 
-async function listEvents(args: { status?: string; limit?: number; from_date?: string; to_date?: string; fields?: 'summary' | 'full' }) {
+async function listEvents(args: { status?: string; limit?: number; from_date?: string; to_date?: string; fields?: 'summary' | 'full'; group_id?: string }) {
   const [id, tz] = await Promise.all([uid(), getUserTimezone()])
   return await withUserContext(id, async (c) => {
     const where: string[] = ['created_by = $1']
@@ -119,8 +121,9 @@ async function listEvents(args: { status?: string; limit?: number; from_date?: s
     if (args.status) { params.push(args.status); where.push(`event_status = $${params.length}`) }
     if (args.from_date) { params.push(args.from_date); where.push(`start_date >= $${params.length}`) }
     if (args.to_date) { params.push(args.to_date + 'T24:00:00'); where.push(`start_date < $${params.length}`) }
+    if (args.group_id) { params.push(args.group_id); where.push(`group_id = $${params.length}`) }
     params.push(args.limit ?? 10)
-    const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, subject_kind, subject_id, owner_attends
+    const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, subject_kind, subject_id, owner_attends, group_id, list_label
                  FROM plannen.events
                  WHERE ${where.join(' AND ')}
                  ORDER BY start_date ASC
@@ -235,6 +238,8 @@ async function createEvent(args: {
   subject_kind?: 'family_member' | 'user'
   subject_id?: string
   owner_attends?: boolean
+  group_id?: string | null
+  list_label?: string
 }) {
   const id = await uid()
   const tz = await getUserTimezone()
@@ -246,15 +251,40 @@ async function createEvent(args: {
       ? (args.event_status as EventStatus)
       : startDate < new Date() ? 'past' : 'going'
 
+  const resolvedKind =
+    args.event_kind === 'reminder' || args.event_kind === 'todo' || args.event_kind === 'container'
+      ? args.event_kind
+      : 'event'
+
   return await withUserContext(id, async (c) => {
     const hashtags = (args.hashtags ?? []).slice(0, 5)
+
+    // Default sharing; overridden by inheritance when joining a container.
+    // (shared_with_family was dropped in 20260520130000 — sharing is event_type
+    // + shared_with_friends; group-based sharing lives in junction tables.)
+    let eventType = 'personal'
+    let sharedWithFriends = 'none'
+    if (args.group_id != null) {
+      if (resolvedKind === 'container') throw new Error('a container cannot belong to another container')
+      const { rows: cont } = await c.query(
+        `SELECT event_kind, event_type, shared_with_friends
+         FROM plannen.events WHERE id = $1 AND created_by = $2`,
+        [args.group_id, id],
+      )
+      if (cont.length === 0 || cont[0].event_kind !== 'container') {
+        throw new Error('group_id must reference a container you own')
+      }
+      eventType = cont[0].event_type
+      sharedWithFriends = cont[0].shared_with_friends
+    }
+
     const { rows } = await c.query(
       `INSERT INTO plannen.events
          (title, description, start_date, end_date, location, event_kind,
           enrollment_url, hashtags, event_type, event_status, created_by,
           assigned_to, shared_with_friends, recurrence_rule,
-          subject_kind, subject_id, owner_attends)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'personal', $9, $10, $11, 'none', $12, $13, $14, $15)
+          subject_kind, subject_id, owner_attends, group_id, list_label)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
        RETURNING *`,
       [
         args.title,
@@ -262,16 +292,20 @@ async function createEvent(args: {
         startDate.toISOString(),
         endDate ? endDate.toISOString() : null,
         args.location ?? null,
-        args.event_kind === 'reminder' || args.event_kind === 'todo' ? args.event_kind : 'event',
+        resolvedKind,
         args.enrollment_url ?? null,
         hashtags,
+        eventType,
         event_status,
         id,
-        args.event_kind === 'todo' ? (args.assigned_to ?? id) : null,
+        resolvedKind === 'todo' ? (args.assigned_to ?? id) : null,
+        sharedWithFriends,
         args.recurrence_rule ?? null,
         args.subject_kind ?? null,
         args.subject_id ?? null,
         args.owner_attends ?? false,
+        args.group_id ?? null,
+        resolvedKind === 'todo' ? (args.list_label ?? null) : null,
       ],
     )
     if (rows.length === 0) throw new Error('Insert failed')
@@ -322,6 +356,8 @@ async function updateEvent(args: {
   subject_kind?: 'family_member' | 'user' | null
   subject_id?: string | null
   owner_attends?: boolean
+  group_id?: string | null
+  list_label?: string | null
 }) {
   const id = await uid()
   const { id: _id, ...rest } = args
@@ -333,6 +369,21 @@ async function updateEvent(args: {
   }
   const entries = Object.entries(rest).filter(([, v]) => v !== undefined)
   return await withUserContext(id, async (c) => {
+    if (rest.group_id != null) {
+      const { rows: tgt } = await c.query(
+        `SELECT event_kind FROM plannen.events WHERE id = $1 AND created_by = $2`,
+        [args.id, id],
+      )
+      if (tgt.length === 0) throw new Error('Not found')
+      if (tgt[0].event_kind === 'container') throw new Error('a container cannot belong to another container')
+      const { rows: cont } = await c.query(
+        `SELECT event_kind FROM plannen.events WHERE id = $1 AND created_by = $2`,
+        [rest.group_id, id],
+      )
+      if (cont.length === 0 || cont[0].event_kind !== 'container') {
+        throw new Error('group_id must reference a container you own')
+      }
+    }
     const setClauses: string[] = []
     const params: unknown[] = []
     for (const [k, v] of entries) {
@@ -2556,6 +2607,7 @@ const TOOLS: Tool[] = [
         from_date: { type: 'string', description: 'ISO date to filter events starting on or after this date, e.g. 2026-05-07' },
         to_date: { type: 'string', description: 'ISO date to filter events starting on or before this date, e.g. 2026-05-07' },
         fields: { type: 'string', enum: ['summary', 'full'], description: 'summary (default) truncates description to 200 chars; full returns the untruncated description.' },
+        group_id: { type: 'string', description: 'Return only members of this container/trip (its child events + todos). Pass the container event id. Remember to also raise limit (default 10 truncates).' },
       },
     },
   },
@@ -2573,7 +2625,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'create_event',
-    description: 'Create a new event or reminder in Plannen',
+    description: 'Create an event, reminder, todo, or container (a multi-day "Trip" that groups child events + todos via their group_id) in Plannen',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2582,13 +2634,15 @@ const TOOLS: Tool[] = [
         start_date: { type: 'string', description: 'ISO 8601. Timezone-naive values (e.g. 2026-06-15T10:00:00) are interpreted in your profile timezone; explicit offsets/Z are respected.' },
         end_date: { type: 'string', description: 'ISO 8601 (naive = profile timezone) or omit' },
         location: { type: 'string' },
-        event_kind: { type: 'string', enum: ['event', 'reminder', 'todo'] },
+        event_kind: { type: 'string', enum: ['event', 'reminder', 'todo', 'container'] },
         assigned_to: { type: 'string', description: 'User UUID to assign a todo to (defaults to creator). Only meaningful for event_kind=todo.' },
         subject_kind: { type: 'string', enum: ['family_member', 'user'], description: "Whose time this event is, if not the owner's. 'family_member' → a family_members id; 'user' → a connected friend's user id. Set together with subject_id." },
         subject_id: { type: 'string', description: 'Id of the subject person (family member or connected user). Set together with subject_kind.' },
         owner_attends: { type: 'boolean', description: "True if the owner is also occupied during this event (so it still counts as a clash). Default false. Only meaningful when a subject is set." },
         enrollment_url: { type: 'string' },
         hashtags: { type: 'array', items: { type: 'string' }, description: 'Tags without # (max 5)' },
+        group_id: { type: 'string', description: 'Container/trip this event or todo belongs to (a container event id). Child inherits the container event_type + sharing unless this event is itself a container. A container cannot have a group_id.' },
+        list_label: { type: 'string', description: 'For event_kind=todo inside a container: which named list it belongs to (e.g. Packing, To-do, Shopping). Ignored for non-todos.' },
         event_status: { type: 'string', enum: ['watching', 'planned', 'interested', 'going', 'cancelled', 'past', 'missed'], description: 'Initial status (default: going for future, past for past dates)' },
         recurrence_rule: {
           type: 'object',
@@ -2624,6 +2678,8 @@ const TOOLS: Tool[] = [
         subject_kind: { type: 'string', enum: ['family_member', 'user'], description: "Whose time this event is, if not the owner's. 'family_member' → a family_members id; 'user' → a connected friend's user id. Set together with subject_id." },
         subject_id: { type: 'string', description: 'Id of the subject person (family member or connected user). Set together with subject_kind.' },
         owner_attends: { type: 'boolean', description: "True if the owner is also occupied during this event (so it still counts as a clash). Default false. Only meaningful when a subject is set." },
+        group_id: { type: 'string', description: 'Assign this event/todo into a container/trip (pass the container event id), or null to remove it from its trip. Cannot be set on a container itself.' },
+        list_label: { type: 'string', description: 'For a todo inside a container: its named list bucket (e.g. Packing). null clears it.' },
       },
       required: ['id'],
     },
