@@ -80,6 +80,24 @@ describe('CalendarGrid compact dot cap (DOT_CAP = 11)', () => {
   })
 })
 
+describe('CalendarGrid – trip bands', () => {
+  it('renders a trip container as a spanning band (not a dot)', () => {
+    const today = new Date()
+    const start = new Date(today.getFullYear(), today.getMonth(), 10, 9, 0).toISOString()
+    const end = new Date(today.getFullYear(), today.getMonth(), 14, 17, 0).toISOString()
+    const trip = { ...makeEvent('trip1', start), title: 'Canada', event_kind: 'container' as const, end_date: end }
+
+    const { container } = render(<CalendarGrid events={[trip]} preferredVisitDates={{}} compact />)
+
+    // The band carries the trip title on every covered day (via title attr).
+    expect(screen.getAllByTitle('Canada').length).toBeGreaterThan(0)
+    // A container must NOT be counted as a blue event dot.
+    expect(container.querySelectorAll('.bg-blue-600').length).toBe(0)
+    // The band uses the violet colour.
+    expect(container.querySelectorAll('.bg-violet-500').length).toBeGreaterThan(0)
+  })
+})
+
 describe('CalendarGrid – create from day', () => {
   it('opens the event form when the sidebar Add button is clicked', async () => {
     const user = userEvent.setup()

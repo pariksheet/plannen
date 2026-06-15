@@ -659,7 +659,7 @@ export function MyFeed() {
             />
           ) : viewMode === 'calendar' ? (
             <CalendarGrid
-              events={filteredEvents}
+              events={[...filteredEvents, ...trips]}
               preferredVisitDates={preferredVisitDates}
               onDelete={handleDeleteClick}
               onShareSuccess={loadEvents}
