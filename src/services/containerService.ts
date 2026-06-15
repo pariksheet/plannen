@@ -61,3 +61,13 @@ export async function assignToContainer(eventId: string, containerId: string | n
     return { error: e instanceof Error ? e : new Error('Assign trip failed') }
   }
 }
+
+/** Delete a trip. Children detach automatically (group_id FK is ON DELETE SET NULL). */
+export async function deleteContainer(id: string): Promise<{ error: Error | null }> {
+  try {
+    await dbClient.events.delete(id)
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e : new Error('Delete trip failed') }
+  }
+}

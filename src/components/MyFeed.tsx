@@ -15,10 +15,12 @@ import { projectScheduleForDay } from '../services/schedulingService'
 import { dbClient } from '../lib/dbClient'
 import type { AttendanceInstanceRow, ResolvedObligationRow } from '../lib/dbClient/types'
 import { ConfirmModal, PromptModal } from './Modal'
-import { Plus, ChevronUp, ChevronDown, Calendar, X, Eye, Briefcase } from 'lucide-react'
+import { Plus, ChevronUp, ChevronDown, Calendar, X, Eye, Briefcase, Pencil, Trash2 } from 'lucide-react'
+import { format } from 'date-fns'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { deleteEvent, completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
+import { deleteContainer } from '../services/containerService'
 import { supabase } from '../lib/supabase'
 
 // Identifies events auto-created by the mailbox-sync routine.
@@ -239,6 +241,14 @@ export function MyFeed() {
   const handleEdit = (event: Event) => {
     setEditingEvent(event)
     setShowForm(true)
+  }
+
+  const handleDeleteTrip = async (trip: Event) => {
+    if (!window.confirm(`Delete the trip "${trip.title}"? Its events and to-dos stay — they're just no longer grouped.`)) return
+    setFeedError(null)
+    const { error } = await deleteContainer(trip.id)
+    if (error) { setFeedError(error.message); return }
+    loadEvents()
   }
 
   const handleDeleteClick = (eventId: string) => {
@@ -465,11 +475,37 @@ export function MyFeed() {
             <div className="px-4 pb-4 border-t border-gray-100 pt-3 space-y-4">
               {trips.map((t) => {
                 const members = tripMembers(t.id)
+                const range = t.end_date
+                  ? `${format(new Date(t.start_date), 'd MMM')} – ${format(new Date(t.end_date), 'd MMM yyyy')}`
+                  : format(new Date(t.start_date), 'd MMM yyyy')
                 return (
                   <div key={t.id}>
-                    <p className="text-sm font-semibold text-gray-900">{t.title}</p>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{t.title}</p>
+                        <p className="text-xs text-gray-500">{range}</p>
+                      </div>
+                      <div className="flex items-center flex-shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleEdit(t)}
+                          className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center text-gray-400 hover:text-indigo-600"
+                          aria-label={`Edit trip ${t.title}`}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTrip(t)}
+                          className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center text-gray-400 hover:text-red-600"
+                          aria-label={`Delete trip ${t.title}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
                     {members.length === 0 ? (
-                      <p className="text-xs text-gray-500 mt-1">Nothing in this trip yet. Add a trip when creating an event.</p>
+                      <p className="text-xs text-gray-500 mt-1">Nothing in this trip yet. Add events or to-dos to it from the create form.</p>
                     ) : (
                       <EventList
                         events={members}

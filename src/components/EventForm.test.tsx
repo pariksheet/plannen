@@ -104,6 +104,24 @@ describe('EventForm – To-do kind', () => {
     expect(submittedData.event_kind).toBe('todo')
   })
 
+  it('creates a Trip (container) via the Trip kind', async () => {
+    const user = userEvent.setup()
+    mockCreateEvent.mockResolvedValue({ data: { id: 'trip-1', event_kind: 'container' }, error: null })
+    renderForm()
+    await user.click(screen.getByRole('button', { name: /^trip$/i }))
+    await user.type(screen.getByLabelText(/title/i), 'Canada')
+    // Trip is a 3-step flow (Basics → When → Sharing); dates are pre-seeded.
+    await user.click(screen.getByRole('button', { name: /^next$/i }))
+    await user.click(screen.getByRole('button', { name: /^next$/i }))
+    await user.click(screen.getByRole('button', { name: /^create$/i }))
+
+    await waitFor(() => expect(mockCreateEvent).toHaveBeenCalled())
+    const [data] = mockCreateEvent.mock.calls[0] as [Record<string, unknown>, ...unknown[]]
+    expect(data.event_kind).toBe('container')
+    // A trip carries no enrollment URL.
+    expect(data.enrollment_url).toBe('')
+  })
+
   it('assigns the event to a chosen trip after create', async () => {
     const user = userEvent.setup()
     mockCreateEvent.mockResolvedValue({ data: { id: 'new-9', event_kind: 'todo' }, error: null })

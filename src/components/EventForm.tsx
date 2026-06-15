@@ -217,7 +217,11 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
   const handleCreateTrip = async () => {
     const name = newTripName.trim()
     if (!name) return
-    const { data, error: e } = await createContainer(name)
+    // Seed the new trip's dates from the event being filed under it, so a
+    // quick-created trip still has a sensible range (editable later).
+    const startIso = formData.start_date ? new Date(formData.start_date).toISOString() : undefined
+    const endIso = formData.end_date ? new Date(formData.end_date).toISOString() : null
+    const { data, error: e } = await createContainer(name, startIso, endIso)
     if (e) { setError(e.message); return }
     if (data) { setTrips((prev) => [...prev, data]); setTripId(data.id) }
     setNewTripName('')
@@ -229,6 +233,9 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
   }, [step])
 
   const isLeanKind = formData.event_kind === 'reminder' || formData.event_kind === 'todo'
+  // A Trip is just an event that can hold children: optional dates, shareable,
+  // no URL / RSVP / recurrence / visit / watch.
+  const isContainer = formData.event_kind === 'container'
 
   // "Visit date" — which day of a multi-day event you plan to attend — only
   // makes sense when the event actually spans more than one calendar day.
@@ -259,9 +266,9 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
     return new Date(v).toISOString()
   }
 
-  // Reminders and to-dos are a single screen — everything fits on step 1, so
-  // there's no wizard for them. Only full events use the 4-step flow.
-  const effectiveSteps = isLeanKind ? 1 : WIZARD_STEPS
+  // Reminders/to-dos are a single screen. Trips skip the Options step (no
+  // watch/RSVP) → 3 steps. Full events use the 4-step flow.
+  const effectiveSteps = isLeanKind ? 1 : isContainer ? 3 : WIZARD_STEPS
   const canProceedStep1 = () => (formData.title ?? '').trim() !== ''
   const canProceedStep2 = () => (formData.start_date ?? '').trim() !== ''
   const canSubmitLeanFromStep1 = () => canProceedStep1() && canProceedStep2()
@@ -288,7 +295,8 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
       if (prev.event_kind === 'todo') return { ...prev, start_date: value, end_date: '' }
       const hasEnd = !!prev.end_date
       const endBeforeStart = hasEnd && !!value && new Date(prev.end_date).getTime() <= new Date(value).getTime()
-      const fill = prev.event_kind === 'event' ? (!hasEnd || endBeforeStart) : endBeforeStart
+      // Events and trips auto-fill an end; reminders only fix an inverted one.
+      const fill = (prev.event_kind === 'event' || prev.event_kind === 'container') ? (!hasEnd || endBeforeStart) : endBeforeStart
       return {
         ...prev,
         start_date: value,
@@ -389,7 +397,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (!isLeanKind && step < WIZARD_STEPS) {
+    if (!isLeanKind && step < effectiveSteps) {
       goNext()
       return
     }
@@ -413,13 +421,14 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
     setLoading(true)
     setError('')
     try {
+      const noEnrollment = isLeanKind || isContainer
       const dataToSubmit: EventFormData = {
         ...formData,
         start_date: new Date(formData.start_date).toISOString(),
         end_date: formData.end_date ? new Date(formData.end_date).toISOString() : '',
-        enrollment_url: isLeanKind ? '' : formData.enrollment_url,
-        enrollment_deadline: isLeanKind ? '' : (formData.enrollment_deadline ? new Date(formData.enrollment_deadline).toISOString() : ''),
-        enrollment_start_date: isLeanKind ? '' : (formData.enrollment_start_date ? new Date(formData.enrollment_start_date).toISOString() : ''),
+        enrollment_url: noEnrollment ? '' : formData.enrollment_url,
+        enrollment_deadline: noEnrollment ? '' : (formData.enrollment_deadline ? new Date(formData.enrollment_deadline).toISOString() : ''),
+        enrollment_start_date: noEnrollment ? '' : (formData.enrollment_start_date ? new Date(formData.enrollment_start_date).toISOString() : ''),
         image_url: formData.image_url?.trim() || '',
         shared_with_friends: formData.shared_with_friends,
         shared_with_user_ids: formData.shared_with_user_ids ?? [],
@@ -500,9 +509,13 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
         <div className="sticky top-0 bg-white border-b border-gray-200 px-4 sm:px-6 py-4 z-10">
           <div className="flex justify-between items-center gap-2">
             <h2 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">
-              {event
-                ? (formData.event_kind === 'reminder' ? 'Edit Reminder' : formData.event_kind === 'todo' ? 'Edit To-do' : 'Edit Event')
-                : (formData.event_kind === 'reminder' ? 'Create Reminder' : formData.event_kind === 'todo' ? 'Create To-do' : 'Create Event')}
+              {(() => {
+                const noun = formData.event_kind === 'reminder' ? 'Reminder'
+                  : formData.event_kind === 'todo' ? 'To-do'
+                  : formData.event_kind === 'container' ? 'Trip'
+                  : 'Event'
+                return `${event ? 'Edit' : 'Create'} ${noun}`
+              })()}
             </h2>
             <button
               type="button"
@@ -532,50 +545,69 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
           <div className="space-y-6">
           <div>
             <span className="block text-sm font-medium text-gray-700 mb-2">What is this?</span>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setFormData((prev) => ({ ...prev, event_kind: 'event', end_date: prev.end_date || (prev.start_date ? plusOneHourLocal(prev.start_date) : '') }))}
-                className={`min-h-[44px] flex-1 px-4 py-2.5 rounded-md text-sm font-medium border-2 transition-colors ${
-                  formData.event_kind === 'event'
-                    ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
-                }`}
-              >
-                Event
-              </button>
-              <button
-                type="button"
-                onClick={() => { setFormData((prev) => ({ ...prev, event_kind: 'reminder', end_date: '' })); setStep(1) }}
-                className={`min-h-[44px] flex-1 px-4 py-2.5 rounded-md text-sm font-medium border-2 transition-colors ${
-                  formData.event_kind === 'reminder'
-                    ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
-                }`}
-              >
-                Reminder
-              </button>
-              <button
-                type="button"
-                onClick={() => { setFormData((prev) => ({ ...prev, event_kind: 'todo', end_date: '' })); setStep(1) }}
-                className={`min-h-[44px] flex-1 px-4 py-2.5 rounded-md text-sm font-medium border-2 transition-colors ${
-                  formData.event_kind === 'todo'
-                    ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
-                }`}
-              >
-                To-do
-              </button>
-            </div>
+            {event && event.event_kind === 'container' ? (
+              <div className="inline-flex items-center px-4 py-2.5 rounded-md text-sm font-medium border-2 border-indigo-600 bg-indigo-50 text-indigo-700">Trip</div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFormData((prev) => ({ ...prev, event_kind: 'event', end_date: prev.end_date || (prev.start_date ? plusOneHourLocal(prev.start_date) : '') }))}
+                  className={`min-h-[44px] flex-1 min-w-[80px] px-4 py-2.5 rounded-md text-sm font-medium border-2 transition-colors ${
+                    formData.event_kind === 'event'
+                      ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  Event
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setFormData((prev) => ({ ...prev, event_kind: 'reminder', end_date: '' })); setStep(1) }}
+                  className={`min-h-[44px] flex-1 min-w-[80px] px-4 py-2.5 rounded-md text-sm font-medium border-2 transition-colors ${
+                    formData.event_kind === 'reminder'
+                      ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  Reminder
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setFormData((prev) => ({ ...prev, event_kind: 'todo', end_date: '' })); setStep(1) }}
+                  className={`min-h-[44px] flex-1 min-w-[80px] px-4 py-2.5 rounded-md text-sm font-medium border-2 transition-colors ${
+                    formData.event_kind === 'todo'
+                      ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  To-do
+                </button>
+                {!event && (
+                  <button
+                    type="button"
+                    onClick={() => { setFormData((prev) => ({ ...prev, event_kind: 'container', end_date: prev.end_date || (prev.start_date ? plusOneHourLocal(prev.start_date) : '') })); setStep(1) }}
+                    className={`min-h-[44px] flex-1 min-w-[80px] px-4 py-2.5 rounded-md text-sm font-medium border-2 transition-colors ${
+                      formData.event_kind === 'container'
+                        ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                        : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                    }`}
+                  >
+                    Trip
+                  </button>
+                )}
+              </div>
+            )}
             <p className="text-xs text-gray-500 mt-1">
               {formData.event_kind === 'reminder'
                 ? 'Simple appointment or thing to remember (no URL or RSVP). Reminders stay private.'
                 : formData.event_kind === 'todo'
                   ? 'A one-off task you check off when done.'
-                  : 'Event with optional link, RSVP, and sharing. Use Next to set date, sharing, and options.'}
+                  : formData.event_kind === 'container'
+                    ? 'A trip or plan that groups other events and to-dos under it. Set its dates and share it like any event.'
+                    : 'Event with optional link, RSVP, and sharing. Use Next to set date, sharing, and options.'}
             </p>
           </div>
-          {!(event && event.event_kind === 'container') && (
+          {!isContainer && (
             <div>
               <label htmlFor="trip" className="block text-sm font-medium text-gray-700 mb-1">Part of a trip (optional)</label>
               {creatingTrip ? (
@@ -681,6 +713,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
           </>
           ) : (
           <>
+          {!isContainer && (
           <div>
             <label htmlFor="enrollment_url" className="block text-sm font-medium text-gray-700 mb-1">Event or registration URL</label>
             <div className="relative">
@@ -735,6 +768,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               <span className="text-xs text-gray-500">Or upload a flyer or poster to auto-fill details.</span>
             </div>
           </div>
+          )}
           <div>
             <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
             <input
@@ -746,6 +780,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
             />
           </div>
+          {!isContainer && (
           <div>
             <label htmlFor="event_type" className="block text-sm font-medium text-gray-700 mb-1">Type</label>
             <select
@@ -761,6 +796,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
             </select>
             <p className="text-xs text-gray-500 mt-1">Used to colour-code the card. Doesn&apos;t change who can see it.</p>
           </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Cover image</label>
             <div className="space-y-2">
