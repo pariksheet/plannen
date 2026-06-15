@@ -118,6 +118,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
   const coverFileInputRef = useRef<HTMLInputElement>(null)
   const modalContentRef = useRef<HTMLDivElement>(null)
   const submitButtonRef = useRef<HTMLButtonElement>(null)
+  const titleRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState('')
   const [recurrenceFreq, setRecurrenceFreq] = useState<'none' | 'daily' | 'weekly' | 'monthly'>('none')
   const [recurrenceCount, setRecurrenceCount] = useState(8)
@@ -251,6 +252,13 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
     modalContentRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
   }, [step])
 
+  // Title is the one required field — focus it when the form opens so the user
+  // can type straight away. (autoFocus is unreliable inside the scrolling modal.)
+  useEffect(() => {
+    const t = window.setTimeout(() => titleRef.current?.focus(), 50)
+    return () => window.clearTimeout(t)
+  }, [])
+
   const isLeanKind = formData.event_kind === 'reminder' || formData.event_kind === 'todo'
   // A Trip is just an event that can hold children: optional dates, shareable,
   // no URL / RSVP / recurrence / visit / watch.
@@ -283,6 +291,25 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
     if (v < formData.start_date) v = formData.start_date
     if (formData.end_date && v > formData.end_date) v = formData.end_date
     return new Date(v).toISOString()
+  }
+
+  // Plain-language summary of what a recurrence will produce — clarifies that
+  // the start/end set ONE session and shows when the series ends.
+  const recurrenceSummary = (): string => {
+    const count = Math.max(2, Math.min(52, recurrenceCount || 0))
+    const word = recurrenceFreq === 'weekly' ? 'weekly' : recurrenceFreq === 'daily' ? 'daily' : 'monthly'
+    let last = ''
+    if (formData.start_date) {
+      const d = new Date(formData.start_date)
+      if (!isNaN(d.getTime())) {
+        const n = count - 1
+        if (recurrenceFreq === 'weekly') d.setDate(d.getDate() + n * 7)
+        else if (recurrenceFreq === 'daily') d.setDate(d.getDate() + n)
+        else d.setMonth(d.getMonth() + n)
+        last = d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+      }
+    }
+    return `The date & time above set one session — it repeats ${word} ×${count}${last ? `, last on ${last}` : ''}.`
   }
 
   // Reminders/to-dos are a single screen. Trips skip the Options step (no
@@ -682,7 +709,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               type="text"
               id="title"
               required
-              autoFocus
+              ref={titleRef}
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
               className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
@@ -791,7 +818,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               type="text"
               id="title"
               required
-              autoFocus
+              ref={titleRef}
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
               className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
@@ -941,39 +968,39 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
             </div>
           </div>
           {!event && formData.event_kind === 'event' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="recurrence_freq" className="block text-sm font-medium text-gray-700 mb-1">Repeats</label>
-                <select
-                  id="recurrence_freq"
-                  value={recurrenceFreq}
-                  onChange={(e) => setRecurrenceFreq(e.target.value as typeof recurrenceFreq)}
-                  className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                >
-                  <option value="none">Does not repeat</option>
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                  <option value="monthly">Monthly</option>
-                </select>
+            <div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="recurrence_freq" className="block text-sm font-medium text-gray-700 mb-1">Repeats</label>
+                  <select
+                    id="recurrence_freq"
+                    value={recurrenceFreq}
+                    onChange={(e) => setRecurrenceFreq(e.target.value as typeof recurrenceFreq)}
+                    className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    <option value="none">Does not repeat</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+                {recurrenceFreq !== 'none' && (
+                  <div>
+                    <label htmlFor="recurrence_count" className="block text-sm font-medium text-gray-700 mb-1">Number of occurrences</label>
+                    <input
+                      type="number"
+                      id="recurrence_count"
+                      min={2}
+                      max={52}
+                      value={recurrenceCount}
+                      onChange={(e) => setRecurrenceCount(Number(e.target.value))}
+                      className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                  </div>
+                )}
               </div>
               {recurrenceFreq !== 'none' && (
-                <div>
-                  <label htmlFor="recurrence_count" className="block text-sm font-medium text-gray-700 mb-1">Number of occurrences</label>
-                  <input
-                    type="number"
-                    id="recurrence_count"
-                    min={2}
-                    max={52}
-                    value={recurrenceCount}
-                    onChange={(e) => setRecurrenceCount(Number(e.target.value))}
-                    className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    {recurrenceFreq === 'weekly'
-                      ? 'Repeats weekly on the same weekday as the start date.'
-                      : `Creates ${Math.max(2, Math.min(52, recurrenceCount))} sessions starting from the date above.`}
-                  </p>
-                </div>
+                <p className="text-xs text-gray-500 mt-1">{recurrenceSummary()}</p>
               )}
             </div>
           )}

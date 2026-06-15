@@ -156,6 +156,12 @@ describe('date helpers', () => {
 })
 
 describe('EventForm – smart defaults & validation', () => {
+  it('focuses the title field when the form opens', async () => {
+    renderForm()
+    const title = screen.getByLabelText(/title/i)
+    await waitFor(() => expect(title).toHaveFocus())
+  })
+
   it('pre-seeds a default start (top-of-hour) and end on create (event)', async () => {
     const user = userEvent.setup()
     renderForm()
