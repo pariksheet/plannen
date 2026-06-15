@@ -319,18 +319,10 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
 
         {showSidebar && (
           <aside className="space-y-3 lg:sticky lg:top-24">
-            <div className="bg-white rounded-lg border border-gray-200 p-3 flex items-center justify-between gap-2">
+            <div className="bg-white rounded-lg border border-gray-200 p-3">
               <h4 className="text-sm font-semibold text-gray-700">
                 {format(selectedDate, 'EEEE, MMM d, yyyy')}
               </h4>
-              <button
-                type="button"
-                onClick={() => handleCreateOnDay(selectedDate)}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 min-h-[36px] rounded-md bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700"
-              >
-                <Plus className="h-4 w-4" />
-                Add
-              </button>
             </div>
             {selectedEvents.length === 0 ? (
               <div className="text-center py-8 bg-white rounded-lg border border-gray-200">
