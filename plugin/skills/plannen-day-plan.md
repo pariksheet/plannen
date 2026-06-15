@@ -14,6 +14,7 @@ Use when the user invokes `/plannen-today` or asks anything like "today's plan",
 2. **Fetch context.** Call `get_briefing_context({ date })`. This returns events today + tomorrow, recent past events, your circle (family_members surfaced as "circle"), practices due today with weekly remaining counts, and locations. It also returns:
    - `attendances_today` — a member's recurring enrolments active today (school, creche, camp), already resolved for blackout suppression and the member-overlap override. **Indicative only**: render as circle/context, never conflict-check them.
    - `obligations_today` — the resolved timed drop/pick tasks (already re-projected onto whichever attendance instance survived). **Actionable**: treat these like events — they go in Schedule and DO participate in the conflict check.
+   - `overdue_todos` — open todos (`event_kind=todo`, not completed, not cancelled) whose due date fell in the last 30 days, oldest first. Render under a `## Overdue` section above Schedule.
 
    One call — no follow-up MCP reads unless the user asks a question requiring extra data.
 
@@ -21,6 +22,9 @@ Use when the user invokes `/plannen-today` or asks anything like "today's plan",
 
    ```markdown
    # <Weekday>, <D Mon>
+
+   ## Overdue
+   - [ ] Todo title (due <D Mon>)        // overdue_todos, oldest first; omit section if none
 
    ## Schedule
    - HH:MM — Event title (annotation if useful, e.g. "you driving")
@@ -39,6 +43,7 @@ Use when the user invokes `/plannen-today` or asks anything like "today's plan",
 
    **Format rules:**
    - **Conflict check first.** Before rendering Schedule, run the time-conflict check from `plannen-core` (dedupe series parents, compare going/planned time ranges). Render any overlap as a `⚠️` line directly under the first affected event: `  ⚠️ overlaps <other event> HH:MM–HH:MM`.
+   - **Overdue.** Render `overdue_todos` as `[ ]` checkbox lines under `## Overdue` above Schedule, oldest first, each annotated `(due <D Mon>)` from its `start_date`. Omit the whole section when `overdue_todos` is empty. On overflow it ranks just below time-conflicted events.
    - **Bullets only**, no prose paragraphs, no motivational/coach copy.
    - Max ~30 lines total. If context overflows, prioritise: events with time conflicts > kids' events > partner's events > recurring reminders.
    - Practices: render `[ ]` when not yet done today, `[x]` if `completions_this_week` already includes today's date.
