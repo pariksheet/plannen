@@ -228,12 +228,23 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
 
   const isLeanKind = formData.event_kind === 'reminder' || formData.event_kind === 'todo'
 
-  const hasValidRange = Boolean(
+  // "Visit date" — which day of a multi-day event you plan to attend — only
+  // makes sense when the event actually spans more than one calendar day.
+  // A same-day event (even with a start/end time range) has nothing to choose.
+  const isMultiDay = Boolean(
     formData.event_kind === 'event' &&
     formData.start_date &&
     formData.end_date &&
-    new Date(formData.start_date).getTime() < new Date(formData.end_date).getTime()
+    formData.start_date.slice(0, 10) !== formData.end_date.slice(0, 10) &&
+    new Date(formData.end_date).getTime() > new Date(formData.start_date).getTime()
   )
+
+  // On create, default the visit date to the first day of the span once the
+  // event becomes multi-day (the user can still change it).
+  useEffect(() => {
+    if (!event && isMultiDay && !visitDateTime) setVisitDateTime(formData.start_date)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMultiDay])
 
   // Reminders and to-dos are a single screen — everything fits on step 1, so
   // there's no wizard for them. Only full events use the 4-step flow.
@@ -437,7 +448,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
         if (updatedEvent && watchForNextOccurrence && (dataToSubmit.enrollment_url || event.enrollment_url)) {
           await createRecurringTask(updatedEvent.id, (dataToSubmit.enrollment_url || event.enrollment_url)!.trim())
         }
-        if (updatedEvent && hasValidRange) {
+        if (updatedEvent && isMultiDay) {
           const preferredVisitIso = visitDateTime ? new Date(visitDateTime).toISOString() : null
           const { error: visitErr } = await setPreferredVisitDate(updatedEvent.id, preferredVisitIso)
           if (visitErr) throw visitErr
@@ -446,7 +457,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
       } else {
         const { data: createdEvent, error: err } = await createEvent(dataToSubmit, watchForNextOccurrence, missedEvent)
         if (err) throw err
-        if (createdEvent && hasValidRange && visitDateTime) {
+        if (createdEvent && isMultiDay && visitDateTime) {
           const preferredVisitIso = new Date(visitDateTime).toISOString()
           const { error: visitErr } = await setPreferredVisitDate(createdEvent.id, preferredVisitIso)
           if (visitErr) throw visitErr
@@ -910,10 +921,10 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               )}
             </div>
           )}
-          {formData.event_kind === 'event' && (
+          {isMultiDay && (
             <div>
               <label htmlFor="visit_date_time" className="block text-sm font-medium text-gray-700 mb-1">
-                Visit date &amp; time (optional)
+                Which day will you go? (optional)
               </label>
               <input
                 type="datetime-local"
@@ -922,14 +933,9 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
                 min={formData.start_date || undefined}
                 max={formData.end_date || undefined}
                 onChange={(e) => setVisitDateTime(e.target.value)}
-                disabled={!hasValidRange}
                 className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
               />
-              <p className="text-xs text-gray-500 mt-1">
-                {hasValidRange
-                  ? 'Choose when you plan to attend. You can set this now while creating the event.'
-                  : 'Set both start and end date/time (with end after start) to enable visit date.'}
-              </p>
+              <p className="text-xs text-gray-500 mt-1">This event runs over several days — pick the day you plan to attend. Defaults to the first day.</p>
             </div>
           )}
           {formData.event_kind === 'event' && !!(formData.enrollment_url?.trim() || formData.enrollment_start_date || formData.enrollment_deadline) && (
