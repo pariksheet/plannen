@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **Creating an event no longer fails after the family-sharing change.** A leftover reference to a removed `shared_with_family` column would cause every event-creation call to error; event creation now uses the current set of columns and works again.
 
+## [0.6.3] - 2026-06-13
+
 ### Event attribution — someone else's event stops blocking your calendar
 
 - **Mark an event as someone else's.** An event can now be attributed to a family member or a connected friend, so it still appears on your calendar but no longer counts as *you* being busy. A child's class or a friend's party you're just tracking stops raising false "⚠ overlaps" warnings against your own plans.
