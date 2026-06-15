@@ -128,9 +128,10 @@ describe('EventForm – To-do kind', () => {
     renderForm()
     await user.click(screen.getByRole('button', { name: /^to-do$/i }))
     await user.type(screen.getByLabelText(/title/i), 'Pack bags')
-    // Trip picker is in the shared step-1 area.
-    await waitFor(() => expect(screen.getByRole('option', { name: 'Italy' })).toBeInTheDocument())
-    await user.selectOptions(screen.getByLabelText(/part of a trip/i), 't1')
+    // Opt into a trip via the checkbox, then the picker appears once trips load.
+    await user.click(screen.getByRole('checkbox', { name: /add to a trip/i }))
+    const select = await screen.findByLabelText(/choose trip/i)
+    await user.selectOptions(select, 't1')
     await user.click(screen.getByRole('button', { name: /^create$/i }))
 
     await waitFor(() => expect(mockAssignToContainer).toHaveBeenCalledWith('new-9', 't1'))

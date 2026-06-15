@@ -128,6 +128,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
   const [visitOnSpecificDay, setVisitOnSpecificDay] = useState(false)
   const [trips, setTrips] = useState<Trip[]>([])
   const [tripId, setTripId] = useState('')
+  const [partOfTrip, setPartOfTrip] = useState(false)
   const [newTripName, setNewTripName] = useState('')
   const [creatingTrip, setCreatingTrip] = useState(false)
   const [hashtagsInput, setHashtagsInput] = useState<string>(() => {
@@ -206,6 +207,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
       })
       setWatchForNextOccurrence(event.event_status === 'watching' || event.event_status === 'missed')
       setTripId(event.group_id ?? '')
+      setPartOfTrip(!!event.group_id)
     }
   }, [event])
 
@@ -213,6 +215,23 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
   useEffect(() => {
     listContainers().then(({ data }) => setTrips(data))
   }, [])
+
+  // Toggle "add to a trip"; detach (and reset) when off. Selection defaults to
+  // the first trip via the effect below (which also handles trips loading late).
+  const handleTripToggle = (on: boolean) => {
+    setPartOfTrip(on)
+    if (!on) {
+      setTripId('')
+      setCreatingTrip(false)
+      setNewTripName('')
+    }
+  }
+
+  // When the box is on and trips are available, pre-select the first one so the
+  // dropdown and the stored selection never disagree.
+  useEffect(() => {
+    if (partOfTrip && !tripId && !creatingTrip && trips.length > 0) setTripId(trips[0].id)
+  }, [partOfTrip, tripId, creatingTrip, trips])
 
   const handleCreateTrip = async () => {
     const name = newTripName.trim()
@@ -609,33 +628,50 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
           </div>
           {!isContainer && (
             <div>
-              <label htmlFor="trip" className="block text-sm font-medium text-gray-700 mb-1">Part of a trip (optional)</label>
-              {creatingTrip ? (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    aria-label="New trip name"
-                    placeholder="e.g. Summer in Italy"
-                    value={newTripName}
-                    onChange={(e) => setNewTripName(e.target.value)}
-                    className="flex-1 min-w-0 px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                  />
-                  <button type="button" onClick={handleCreateTrip} disabled={!newTripName.trim()} className="min-h-[44px] px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50">Create</button>
-                  <button type="button" onClick={() => { setCreatingTrip(false); setNewTripName('') }} className="min-h-[44px] px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md">Cancel</button>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={partOfTrip}
+                  onChange={(e) => handleTripToggle(e.target.checked)}
+                  className="h-4 w-4 text-indigo-600 rounded"
+                />
+                <span className="text-sm font-medium text-gray-700">Add to a trip</span>
+              </label>
+              {partOfTrip && (
+                <div className="mt-2">
+                  {(creatingTrip || trips.length === 0) ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        aria-label="New trip name"
+                        placeholder="e.g. Summer in Italy"
+                        value={newTripName}
+                        onChange={(e) => setNewTripName(e.target.value)}
+                        className="flex-1 min-w-0 px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                      />
+                      <button type="button" onClick={handleCreateTrip} disabled={!newTripName.trim()} className="min-h-[44px] px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50">Create</button>
+                      <button
+                        type="button"
+                        onClick={() => { if (trips.length === 0) handleTripToggle(false); else { setCreatingTrip(false); setNewTripName('') } }}
+                        className="min-h-[44px] px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      id="trip"
+                      aria-label="Choose trip"
+                      value={tripId}
+                      onChange={(e) => { if (e.target.value === '__new__') { setCreatingTrip(true); setNewTripName('') } else setTripId(e.target.value) }}
+                      className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                    >
+                      {trips.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+                      <option value="__new__">＋ New trip…</option>
+                    </select>
+                  )}
                 </div>
-              ) : (
-                <select
-                  id="trip"
-                  value={tripId}
-                  onChange={(e) => { if (e.target.value === '__new__') setCreatingTrip(true); else setTripId(e.target.value) }}
-                  className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                >
-                  <option value="">Not part of a trip</option>
-                  {trips.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
-                  <option value="__new__">＋ New trip…</option>
-                </select>
               )}
-              <p className="text-xs text-gray-500 mt-1">Group this under a trip to see everything for it together.</p>
             </div>
           )}
           {isLeanKind ? (
