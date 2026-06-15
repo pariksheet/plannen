@@ -236,17 +236,20 @@ describe('EventForm – smart defaults & validation', () => {
     const user = userEvent.setup()
     mockCreateEvent.mockResolvedValue({ data: { id: 'x' }, error: null })
     renderForm()
-    // Reminder is single-step and has an optional end field.
-    await user.click(screen.getByRole('button', { name: /^reminder$/i }))
+    // Events have start/end on step 2; only they carry an end field now.
     await user.type(screen.getByLabelText(/title/i), 'Bad range')
+    await user.click(screen.getByRole('button', { name: /^next$/i }))
 
-    const startInput = screen.getByLabelText(/date & time/i)
+    const startInput = screen.getByLabelText(/start date/i)
     await user.clear(startInput)
     await user.type(startInput, '2026-12-01T10:00')
-    const endInput = screen.getByLabelText(/end time/i)
+    const endInput = screen.getByLabelText(/end date/i)
     await user.clear(endInput)
     await user.type(endInput, '2026-12-01T09:00')
 
+    // Advance through sharing + options to the final submit.
+    await user.click(screen.getByRole('button', { name: /^next$/i }))
+    await user.click(screen.getByRole('button', { name: /^next$/i }))
     await user.click(screen.getByRole('button', { name: /^create$/i }))
 
     expect(await screen.findByText(/end time must be after the start time/i)).toBeInTheDocument()

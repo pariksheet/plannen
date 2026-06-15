@@ -561,7 +561,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
             </div>
           )}
           {step === 1 && (
-          <div className="space-y-6">
+          <div className="space-y-4">
           <div>
             <span className="block text-sm font-medium text-gray-700 mb-2">What is this?</span>
             {event && event.event_kind === 'container' ? (
@@ -699,32 +699,18 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
             />
           </div>
-          <div className={`grid grid-cols-1 ${formData.event_kind === 'todo' ? '' : 'md:grid-cols-2'} gap-4`}>
-            <div>
-              <label htmlFor="start_date" className="block text-sm font-medium text-gray-700 mb-1">
-                {formData.event_kind === 'todo' ? 'Due date & time *' : 'Date & time *'}
-              </label>
-              <input
-                type="datetime-local"
-                id="start_date"
-                required
-                value={formData.start_date}
-                onChange={(e) => handleStartChange(e.target.value)}
-                className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              />
-            </div>
-            {formData.event_kind === 'reminder' && (
-              <div>
-                <label htmlFor="end_date" className="block text-sm font-medium text-gray-700 mb-1">End time (optional)</label>
-                <input
-                  type="datetime-local"
-                  id="end_date"
-                  value={formData.end_date}
-                  onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
-                  className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                />
-              </div>
-            )}
+          <div>
+            <label htmlFor="start_date" className="block text-sm font-medium text-gray-700 mb-1">
+              {formData.event_kind === 'todo' ? 'Due date & time *' : 'Date & time *'}
+            </label>
+            <input
+              type="datetime-local"
+              id="start_date"
+              required
+              value={formData.start_date}
+              onChange={(e) => handleStartChange(e.target.value)}
+              className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            />
           </div>
           <div>
             <label htmlFor="hashtags" className="block text-sm font-medium text-gray-700 mb-1">Hashtags</label>
@@ -875,7 +861,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
             <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">Description</label>
             <textarea
               id="description"
-              rows={4}
+              rows={2}
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
@@ -900,16 +886,14 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               placeholder="#summer #kids #camp (max 5)"
               className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
             />
-            <p className="text-xs text-gray-500 mt-1">
-              Add up to 5 short tags without spaces. They help you group and scan events later.
-            </p>
+            <p className="text-xs text-gray-500 mt-1">Up to 5 short tags, for grouping and scanning later.</p>
           </div>
           </>
           )}
           </div>
           )}
           {step === 2 && (
-          <div className="space-y-6">
+          <div className="space-y-4">
           {isLeanKind ? (
             <div className="p-4 bg-gray-50 border border-gray-200 rounded-md">
               <p className="text-sm font-medium text-gray-700">You&apos;re all set.</p>
@@ -1051,7 +1035,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
           </div>
           )}
           {step === 3 && (
-          <div className="space-y-6">
+          <div className="space-y-4">
           {isLeanKind ? (
             <div className="p-4 bg-gray-50 border border-gray-200 rounded-md">
               <p className="text-sm font-medium text-gray-700">
@@ -1122,7 +1106,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
           </div>
           )}
           {step === 4 && (
-          <div className="space-y-6">
+          <div className="space-y-4">
           <p className="text-sm font-medium text-gray-700">Options</p>
           {isLeanKind && (
             <div className="p-4 bg-gray-50 border border-gray-200 rounded-md">
