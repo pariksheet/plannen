@@ -139,6 +139,28 @@ describe('EventForm – smart defaults & validation', () => {
     expect(await screen.findByText(/couldn't read that link/i)).toBeInTheDocument()
   })
 
+  it('passes a recurrence_rule when a repeat is chosen on create', async () => {
+    const user = userEvent.setup()
+    mockCreateEvent.mockResolvedValue({ data: { id: 'r1', event_kind: 'event' }, error: null })
+    renderForm()
+    // Event kind is the default. Step 1: title.
+    await user.type(screen.getByLabelText(/title/i), 'Swim class')
+    await user.click(screen.getByRole('button', { name: /^next$/i }))
+    // Step 2: choose weekly recurrence (start date is pre-seeded).
+    await user.selectOptions(screen.getByLabelText(/repeats/i), 'weekly')
+    await user.click(screen.getByRole('button', { name: /^next$/i }))
+    // Step 3 (sharing) → Step 4 (options)
+    await user.click(screen.getByRole('button', { name: /^next$/i }))
+    await user.click(screen.getByRole('button', { name: /^create$/i }))
+
+    await waitFor(() => expect(mockCreateEvent).toHaveBeenCalled())
+    const [submitted] = mockCreateEvent.mock.calls[0] as [Record<string, unknown>, ...unknown[]]
+    const rule = submitted.recurrence_rule as { frequency: string; count: number; days?: string[] }
+    expect(rule.frequency).toBe('weekly')
+    expect(rule.count).toBe(8)
+    expect(rule.days?.length).toBe(1)
+  })
+
   it('blocks submit when the end is not after the start', async () => {
     const user = userEvent.setup()
     mockCreateEvent.mockResolvedValue({ data: { id: 'x' }, error: null })

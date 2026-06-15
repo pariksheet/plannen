@@ -6,6 +6,7 @@ import { ProfilePersonalInfo } from '../components/ProfilePersonalInfo'
 import { ProfileLocations } from '../components/ProfileLocations'
 import { ProfileInterestsGoals } from '../components/ProfileInterestsGoals'
 import { ProfileFamilyMembers } from '../components/ProfileFamilyMembers'
+import { ProfileRoutines } from '../components/ProfileRoutines'
 import { ProfileStoryLanguages } from '../components/ProfileStoryLanguages'
 import { ProfileFacts } from '../components/ProfileFacts'
 import { ProfilePasskeys } from '../components/ProfilePasskeys'
@@ -34,6 +35,7 @@ export function Profile() {
           <ProfileLocations />
           <ProfileInterestsGoals />
           <ProfileFamilyMembers />
+          <ProfileRoutines />
           <ProfileStoryLanguages />
           <ProfilePasskeys />
           <ProfileFacts />

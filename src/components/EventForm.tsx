@@ -119,6 +119,8 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
   const submitButtonRef = useRef<HTMLButtonElement>(null)
   const createReminderButtonRef = useRef<HTMLButtonElement>(null)
   const [error, setError] = useState('')
+  const [recurrenceFreq, setRecurrenceFreq] = useState<'none' | 'daily' | 'weekly' | 'monthly'>('none')
+  const [recurrenceCount, setRecurrenceCount] = useState(8)
   const [watchForNextOccurrence, setWatchForNextOccurrence] = useState(false)
   const [missedEvent, setMissedEvent] = useState(false)
   const [convertFromWatching, setConvertFromWatching] = useState(false)
@@ -368,6 +370,22 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
         shared_with_friends: formData.shared_with_friends,
         shared_with_user_ids: formData.shared_with_user_ids ?? [],
         shared_with_group_ids: formData.shared_with_group_ids ?? [],
+      }
+      // Recurrence is only materialised on create (the service fans out child
+      // sessions); editing the rule of an existing event isn't supported yet.
+      if (!event && formData.event_kind === 'event' && recurrenceFreq !== 'none') {
+        const start = new Date(dataToSubmit.start_date)
+        const dayCode = (['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'] as const)[start.getDay()]
+        const rule: Record<string, unknown> = {
+          frequency: recurrenceFreq,
+          count: Math.max(2, Math.min(52, recurrenceCount)),
+        }
+        if (recurrenceFreq === 'weekly') rule.days = [dayCode]
+        if (formData.end_date) {
+          const mins = Math.round((new Date(formData.end_date).getTime() - start.getTime()) / 60_000)
+          if (mins > 0) rule.session_duration_minutes = mins
+        }
+        dataToSubmit.recurrence_rule = rule
       }
       let statusOption: { newStatus: EventStatus } | undefined
       if (event) {
@@ -628,6 +646,21 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
             />
           </div>
           <div>
+            <label htmlFor="event_type" className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+            <select
+              id="event_type"
+              value={formData.event_type}
+              onChange={(e) => setFormData({ ...formData, event_type: e.target.value as EventFormData['event_type'] })}
+              className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            >
+              <option value="personal">Personal</option>
+              <option value="family">Family</option>
+              <option value="friends">Friends</option>
+              <option value="group">Group</option>
+            </select>
+            <p className="text-xs text-gray-500 mt-1">Used to colour-code the card. Doesn&apos;t change who can see it.</p>
+          </div>
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Cover image</label>
             <div className="space-y-2">
               <div className="flex items-center gap-2">
@@ -765,6 +798,43 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               />
             </div>
           </div>
+          {!event && formData.event_kind === 'event' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="recurrence_freq" className="block text-sm font-medium text-gray-700 mb-1">Repeats</label>
+                <select
+                  id="recurrence_freq"
+                  value={recurrenceFreq}
+                  onChange={(e) => setRecurrenceFreq(e.target.value as typeof recurrenceFreq)}
+                  className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  <option value="none">Does not repeat</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+              </div>
+              {recurrenceFreq !== 'none' && (
+                <div>
+                  <label htmlFor="recurrence_count" className="block text-sm font-medium text-gray-700 mb-1">Number of occurrences</label>
+                  <input
+                    type="number"
+                    id="recurrence_count"
+                    min={2}
+                    max={52}
+                    value={recurrenceCount}
+                    onChange={(e) => setRecurrenceCount(Number(e.target.value))}
+                    className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    {recurrenceFreq === 'weekly'
+                      ? 'Repeats weekly on the same weekday as the start date.'
+                      : `Creates ${Math.max(2, Math.min(52, recurrenceCount))} sessions starting from the date above.`}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
           {formData.event_kind === 'event' && (
             <div>
               <label htmlFor="visit_date_time" className="block text-sm font-medium text-gray-700 mb-1">

@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Event, EventFormData, EventViewMode } from '../types/event'
 import { getMyFeedEvents } from '../services/viewService'
+import { getWishlistEvents } from '../services/wishlistService'
 import { getPreferredVisitDates } from '../services/rsvpService'
 import { buildFutureTimeline, TimelineItem } from '../utils/timeline'
 import { Timeline } from './Timeline'
+import { EventList } from './EventList'
 import { CalendarGrid } from './CalendarGrid'
 import { EventForm } from './EventForm'
 import { DiscoverButton } from './DiscoverButton'
@@ -13,7 +15,7 @@ import { projectScheduleForDay } from '../services/schedulingService'
 import { dbClient } from '../lib/dbClient'
 import type { AttendanceInstanceRow, ResolvedObligationRow } from '../lib/dbClient/types'
 import { ConfirmModal, PromptModal } from './Modal'
-import { Plus, ChevronUp, Calendar, X } from 'lucide-react'
+import { Plus, ChevronUp, ChevronDown, Calendar, X, Eye } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { deleteEvent, completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
@@ -65,6 +67,8 @@ export function MyFeed() {
   const [muteSenderPrompt, setMuteSenderPrompt] = useState<{ eventId: string; senderHint: string } | null>(null)
   const [feedError, setFeedError] = useState<string | null>(null)
   const [preferredVisitDates, setPreferredVisitDates] = useState<Record<string, string | null>>({})
+  const [watchQueue, setWatchQueue] = useState<Event[]>([])
+  const [showWatchQueue, setShowWatchQueue] = useState(false)
   const [attendancesToday, setAttendancesToday] = useState<AttendanceInstanceRow[]>([])
   const [obligationsToday, setObligationsToday] = useState<ResolvedObligationRow[]>([])
   const [subjectNames, setSubjectNames] = useState<Record<string, string>>({})
@@ -131,6 +135,9 @@ export function MyFeed() {
       const { data: preferred } = await getPreferredVisitDates(ids)
       setPreferredVisitDates(preferred ?? {})
     }
+    // The watch queue (watching + missed) regardless of the date window.
+    const { data: wl } = await getWishlistEvents()
+    setWatchQueue(wl ?? [])
     setLoading(false)
   }, [fromIso, toIso])
 
@@ -391,6 +398,41 @@ export function MyFeed() {
           </div>
         </div>
       </div>
+
+      {watchQueue.length > 0 && (
+        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowWatchQueue((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 text-left"
+            aria-expanded={showWatchQueue}
+          >
+            <span className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900">
+              <Eye className="h-4 w-4 text-indigo-500" />
+              Watching
+              <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-semibold">
+                {watchQueue.length}
+              </span>
+            </span>
+            {showWatchQueue ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
+          </button>
+          {showWatchQueue && (
+            <div className="px-4 pb-4 border-t border-gray-100 pt-3">
+              <p className="text-xs text-gray-500 mb-2">Events you're tracking for the next occurrence. Open one and edit it to turn it into a real event.</p>
+              <EventList
+                events={watchQueue}
+                onEdit={handleEdit}
+                onDelete={handleDeleteClick}
+                onShareSuccess={loadEvents}
+                onHashtagClick={(tag) => { setActiveHashtag(tag); setShowPast(true) }}
+                showActions
+                showWatchButton={false}
+                viewMode="compact"
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       {viewMode !== 'schedule' && (<>
       <div className="flex justify-center items-center gap-2 flex-wrap pb-1 -mx-1 px-1">
