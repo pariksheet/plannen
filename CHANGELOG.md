@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-06-15
+
+### Daily brief — surface overdue to-dos
+
+- **The morning brief now opens with what's overdue.** The daily plan gained an "Overdue" section, shown above the day's schedule, listing any open to-do whose due date slipped past within the last 30 days — oldest first, each tagged with its original due date. Completed and cancelled items are filtered out, so the list reflects only what still needs doing, and the section disappears entirely on days with nothing outstanding.
+
 ## [0.6.4] - 2026-06-15
 
 ### Trips — group related plans under one container (data model)
