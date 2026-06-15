@@ -115,7 +115,6 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
   const [scrapeNote, setScrapeNote] = useState('')
   const [coverUploading, setCoverUploading] = useState(false)
   const [coverError, setCoverError] = useState('')
-  const [showCoverUrl, setShowCoverUrl] = useState(false)
   const coverFileInputRef = useRef<HTMLInputElement>(null)
   const modalContentRef = useRef<HTMLDivElement>(null)
   const submitButtonRef = useRef<HTMLButtonElement>(null)
@@ -858,37 +857,33 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
                 <img src={formData.image_url} alt="" className="h-14 w-14 rounded object-cover border border-gray-200" onError={() => setFormData((prev) => ({ ...prev, image_url: '' }))} />
                 <button
                   type="button"
-                  onClick={() => { setFormData((prev) => ({ ...prev, image_url: '' })); setShowCoverUrl(false) }}
+                  onClick={() => setFormData((prev) => ({ ...prev, image_url: '' }))}
                   className="text-sm text-gray-600 hover:text-red-600"
                 >
                   Remove
                 </button>
               </div>
             ) : (
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2">
+                <input
+                  type="url"
+                  id="image_url"
+                  aria-label="Image URL"
+                  value={formData.image_url}
+                  onChange={(e) => { setCoverError(''); setFormData({ ...formData, image_url: e.target.value }) }}
+                  placeholder="Paste image URL"
+                  className="flex-1 min-w-0 px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                />
                 <button
                   type="button"
                   onClick={() => coverFileInputRef.current?.click()}
                   disabled={coverUploading}
-                  title="max 500KB, compressed automatically"
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  title="Upload from device — max 500KB, compressed automatically"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-md border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex-shrink-0"
                 >
                   <Upload className="h-4 w-4" />
-                  {coverUploading ? 'Uploading…' : 'Upload'}
+                  <span className="hidden sm:inline">{coverUploading ? 'Uploading…' : 'Upload'}</span>
                 </button>
-                {showCoverUrl ? (
-                  <input
-                    type="url"
-                    id="image_url"
-                    aria-label="Image URL"
-                    value={formData.image_url}
-                    onChange={(e) => { setCoverError(''); setFormData({ ...formData, image_url: e.target.value }) }}
-                    placeholder="Paste image URL"
-                    className="flex-1 min-w-[160px] px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                  />
-                ) : (
-                  <button type="button" onClick={() => setShowCoverUrl(true)} className="text-sm text-indigo-600 hover:underline">or paste a link</button>
-                )}
               </div>
             )}
             {coverError && <p className="text-xs text-red-600 mt-1">{coverError}</p>}
