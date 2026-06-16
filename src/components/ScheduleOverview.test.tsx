@@ -443,6 +443,53 @@ describe('ScheduleOverview', () => {
     expect(screen.getByText('Milo')).toBeInTheDocument()
   })
 
+  it('renders a custom heading when provided (group Schedule view)', () => {
+    render(
+      <MemoryRouter>
+        <ScheduleOverview
+          events={[]}
+          onEdit={vi.fn()}
+          onDelete={vi.fn()}
+          onShareSuccess={vi.fn()}
+          onHashtagClick={vi.fn()}
+          preferredVisitDates={{}}
+          heading="My Family"
+        />
+      </MemoryRouter>
+    )
+    expect(screen.getByText('My Family')).toBeInTheDocument()
+    expect(screen.queryByText('Your Schedule')).not.toBeInTheDocument()
+  })
+
+  it('omits personal routines from the week card when hideRoutines is set', async () => {
+    const { listPractices, completionsThisWeek } = await import('../services/practiceService')
+    vi.mocked(completionsThisWeek).mockResolvedValue([])
+    vi.mocked(listPractices).mockResolvedValue([
+      practiceFixture({
+        id: 'p1', name: 'Sunscreen', recurrence_mode: 'pinned',
+        recurrence_rule: { frequency: 'daily' }, flex_period: null, flex_target: null,
+        preferred_time_of_day: 'morning',
+      }),
+    ])
+    render(
+      <MemoryRouter>
+        <ScheduleOverview
+          events={[]}
+          onEdit={vi.fn()}
+          onDelete={vi.fn()}
+          onShareSuccess={vi.fn()}
+          onHashtagClick={vi.fn()}
+          preferredVisitDates={{}}
+          hideRoutines
+        />
+      </MemoryRouter>
+    )
+    const week = screen.getByTestId('week-card')
+    // Give the routines hook a chance to resolve, then confirm nothing folded in.
+    await vi.waitFor(() => expect(vi.mocked(listPractices)).toHaveBeenCalled())
+    expect(within(week).queryByText(/Sunscreen/)).not.toBeInTheDocument()
+  })
+
   it('excludes to-dos from the month-list sidebar (grid-only)', () => {
     const today = new Date()
     const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()

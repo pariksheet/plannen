@@ -8,19 +8,33 @@ import { getPreferredVisitDates } from '../services/rsvpService'
 import { buildFutureTimeline, TimelineItem } from '../utils/timeline'
 import { Timeline } from './Timeline'
 import { CalendarGrid } from './CalendarGrid'
+import { ScheduleOverview } from './ScheduleOverview'
 import { EventForm } from './EventForm'
 import { ManageGroups } from './ManageGroups'
-import { Modal } from './Modal'
+import { Modal, ConfirmModal } from './Modal'
+import { deleteEvent } from '../services/eventService'
 import { ChevronUp, Settings, Star } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { getMyGroups } from '../services/groupService'
+
+// The persisted Compact / Calendar preference. 'schedule' is intentionally not a
+// stored value (see the persistence effect), so reads collapse to compact.
+function savedTimelineMode(): 'compact' | 'calendar' {
+  if (typeof window === 'undefined') return 'compact'
+  return window.localStorage.getItem('timelineViewMode') === 'calendar' ? 'calendar' : 'compact'
+}
 
 export function MyGroups() {
   const { profile } = useAuth()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const selectedGroupId = searchParams.get('group_id')
+  // The Schedule dashboard (and three-way switcher) is reserved for the starred /
+  // primary group — "All" and other groups keep Compact / Calendar only.
+  const primaryGroupId = profile?.primary_group_id ?? null
+  const isPrimarySelected = !!primaryGroupId && selectedGroupId === primaryGroupId
   const [events, setEvents] = useState<Event[]>([])
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [preferredVisitDates, setPreferredVisitDates] = useState<Record<string, string | null>>({})
@@ -34,11 +48,7 @@ export function MyGroups() {
   const [eventGroupIdsByEventId, setEventGroupIdsByEventId] = useState<Record<string, string[]>>({})
   const [accessibleGroups, setAccessibleGroups] = useState<{ id: string; name: string }[]>([])
   const [showManageModal, setShowManageModal] = useState(false)
-  const [viewMode, setViewMode] = useState<EventViewMode>(() => {
-    if (typeof window === 'undefined') return 'compact'
-    const saved = window.localStorage.getItem('timelineViewMode')
-    return saved === 'calendar' ? 'calendar' : 'compact'
-  })
+  const [viewMode, setViewMode] = useState<EventViewMode>(() => savedTimelineMode())
   const pastSectionRef = useRef<HTMLDivElement | null>(null)
 
   const loadEvents = useCallback(async () => {
@@ -138,9 +148,23 @@ export function MyGroups() {
     void loadEventGroupsContext(events.map((e) => e.id))
   }, [events, loadEventGroupsContext])
 
+  // Never persist 'schedule' — the localStorage key is shared with Timeline /
+  // other views, which only understand compact / calendar.
   useEffect(() => {
+    if (viewMode === 'schedule') return
     window.localStorage.setItem('timelineViewMode', viewMode)
   }, [viewMode])
+
+  // Default to Schedule each time the starred group is opened; leaving it falls
+  // back to the saved compact / calendar mode. This gives "Schedule by default"
+  // while still allowing in-visit switching.
+  useEffect(() => {
+    if (isPrimarySelected) {
+      setViewMode('schedule')
+    } else {
+      setViewMode((cur) => (cur === 'schedule' ? savedTimelineMode() : cur))
+    }
+  }, [isPrimarySelected])
 
   useEffect(() => {
     if (TIER === '0') {
@@ -163,7 +187,6 @@ export function MyGroups() {
     return (eventGroupIdsByEventId[event.id] ?? []).includes(selectedGroupId)
   }
   const selectedGroupName = selectedGroupId ? (groupNamesById[selectedGroupId] ?? null) : null
-  const primaryGroupId = profile?.primary_group_id ?? null
   const pillGroups = (() => {
     if (accessibleGroups.length === 0) return []
     const primary = primaryGroupId ? accessibleGroups.find((g) => g.id === primaryGroupId) : null
@@ -218,6 +241,17 @@ export function MyGroups() {
     setEditingEvent(event)
     setShowForm(true)
   }
+  const handleDeleteClick = (eventId: string) => setDeleteTargetId(eventId)
+  const handleDeleteConfirm = async () => {
+    if (!deleteTargetId) return
+    const { error: delErr } = await deleteEvent(deleteTargetId)
+    if (delErr) {
+      setError(delErr.message)
+      return
+    }
+    setDeleteTargetId(null)
+    await refresh()
+  }
 
   return (
     <div className="space-y-8 w-full min-w-0">
@@ -225,6 +259,15 @@ export function MyGroups() {
         <h2 className="text-2xl sm:text-3xl font-bold text-gray-900">My Groups</h2>
         <div className="flex items-center gap-2">
           <div className="inline-flex rounded-md border border-gray-300 bg-white p-0.5">
+            {isPrimarySelected && (
+              <button
+                type="button"
+                onClick={() => setViewMode('schedule')}
+                className={`px-3 py-1 text-xs font-medium rounded ${viewMode === 'schedule' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+              >
+                Schedule
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setViewMode('compact')}
@@ -340,7 +383,21 @@ export function MyGroups() {
               </button>
             </div>
           )}
-          {viewMode === 'calendar' ? (
+          {viewMode === 'schedule' ? (
+            <ScheduleOverview
+              events={filteredEvents}
+              preferredVisitDates={preferredVisitDates}
+              heading={selectedGroupName ?? 'Schedule'}
+              hideRoutines
+              onEdit={handleEdit}
+              onDelete={handleDeleteClick}
+              onShareSuccess={refresh}
+              onHashtagClick={(tag) => {
+                setActiveHashtag(tag)
+                setShowPast(true)
+              }}
+            />
+          ) : viewMode === 'calendar' ? (
             <CalendarGrid
               events={filteredEvents}
               preferredVisitDates={preferredVisitDates}
@@ -420,6 +477,17 @@ export function MyGroups() {
           <ManageGroups onSuccess={refresh} />
         </div>
       </Modal>
+
+      <ConfirmModal
+        isOpen={!!deleteTargetId}
+        onClose={() => setDeleteTargetId(null)}
+        title="Delete event?"
+        message="This event will be permanently deleted."
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+        onConfirm={handleDeleteConfirm}
+      />
     </div>
   )
 }
