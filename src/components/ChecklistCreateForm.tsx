@@ -135,9 +135,9 @@ export function ChecklistCreateForm({ events, onCreate, onClose, defaultEventId 
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addDraft() } }}
               placeholder="Add an item…"
-              className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm"
+              className="flex-1 min-w-0 border border-gray-200 rounded-lg px-3 py-2.5 text-sm min-h-[44px]"
             />
-            <button type="button" onClick={addDraft} disabled={!draft.trim()} className="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50">Add</button>
+            <button type="button" onClick={addDraft} disabled={!draft.trim()} className="shrink-0 min-h-[44px] px-4 py-2.5 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50">Add</button>
           </div>
         </div>
         <div className="flex justify-end gap-2 pt-1">

@@ -141,7 +141,7 @@ export function EventNotes({ eventId }: EventNotesProps) {
             type="button"
             disabled={!draft.trim() || submitting}
             onClick={handleAdd}
-            className="inline-flex items-center min-h-[40px] px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 disabled:opacity-50"
+            className="inline-flex items-center min-h-[44px] px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 disabled:opacity-50"
           >
             {submitting ? 'Saving…' : 'Add note'}
           </button>
@@ -204,7 +204,7 @@ export function EventNotes({ eventId }: EventNotesProps) {
                       <button
                         type="button"
                         onClick={cancelEdit}
-                        className="min-h-[36px] px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800"
+                        className="min-h-[44px] px-3 py-2 text-sm text-gray-600 hover:text-gray-800"
                       >
                         Cancel
                       </button>
@@ -212,7 +212,7 @@ export function EventNotes({ eventId }: EventNotesProps) {
                         type="button"
                         onClick={saveEdit}
                         disabled={!editingBody.trim()}
-                        className="min-h-[36px] px-3 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 disabled:opacity-50"
+                        className="min-h-[44px] px-3 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 disabled:opacity-50"
                       >
                         Save
                       </button>

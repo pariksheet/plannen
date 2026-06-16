@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-06-16
+
+### Shared checklists, fixed
+
+- **Open a shared trip's checklist from the group Schedule view.** Previously, when a trip was shared with a group, members saw the checklist as a read-only summary that didn't open. The checklist row now opens the full list in a modal — the same as in My Plans — so everyone the trip is shared with can work through it.
+- **Group members can now add, check, edit, and delete items on a shared checklist.** A shared list was readable but not editable for anyone other than its creator; collaborators could see items but every change was silently rejected. Any member with access to the list can now fully collaborate on its items.
+
+### Mobile-first polish
+
+- **The "add item" bar no longer pushes its Add button off-screen on phones.** On narrow viewports the text field could overflow and shove the Add button past the edge of the dialog; the field now shrinks to fit so the button always stays in view.
+- **Larger touch targets in several dialogs.** A few primary buttons (add/save note, share, RSVP-conflict actions) were below the comfortable tap size on mobile and have been bumped up.
+
 ## [0.8.0] - 2026-06-16
 
 ### Shareable checklists

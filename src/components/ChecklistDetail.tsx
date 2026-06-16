@@ -49,8 +49,8 @@ export function ChecklistDetail({ id, onBack }: { id: string; onBack: () => void
       <div className="mt-4 flex gap-2">
         <input value={draft} onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') void submit() }}
-          placeholder="Add an item…" className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-        <button type="button" onClick={() => void submit()} className="bg-indigo-600 text-white rounded-lg px-3 py-2 text-sm">Add</button>
+          placeholder="Add an item…" className="flex-1 min-w-0 border border-gray-200 rounded-lg px-3 py-2.5 text-sm min-h-[44px]" />
+        <button type="button" onClick={() => void submit()} className="shrink-0 min-h-[44px] bg-indigo-600 text-white rounded-lg px-4 py-2.5 text-sm font-medium">Add</button>
       </div>
     </div>
   )
