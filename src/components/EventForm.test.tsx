@@ -29,7 +29,7 @@ vi.mock('../services/rsvpService', () => ({
 vi.mock('../services/eventCoverService', () => ({
   uploadEventCover: vi.fn(async () => ({ data: null, error: null })),
 }))
-const mockAssignToContainer = vi.fn(async () => ({ error: null }))
+const mockAssignToContainer = vi.fn(async (..._args: unknown[]) => ({ error: null }))
 vi.mock('../services/containerService', () => ({
   listContainers: vi.fn(async () => ({ data: [{ id: 't1', title: 'Italy', start_date: '2026-07-01T00:00:00Z', end_date: null }], error: null })),
   createContainer: vi.fn(async () => ({ data: null, error: null })),

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const { rsvpRows, userRows, fromMock } = vi.hoisted(() => {
+const { fromMock } = vi.hoisted(() => {
   const rsvpRows = [
     { event_id: 'e1', user_id: 'u1', status: 'going', preferred_visit_date: null },
     { event_id: 'e1', user_id: 'u2', status: 'maybe', preferred_visit_date: null },
@@ -18,7 +18,7 @@ const { rsvpRows, userRows, fromMock } = vi.hoisted(() => {
     }
     return builder
   })
-  return { rsvpRows, userRows, fromMock }
+  return { fromMock }
 })
 
 vi.mock('../lib/supabase', () => ({ supabase: { from: fromMock } }))
