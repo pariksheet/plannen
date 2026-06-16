@@ -49,6 +49,7 @@ export function TripsSection({
   const [open, setOpen] = useState(defaultOpen)
   const [shareTrip, setShareTrip] = useState<Event | null>(null)
   const [createForTrip, setCreateForTrip] = useState<Event | null>(null)
+  const [openEvents, setOpenEvents] = useState<Record<string, boolean>>({})
   if (trips.length === 0) return null
 
   const handleDeleteTrip = async (trip: Event) => {
@@ -120,18 +121,31 @@ export function TripsSection({
                 {members.length === 0 ? (
                   <p className="text-xs text-gray-500 mt-1">Nothing in this trip yet. Add events or to-dos to it from the create form.</p>
                 ) : (
-                  <EventList
-                    events={members}
-                    onEdit={onEditTrip}
-                    onDelete={onDeleteEvent}
-                    onShareSuccess={onChange}
-                    onToggleTodo={onToggleTodo}
-                    onConvertKind={onConvertKind}
-                    onHashtagClick={onHashtagClick}
-                    showActions
-                    showWatchButton={false}
-                    viewMode="compact"
-                  />
+                  <div className="mt-1">
+                    <button
+                      type="button"
+                      onClick={() => setOpenEvents((m) => ({ ...m, [t.id]: !m[t.id] }))}
+                      aria-expanded={!!openEvents[t.id]}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 hover:text-gray-900 px-1.5 py-1"
+                    >
+                      Events ({members.length})
+                      {openEvents[t.id] ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                    </button>
+                    {openEvents[t.id] && (
+                      <EventList
+                        events={members}
+                        onEdit={onEditTrip}
+                        onDelete={onDeleteEvent}
+                        onShareSuccess={onChange}
+                        onToggleTodo={onToggleTodo}
+                        onConvertKind={onConvertKind}
+                        onHashtagClick={onHashtagClick}
+                        showActions
+                        showWatchButton={false}
+                        viewMode="compact"
+                      />
+                    )}
+                  </div>
                 )}
                 {(checklistsOf || onCreateChecklist) && (
                   <div className="mt-2 space-y-1">
