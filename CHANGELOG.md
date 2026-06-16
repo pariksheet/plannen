@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-06-16
+
+### Starred group gets the full view switcher
+
+- **Your starred group now opens on a Schedule dashboard, just like My Plans.** Opening the starred (primary) group — e.g. "My Family" — gives you the same three-way switcher (Schedule / Compact / Calendar) the personal feed has, and lands on Schedule by default. Every section (Today, Overdue, the week agenda, and the month calendar) is scoped to the events shared with that group. Other groups and the "All" view are unchanged, keeping Compact and Calendar.
+
 ## [0.7.0] - 2026-06-16
 
 ### Web UI parity — do it in the app, not just via the assistant
