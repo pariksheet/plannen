@@ -584,19 +584,19 @@ describe('pinned trips (starred-group Schedule view)', () => {
 
   it('pins an upcoming trip container in a Trips card', () => {
     renderPinned([trip()])
-    const card = screen.getByTestId('trips-card')
+    const card = screen.getByTestId('trips-section')
     expect(within(card).getByText('Canada Trip')).toBeInTheDocument()
   })
 
   it('renders no Trips card when pinTrips is off', () => {
     renderOverview([trip()])
-    expect(screen.queryByTestId('trips-card')).toBeNull()
+    expect(screen.queryByTestId('trips-section')).toBeNull()
   })
 
   it('clicking a pinned trip opens it via onEdit', async () => {
     const onEdit = vi.fn()
     renderPinned([trip()], onEdit)
-    await userEvent.click(within(screen.getByTestId('trips-card')).getByText('Canada Trip'))
+    await userEvent.click(within(screen.getByTestId('trips-section')).getByLabelText('Edit trip Canada Trip'))
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'trip1' }))
   })
 })

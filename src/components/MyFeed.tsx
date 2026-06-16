@@ -15,13 +15,11 @@ import { projectScheduleForDay } from '../services/schedulingService'
 import { dbClient } from '../lib/dbClient'
 import type { AttendanceInstanceRow, ResolvedObligationRow } from '../lib/dbClient/types'
 import { ConfirmModal, PromptModal } from './Modal'
-import { Plus, ChevronUp, ChevronDown, Calendar, X, Eye, Briefcase, Pencil, Trash2, Share2 } from 'lucide-react'
-import { format } from 'date-fns'
+import { Plus, ChevronUp, ChevronDown, Calendar, X, Eye } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { deleteEvent, completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
-import { deleteContainer, syncTripSharing } from '../services/containerService'
-import { EventShareModal } from './EventShareModal'
+import { TripsSection } from './TripsSection'
 import { supabase } from '../lib/supabase'
 
 // Identifies events auto-created by the mailbox-sync routine.
@@ -66,14 +64,12 @@ export function MyFeed() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingEvent, setEditingEvent] = useState<Event | undefined>()
-  const [shareTrip, setShareTrip] = useState<Event | null>(null)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [muteSenderPrompt, setMuteSenderPrompt] = useState<{ eventId: string; senderHint: string } | null>(null)
   const [feedError, setFeedError] = useState<string | null>(null)
   const [preferredVisitDates, setPreferredVisitDates] = useState<Record<string, string | null>>({})
   const [watchQueue, setWatchQueue] = useState<Event[]>([])
   const [showWatchQueue, setShowWatchQueue] = useState(false)
-  const [showTrips, setShowTrips] = useState(false)
   const [attendancesToday, setAttendancesToday] = useState<AttendanceInstanceRow[]>([])
   const [obligationsToday, setObligationsToday] = useState<ResolvedObligationRow[]>([])
   const [subjectNames, setSubjectNames] = useState<Record<string, string>>({})
@@ -243,14 +239,6 @@ export function MyFeed() {
   const handleEdit = (event: Event) => {
     setEditingEvent(event)
     setShowForm(true)
-  }
-
-  const handleDeleteTrip = async (trip: Event) => {
-    if (!window.confirm(`Delete the trip "${trip.title}"? Its events and to-dos stay — they're just no longer grouped.`)) return
-    setFeedError(null)
-    const { error } = await deleteContainer(trip.id)
-    if (error) { setFeedError(error.message); return }
-    loadEvents()
   }
 
   const handleDeleteClick = (eventId: string) => {
@@ -456,88 +444,16 @@ export function MyFeed() {
         </div>
       )}
 
-      {trips.length > 0 && (
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setShowTrips((v) => !v)}
-            className="w-full flex items-center justify-between px-4 py-3 text-left"
-            aria-expanded={showTrips}
-          >
-            <span className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900">
-              <Briefcase className="h-4 w-4 text-indigo-500" />
-              Trips
-              <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-semibold">
-                {trips.length}
-              </span>
-            </span>
-            {showTrips ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
-          </button>
-          {showTrips && (
-            <div className="px-4 pb-4 border-t border-gray-100 pt-3 space-y-4">
-              {trips.map((t) => {
-                const members = tripMembers(t.id)
-                const range = t.end_date
-                  ? `${format(new Date(t.start_date), 'd MMM')} – ${format(new Date(t.end_date), 'd MMM yyyy')}`
-                  : format(new Date(t.start_date), 'd MMM yyyy')
-                return (
-                  <div key={t.id}>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-gray-900 truncate">{t.title}</p>
-                        <p className="text-xs text-gray-500">{range}</p>
-                      </div>
-                      <div className="flex items-center flex-shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => setShareTrip(t)}
-                          className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center text-gray-400 hover:text-indigo-600"
-                          aria-label={`Share trip ${t.title}`}
-                          title="Share this trip"
-                        >
-                          <Share2 className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleEdit(t)}
-                          className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center text-gray-400 hover:text-indigo-600"
-                          aria-label={`Edit trip ${t.title}`}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteTrip(t)}
-                          className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center text-gray-400 hover:text-red-600"
-                          aria-label={`Delete trip ${t.title}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                    {members.length === 0 ? (
-                      <p className="text-xs text-gray-500 mt-1">Nothing in this trip yet. Add events or to-dos to it from the create form.</p>
-                    ) : (
-                      <EventList
-                        events={members}
-                        onEdit={handleEdit}
-                        onDelete={handleDeleteClick}
-                        onShareSuccess={loadEvents}
-                        onToggleTodo={handleToggleTodo}
-                        onConvertKind={handleConvertKind}
-                        onHashtagClick={(tag) => { setActiveHashtag(tag); setShowPast(true) }}
-                        showActions
-                        showWatchButton={false}
-                        viewMode="compact"
-                      />
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      )}
+      <TripsSection
+        trips={trips}
+        childrenOf={tripMembers}
+        onEditTrip={handleEdit}
+        onDeleteEvent={handleDeleteClick}
+        onChange={loadEvents}
+        onToggleTodo={handleToggleTodo}
+        onConvertKind={handleConvertKind}
+        onHashtagClick={(tag) => { setActiveHashtag(tag); setShowPast(true) }}
+      />
 
       {viewMode !== 'schedule' && (<>
       <div className="flex justify-center items-center gap-2 flex-wrap pb-1 -mx-1 px-1">
@@ -738,25 +654,6 @@ export function MyFeed() {
         </button>
       )}
 
-      {shareTrip && (
-        <EventShareModal
-          event={shareTrip}
-          onClose={() => setShareTrip(null)}
-          onSuccess={() => {
-            const trip = shareTrip
-            setShareTrip(null)
-            void (async () => {
-              // Cascade the trip's new sharing onto its children so the whole
-              // trip (band + its events) shows for the same people/groups.
-              if (trip) {
-                const childIds = events.filter((e) => e.group_id === trip.id).map((e) => e.id)
-                if (childIds.length) await syncTripSharing(trip.id, childIds)
-              }
-              loadEvents()
-            })()
-          }}
-        />
-      )}
       {showForm && (
         <EventForm
           event={editingEvent}
