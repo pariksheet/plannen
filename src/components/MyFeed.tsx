@@ -578,7 +578,7 @@ export function MyFeed() {
 
           {viewMode === 'schedule' ? (
             <ScheduleOverview
-              events={filteredEvents}
+              events={[...filteredEvents, ...trips]}
               preferredVisitDates={preferredVisitDates}
               attendancesToday={attendancesToday}
               obligationsToday={obligationsToday}
