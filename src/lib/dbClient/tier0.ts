@@ -7,6 +7,8 @@ import type {
   AgentTaskRow,
   AttendanceBlackoutWindowRow,
   AttendanceRow,
+  ChecklistItemRow,
+  ChecklistRow,
   DailyBriefingRow,
   DbClient,
   ObligationRow,
@@ -246,6 +248,19 @@ export const tier0: DbClient = {
       await api(`/api/practices/${input.practice_id}/completions/${input.completed_on}`, { method: 'DELETE' })
     },
     completionsThisWeek: (date) => api<PracticeCompletionRow[]>(`/api/practices/completions?since=${date}`),
+  },
+
+  // ── checklists ────────────────────────────────────────────────────────────
+  checklists: {
+    list: (p) => api<ChecklistRow[]>(`/api/checklists${qs({ event_id: p?.event_id ?? undefined })}`),
+    get: (id) => api<ChecklistRow>(`/api/checklists/${id}`),
+    create: (i) => api<ChecklistRow>('/api/checklists', { method: 'POST', body: JSON.stringify(i) }),
+    delete: async (id) => { await api(`/api/checklists/${id}`, { method: 'DELETE' }) },
+    addItems: (id, items) => api<ChecklistItemRow[]>(`/api/checklists/${id}/items`, { method: 'POST', body: JSON.stringify({ items }) }),
+    setItemChecked: (itemId, checked) => api<ChecklistItemRow>(`/api/checklists/items/${itemId}/checked`, { method: 'PATCH', body: JSON.stringify({ checked }) }),
+    updateItem: (itemId, text) => api<ChecklistItemRow>(`/api/checklists/items/${itemId}`, { method: 'PATCH', body: JSON.stringify({ text }) }),
+    deleteItem: async (itemId) => { await api(`/api/checklists/items/${itemId}`, { method: 'DELETE' }) },
+    share: async (id, input) => { await api(`/api/checklists/${id}/shares`, { method: 'POST', body: JSON.stringify(input) }) },
   },
 
   // ── briefings ─────────────────────────────────────────────────────────────

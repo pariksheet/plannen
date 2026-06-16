@@ -8,6 +8,8 @@ import type {
   AgentTaskRow,
   AttendanceBlackoutWindowRow,
   AttendanceRow,
+  ChecklistItemRow,
+  ChecklistRow,
   DailyBriefingRow,
   DbClient,
   ObligationRow,
@@ -731,6 +733,49 @@ export const tier1: DbClient = {
         .select('practice_id, completed_on')
         .eq('user_id', userId)
         .gte('completed_on', date)) as PracticeCompletionRow[]
+    },
+  },
+
+  // ── checklists ────────────────────────────────────────────────────────────
+  checklists: {
+    list: async (params) => {
+      let q = supabase.from('checklists').select('*, items:checklist_items(*)').order('created_at', { ascending: false })
+      if (params?.event_id) q = q.eq('event_id', params.event_id)
+      const rows = unwrap(await q) as ChecklistRow[]
+      return rows.map((r) => ({ ...r, total: r.items?.length ?? 0, done: r.items?.filter((i) => i.checked_at != null).length ?? 0 }))
+    },
+    get: async (id) => {
+      const row = unwrap(await supabase.from('checklists').select('*, items:checklist_items(*)').eq('id', id).single()) as ChecklistRow
+      row.items = (row.items ?? []).slice().sort((a, b) => a.position - b.position)
+      return row
+    },
+    create: async (input) => {
+      const userId = await currentUserId()
+      const cl = unwrap(await supabase.from('checklists').insert({ title: input.title, event_id: input.event_id ?? null, created_by: userId }).select().single()) as ChecklistRow
+      const texts = (input.items ?? []).filter((t) => t.trim().length > 0)
+      cl.items = texts.length
+        ? unwrap(await supabase.from('checklist_items').insert(texts.map((text, position) => ({ checklist_id: cl.id, text, position }))).select()) as ChecklistItemRow[]
+        : []
+      return cl
+    },
+    delete: async (id) => { const { error } = await supabase.from('checklists').delete().eq('id', id); if (error) throw new Error(error.message) },
+    addItems: async (id, items) => {
+      const { data: existing } = await supabase.from('checklist_items').select('position').eq('checklist_id', id)
+      const start = existing && existing.length ? Math.max(...existing.map((r) => r.position as number)) + 1 : 0
+      const rows = items.filter((t) => t.trim().length > 0).map((text, i) => ({ checklist_id: id, text, position: start + i }))
+      if (!rows.length) return []
+      return unwrap(await supabase.from('checklist_items').insert(rows).select()) as ChecklistItemRow[]
+    },
+    setItemChecked: async (itemId, checked) => {
+      const userId = await currentUserId()
+      const patch = checked ? { checked_at: new Date().toISOString(), checked_by: userId } : { checked_at: null, checked_by: null }
+      return unwrap(await supabase.from('checklist_items').update(patch).eq('id', itemId).select().single()) as ChecklistItemRow
+    },
+    updateItem: async (itemId, text) => unwrap(await supabase.from('checklist_items').update({ text }).eq('id', itemId).select().single()) as ChecklistItemRow,
+    deleteItem: async (itemId) => { const { error } = await supabase.from('checklist_items').delete().eq('id', itemId); if (error) throw new Error(error.message) },
+    share: async (id, input) => {
+      if (input.user_ids?.length) { const { error } = await supabase.from('checklist_shared_with_users').upsert(input.user_ids.map((user_id) => ({ checklist_id: id, user_id }))); if (error) throw new Error(error.message) }
+      if (input.group_ids?.length) { const { error } = await supabase.from('checklist_shared_with_groups').upsert(input.group_ids.map((group_id) => ({ checklist_id: id, group_id }))); if (error) throw new Error(error.message) }
     },
   },
 
