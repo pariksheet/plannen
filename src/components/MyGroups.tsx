@@ -35,7 +35,7 @@ export function MyGroups() {
   const primaryGroupId = profile?.primary_group_id ?? null
   const isPrimarySelected = !!primaryGroupId && selectedGroupId === primaryGroupId
   const [events, setEvents] = useState<Event[]>([])
-  const { checklists: groupChecklists } = useChecklists()
+  const { checklists: groupChecklists, create: createGroupChecklist } = useChecklists()
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -393,6 +393,7 @@ export function MyGroups() {
               hideRoutines
               pinTrips
               tripChecklistsOf={(id) => groupChecklists.filter((c) => c.event_id === id)}
+              onCreateChecklist={createGroupChecklist}
               onEdit={handleEdit}
               onDelete={handleDeleteClick}
               onShareSuccess={refresh}

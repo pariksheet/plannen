@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Briefcase, ChevronUp, ChevronDown, Share2, Pencil, Trash2, ListChecks } from 'lucide-react'
+import { Briefcase, ChevronUp, ChevronDown, Share2, Pencil, Trash2, ListChecks, Plus } from 'lucide-react'
 import { format } from 'date-fns'
 import type { Event } from '../types/event'
 import type { ChecklistRow } from '../lib/dbClient/types'
 import { EventList } from './EventList'
 import { EventShareModal } from './EventShareModal'
+import { ChecklistCreateForm } from './ChecklistCreateForm'
 import { deleteContainer, syncTripSharing } from '../services/containerService'
 
 interface TripsSectionProps {
@@ -28,6 +29,9 @@ interface TripsSectionProps {
   checklistsOf?: (tripId: string) => ChecklistRow[]
   /** Open a checklist by id. When given, checklist rows become clickable. */
   onOpenChecklist?: (id: string) => void
+  /** Create a checklist (parent owns the data + reload). When given, each trip
+   *  shows a "+ Checklist" button that opens the create form pre-attached. */
+  onCreateChecklist?: (input: { title: string; event_id: string | null; items: string[] }) => Promise<void> | void
 }
 
 /**
@@ -40,10 +44,11 @@ interface TripsSectionProps {
 export function TripsSection({
   trips, childrenOf, onEditTrip, onDeleteEvent, onChange,
   onToggleTodo, onConvertKind, onHashtagClick, defaultOpen = false,
-  checklistsOf, onOpenChecklist,
+  checklistsOf, onOpenChecklist, onCreateChecklist,
 }: TripsSectionProps) {
   const [open, setOpen] = useState(defaultOpen)
   const [shareTrip, setShareTrip] = useState<Event | null>(null)
+  const [createForTrip, setCreateForTrip] = useState<Event | null>(null)
   if (trips.length === 0) return null
 
   const handleDeleteTrip = async (trip: Event) => {
@@ -128,34 +133,43 @@ export function TripsSection({
                     viewMode="compact"
                   />
                 )}
-                {(() => {
-                  const cls = checklistsOf?.(t.id) ?? []
-                  if (cls.length === 0) return null
-                  return (
-                    <div className="mt-2 space-y-1">
-                      {cls.map((cl) => {
-                        const total = cl.total ?? 0
-                        const done = cl.done ?? 0
-                        const inner = (
-                          <>
-                            <ListChecks className="h-3.5 w-3.5 text-indigo-500 shrink-0" aria-hidden />
-                            <span className="truncate">{cl.title}</span>
-                            <span className="ml-auto text-gray-400 tabular-nums">{done}/{total}</span>
-                          </>
-                        )
-                        return onOpenChecklist ? (
-                          <button key={cl.id} type="button" onClick={() => onOpenChecklist(cl.id)} className="flex items-center gap-2 w-full text-left text-xs text-gray-700 rounded px-1.5 py-1 hover:bg-gray-50">{inner}</button>
-                        ) : (
-                          <div key={cl.id} className="flex items-center gap-2 w-full text-xs text-gray-600 px-1.5 py-1">{inner}</div>
-                        )
-                      })}
-                    </div>
-                  )
-                })()}
+                {(checklistsOf || onCreateChecklist) && (
+                  <div className="mt-2 space-y-1">
+                    {(checklistsOf?.(t.id) ?? []).map((cl) => {
+                      const total = cl.total ?? 0
+                      const done = cl.done ?? 0
+                      const inner = (
+                        <>
+                          <ListChecks className="h-3.5 w-3.5 text-indigo-500 shrink-0" aria-hidden />
+                          <span className="truncate">{cl.title}</span>
+                          <span className="ml-auto text-gray-400 tabular-nums">{done}/{total}</span>
+                        </>
+                      )
+                      return onOpenChecklist ? (
+                        <button key={cl.id} type="button" onClick={() => onOpenChecklist(cl.id)} className="flex items-center gap-2 w-full text-left text-xs text-gray-700 rounded px-1.5 py-1 hover:bg-gray-50">{inner}</button>
+                      ) : (
+                        <div key={cl.id} className="flex items-center gap-2 w-full text-xs text-gray-600 px-1.5 py-1">{inner}</div>
+                      )
+                    })}
+                    {onCreateChecklist && (
+                      <button type="button" onClick={() => setCreateForTrip(t)} className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 px-1.5 py-1">
+                        <Plus className="h-3.5 w-3.5" /> Checklist
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             )
           })}
         </div>
+      )}
+      {createForTrip && onCreateChecklist && (
+        <ChecklistCreateForm
+          events={[createForTrip]}
+          defaultEventId={createForTrip.id}
+          onCreate={onCreateChecklist}
+          onClose={() => setCreateForTrip(null)}
+        />
       )}
       {shareTrip && (
         <EventShareModal

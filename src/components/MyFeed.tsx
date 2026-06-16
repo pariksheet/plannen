@@ -67,7 +67,7 @@ export function MyFeed() {
   const [showForm, setShowForm] = useState(false)
   const [editingEvent, setEditingEvent] = useState<Event | undefined>()
   const [openChecklistId, setOpenChecklistId] = useState<string | null>(null)
-  const { checklists: tripChecklists, reload: reloadChecklists } = useChecklists()
+  const { checklists: tripChecklists, reload: reloadChecklists, create: createTripChecklist } = useChecklists()
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [muteSenderPrompt, setMuteSenderPrompt] = useState<{ eventId: string; senderHint: string } | null>(null)
   const [feedError, setFeedError] = useState<string | null>(null)
@@ -459,6 +459,7 @@ export function MyFeed() {
         onHashtagClick={(tag) => { setActiveHashtag(tag); setShowPast(true) }}
         checklistsOf={(id) => tripChecklists.filter((c) => c.event_id === id)}
         onOpenChecklist={setOpenChecklistId}
+        onCreateChecklist={createTripChecklist}
       />
 
       {viewMode !== 'schedule' && (<>

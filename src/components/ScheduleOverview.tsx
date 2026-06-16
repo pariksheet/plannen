@@ -50,6 +50,9 @@ export interface ScheduleOverviewProps {
   // The starred-group Schedule view forwards this so each pinned trip shows its
   // checklists (read-only summaries). Omitted elsewhere → no checklists shown.
   tripChecklistsOf?: (tripId: string) => ChecklistRow[]
+  // Create a checklist attached to a trip (My Family forwards this so each
+  // pinned trip gets a "+ Checklist" button).
+  onCreateChecklist?: (input: { title: string; event_id: string | null; items: string[] }) => Promise<void> | void
 }
 
 const sketchHand = "font-['Caveat'] tracking-tight"
@@ -165,6 +168,7 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
           onConvertKind={handleConvertKind}
           onHashtagClick={props.onHashtagClick}
           checklistsOf={props.tripChecklistsOf}
+          onCreateChecklist={props.onCreateChecklist}
         />
       )}
       <TodayScheduleCard
