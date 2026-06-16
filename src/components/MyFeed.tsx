@@ -20,7 +20,7 @@ import { format } from 'date-fns'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { deleteEvent, completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
-import { deleteContainer } from '../services/containerService'
+import { deleteContainer, syncTripSharing } from '../services/containerService'
 import { EventShareModal } from './EventShareModal'
 import { supabase } from '../lib/supabase'
 
@@ -742,7 +742,19 @@ export function MyFeed() {
         <EventShareModal
           event={shareTrip}
           onClose={() => setShareTrip(null)}
-          onSuccess={() => { setShareTrip(null); loadEvents() }}
+          onSuccess={() => {
+            const trip = shareTrip
+            setShareTrip(null)
+            void (async () => {
+              // Cascade the trip's new sharing onto its children so the whole
+              // trip (band + its events) shows for the same people/groups.
+              if (trip) {
+                const childIds = events.filter((e) => e.group_id === trip.id).map((e) => e.id)
+                if (childIds.length) await syncTripSharing(trip.id, childIds)
+              }
+              loadEvents()
+            })()
+          }}
         />
       )}
       {showForm && (
