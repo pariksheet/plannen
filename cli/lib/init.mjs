@@ -384,7 +384,7 @@ export async function invokeInit(rawArgs, ctx = {}) {
         spawn: cspawn, sspawn, prompt, mgmt, fetch: fetchImpl, log: logImpl,
         write: ctx.writeRaw ?? ((s) => process.stdout.write(s)),
       },
-      env: { repoRoot, envFile: profileEnvFile, exampleFile, email, tierChange },
+      env: { repoRoot, envFile: profileEnvFile, exampleFile, email, tierChange, composed },
     });
   }
 
@@ -873,7 +873,7 @@ export async function invokeInit(rawArgs, ctx = {}) {
 
 async function runTier2({ rawArgs, ctx, env: penv }) {
   const { spawn, sspawn, prompt, mgmt, fetch: fetchImpl, log: logImpl, write } = ctx;
-  const { repoRoot, envFile, exampleFile, email, tierChange } = penv;
+  const { repoRoot, envFile, exampleFile, email, tierChange, composed } = penv;
   const { argProjectRef, argCloudDbUrl, forceOverwrite, acceptStorageQuota, skipPhotos, skipVercel, nonInteractive, startDev } = rawArgs;
   void skipPhotos; void acceptStorageQuota; void forceOverwrite; // forwarded as env vars below
 
