@@ -88,7 +88,10 @@ export function TripsSection({
               ? `${format(new Date(t.start_date), 'd MMM')} – ${format(new Date(t.end_date), 'd MMM yyyy')}`
               : format(new Date(t.start_date), 'd MMM yyyy')
             return (
-              <div key={t.id}>
+              <div
+                key={t.id}
+                className="bg-gradient-to-br from-white to-indigo-50/40 rounded-lg shadow hover:shadow-md transition-all duration-200 border border-gray-100 border-l-4 border-l-indigo-500 p-3 sm:p-4"
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-gray-900 truncate">{t.title}</p>
