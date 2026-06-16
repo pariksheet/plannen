@@ -10,12 +10,29 @@ import { MyStories } from '../components/MyStories'
 import { Settings } from '../components/Settings'
 import { InviteToApp } from '../components/InviteToApp'
 import { Modal } from '../components/Modal'
+import { ChecklistList } from '../components/ChecklistList'
+import { ChecklistDetail } from '../components/ChecklistDetail'
+import { useChecklists } from '../hooks/useChecklists'
 import { isTierZero } from '../lib/tier'
 import { X } from 'lucide-react'
 
 const PRIVACY_NOTICE_DISMISSED_KEY = 'plannen_privacy_notice_dismissed'
 
-type View = 'today' | 'feed' | 'people' | 'groups' | 'stories' | 'settings'
+function ChecklistsView() {
+  const { checklists, create, remove } = useChecklists()
+  const [openId, setOpenId] = useState<string | null>(null)
+  if (openId) return <ChecklistDetail id={openId} onBack={() => setOpenId(null)} />
+  return (
+    <div className="space-y-4">
+      <div className="max-w-2xl mx-auto flex justify-end">
+        <button type="button" onClick={() => void create({ title: 'New checklist' })} className="bg-indigo-600 text-white rounded-lg px-3 py-2 text-sm">New checklist</button>
+      </div>
+      <ChecklistList checklists={checklists} onOpen={setOpenId} onDelete={(id) => void remove(id)} />
+    </div>
+  )
+}
+
+type View = 'today' | 'feed' | 'people' | 'groups' | 'stories' | 'checklists' | 'settings'
 
 // Tier 0 hides the social feeds (no backend wiring). A saved bookmark to
 // ?view=people/groups (or the legacy family/friends) falls back to the feed.
@@ -25,7 +42,7 @@ function parseView(v: string | null): View {
   // Legacy aliases — bookmarks that still point at the old family/friends tabs.
   if (v === 'family' || v === 'friends') return isTierZero() ? 'feed' : 'people'
   if (v === 'today' || v === 'feed' || v === 'people' ||
-      v === 'groups' || v === 'stories' || v === 'settings') {
+      v === 'groups' || v === 'stories' || v === 'checklists' || v === 'settings') {
     if (isTierZero() && SOCIAL_VIEWS.includes(v as View)) return 'feed'
     return v
   }
@@ -115,6 +132,7 @@ export function Dashboard() {
         {currentView === 'today' && <Today />}
         {currentView === 'feed' && <MyFeed />}
         {currentView === 'stories' && <MyStories />}
+        {currentView === 'checklists' && <ChecklistsView />}
         {currentView === 'people' && <MyPeople />}
         {currentView === 'groups' && <MyGroups />}
         {currentView === 'settings' && <Settings />}
