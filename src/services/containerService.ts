@@ -71,12 +71,17 @@ async function applyTripSharingToEvent(eventId: string, containerId: string): Pr
   }
 }
 
-/** Attach an event/todo to a trip (or detach with null). On attach, the event
- *  inherits the trip's sharing as its default. */
-export async function assignToContainer(eventId: string, containerId: string | null): Promise<{ error: Error | null }> {
+/** Attach an event/todo to a trip (or detach with null). On attach the event
+ *  inherits the trip's sharing as its default — unless skipInherit is set
+ *  (the user gave the event its own sharing, which must win). */
+export async function assignToContainer(
+  eventId: string,
+  containerId: string | null,
+  opts?: { skipInherit?: boolean },
+): Promise<{ error: Error | null }> {
   try {
     await dbClient.events.update(eventId, { group_id: containerId } as Partial<Event>)
-    if (containerId) await applyTripSharingToEvent(eventId, containerId)
+    if (containerId && !opts?.skipInherit) await applyTripSharingToEvent(eventId, containerId)
     return { error: null }
   } catch (e) {
     return { error: e instanceof Error ? e : new Error('Assign trip failed') }

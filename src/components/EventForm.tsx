@@ -132,6 +132,11 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
   const [partOfTrip, setPartOfTrip] = useState(false)
   const [newTripName, setNewTripName] = useState('')
   const [creatingTrip, setCreatingTrip] = useState(false)
+  const [myGroups, setMyGroups] = useState<{ id: string; name: string }[]>([])
+  // Whether the user has explicitly set this item's sharing. When false, a
+  // to-do/reminder filed under a trip inherits the trip's sharing; once true,
+  // the explicit choice wins (we pass skipInherit to assignToContainer).
+  const [sharingTouched, setSharingTouched] = useState(false)
   const [hashtagsInput, setHashtagsInput] = useState<string>(() => {
     const raw = (initialData as Partial<EventFormData> | undefined)?.hashtags ?? []
     return raw && raw.length ? raw.map((tag) => `#${tag}`).join(' ') : ''
@@ -209,12 +214,20 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
       setWatchForNextOccurrence(event.event_status === 'watching' || event.event_status === 'missed')
       setTripId(event.group_id ?? '')
       setPartOfTrip(!!event.group_id)
+      // An existing event already carries its own sharing — don't let a trip
+      // re-assignment overwrite it on save.
+      setSharingTouched(true)
     }
   }, [event])
 
   // Load the user's trips (containers) to populate the "Part of a trip" picker.
   useEffect(() => {
     listContainers().then(({ data }) => setTrips(data))
+  }, [])
+
+  // Groups for the compact lean "Share with" picker (sharing-capable tiers only).
+  useEffect(() => {
+    if (!isTierZero()) getMyGroups().then(({ data }) => setMyGroups(data ?? []))
   }, [])
 
   // Toggle "add to a trip"; detach (and reset) when off. Selection defaults to
@@ -265,6 +278,27 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
   // A Trip is just an event that can hold children: optional dates, shareable,
   // no URL / RSVP / recurrence / visit / watch.
   const isContainer = formData.event_kind === 'container'
+
+  // Compact sharing control for lean kinds (to-do / reminder): a single select
+  // mapping to the same fields the full event form uses. "Just me" / "All my
+  // friends" / one entry per group (sharing with a single group is the common
+  // case). Picking anything marks sharing as explicitly chosen.
+  const leanShareValue =
+    formData.shared_with_friends === 'all'
+      ? 'all'
+      : (formData.shared_with_group_ids?.length ?? 0) > 0
+        ? `group:${formData.shared_with_group_ids[0]}`
+        : 'none'
+  const handleLeanShareChange = (val: string) => {
+    setSharingTouched(true)
+    if (val === 'all') {
+      setFormData((prev) => ({ ...prev, shared_with_friends: 'all', shared_with_user_ids: [], shared_with_group_ids: [] }))
+    } else if (val.startsWith('group:')) {
+      setFormData((prev) => ({ ...prev, shared_with_friends: 'none', shared_with_user_ids: [], shared_with_group_ids: [val.slice('group:'.length)] }))
+    } else {
+      setFormData((prev) => ({ ...prev, shared_with_friends: 'none', shared_with_user_ids: [], shared_with_group_ids: [] }))
+    }
+  }
 
   // "Visit date" — which day of a multi-day event you plan to attend — only
   // makes sense when the event actually spans more than one calendar day.
@@ -539,7 +573,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
       // Attach to / detach from a trip if the selection changed (skip when
       // editing a container itself — it can't belong to another trip).
       if (result?.event && event?.event_kind !== 'container' && tripId !== (event?.group_id ?? '')) {
-        const { error: tripErr } = await assignToContainer(result.event.id, tripId || null)
+        const { error: tripErr } = await assignToContainer(result.event.id, tripId || null, { skipInherit: sharingTouched })
         if (tripErr) throw tripErr
       }
       onSuccess(result)
@@ -647,7 +681,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
             )}
             <p className="text-xs text-gray-500 mt-1">
               {formData.event_kind === 'reminder'
-                ? 'Simple appointment or thing to remember (no URL or RSVP). Reminders stay private.'
+                ? 'Simple appointment or thing to remember (no URL or RSVP).'
                 : formData.event_kind === 'todo'
                   ? 'A one-off task you check off when done.'
                   : formData.event_kind === 'container'
@@ -762,6 +796,27 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
             />
             <p className="text-xs text-gray-500 mt-1">Add up to 5 short tags without spaces.</p>
           </div>
+          {!isTierZero() && (
+          <div>
+            <label htmlFor="lean_share" className="block text-sm font-medium text-gray-700 mb-1">
+              Share with <span className="font-normal text-gray-400">— optional</span>
+            </label>
+            <select
+              id="lean_share"
+              aria-label="Share with"
+              value={leanShareValue}
+              onChange={(e) => handleLeanShareChange(e.target.value)}
+              className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            >
+              <option value="none">Just me</option>
+              <option value="all">All my friends</option>
+              {myGroups.map((g) => <option key={g.id} value={`group:${g.id}`}>{g.name}</option>)}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              {partOfTrip ? "Defaults to the trip's sharing. Change it to override." : 'Private by default — pick who can see this.'}
+            </p>
+          </div>
+          )}
           </>
           ) : (
           <>
@@ -1089,7 +1144,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
                     type="radio"
                     name="shared_with_friends"
                     checked={formData.shared_with_friends === 'none'}
-                    onChange={() => setFormData({ ...formData, shared_with_friends: 'none', shared_with_user_ids: [] })}
+                    onChange={() => { setSharingTouched(true); setFormData({ ...formData, shared_with_friends: 'none', shared_with_user_ids: [] }) }}
                     className="h-4 w-4 border-gray-300 text-indigo-600"
                   />
                   <span className="text-sm text-gray-700">None</span>
@@ -1099,7 +1154,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
                     type="radio"
                     name="shared_with_friends"
                     checked={formData.shared_with_friends === 'all'}
-                    onChange={() => setFormData({ ...formData, shared_with_friends: 'all', shared_with_user_ids: [] })}
+                    onChange={() => { setSharingTouched(true); setFormData({ ...formData, shared_with_friends: 'all', shared_with_user_ids: [] }) }}
                     className="h-4 w-4 border-gray-300 text-indigo-600"
                   />
                   <span className="text-sm text-gray-700">All my friends</span>
@@ -1109,7 +1164,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
                     type="radio"
                     name="shared_with_friends"
                     checked={formData.shared_with_friends === 'selected'}
-                    onChange={() => setFormData({ ...formData, shared_with_friends: 'selected' })}
+                    onChange={() => { setSharingTouched(true); setFormData({ ...formData, shared_with_friends: 'selected' }) }}
                     className="h-4 w-4 border-gray-300 text-indigo-600"
                   />
                   <span className="text-sm text-gray-700">Selected friends</span>
@@ -1118,7 +1173,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               {formData.shared_with_friends === 'selected' && (
                 <PeoplePicker
                   selectedIds={formData.shared_with_user_ids}
-                  onChange={(ids) => setFormData((prev) => ({ ...prev, shared_with_user_ids: ids }))}
+                  onChange={(ids) => { setSharingTouched(true); setFormData((prev) => ({ ...prev, shared_with_user_ids: ids })) }}
                 />
               )}
             </div>
@@ -1127,7 +1182,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               <p className="text-xs text-gray-500 mb-1">Events shared with a group are visible to everyone in that group.</p>
               <GroupPicker
                 selectedIds={formData.shared_with_group_ids}
-                onChange={(ids) => setFormData((prev) => ({ ...prev, shared_with_group_ids: ids }))}
+                onChange={(ids) => { setSharingTouched(true); setFormData((prev) => ({ ...prev, shared_with_group_ids: ids })) }}
               />
             </div>
           </div>

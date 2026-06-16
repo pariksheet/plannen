@@ -134,7 +134,7 @@ describe('EventForm – To-do kind', () => {
     await user.selectOptions(select, 't1')
     await user.click(screen.getByRole('button', { name: /^create$/i }))
 
-    await waitFor(() => expect(mockAssignToContainer).toHaveBeenCalledWith('new-9', 't1'))
+    await waitFor(() => expect(mockAssignToContainer).toHaveBeenCalledWith('new-9', 't1', { skipInherit: false }))
   })
 })
 
