@@ -135,8 +135,10 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
   // Cancelled events don't belong on a schedule — filter once for every card.
   const events = props.events.filter((e) => e.event_status !== 'cancelled')
   const todayKey = todayIso()
-  // When pinning trips, lift containers out of the inline lists so they aren't
-  // duplicated — they render in the Trips card at the top instead.
+  // When pinning trips, lift containers out of the WEEK list so they aren't
+  // duplicated there — they render in the Trips card at the top instead. They
+  // still belong on the month calendar below (as a band), so This Month keeps
+  // the full events.
   const trips = props.pinTrips ? events.filter((e) => e.event_kind === 'container') : []
   const agenda = props.pinTrips ? events.filter((e) => e.event_kind !== 'container') : events
   // Overdue to-dos live only in the Overdue section, never duplicated in the
@@ -196,7 +198,7 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
         hideRoutines={props.hideRoutines}
       />
       <ThisMonthCard
-        events={agenda}
+        events={events}
         preferredVisitDates={props.preferredVisitDates}
         onEdit={props.onEdit}
         onDelete={props.onDelete}
