@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-16
+
+### Shareable checklists
+
+- **Checklists are here — lean, dateless lists of checkable items.** Create a packing or shopping list, optionally attach it to any event or trip, and tick items off. Checklists stay out of your agenda, briefing, and calendar — they live in their own space. Available across the web app, the Tier 0 backend, and both MCP servers.
+- **Items are real checkbox rows.** The new-checklist form adds each item as its own checkbox row instead of a freeform text box, and you can pre-check an item that's already done.
+- **See who did what.** Each checklist shows its creator; each item shows who added it and, once ticked, who checked it and when.
+- **Reset all.** One button unchecks every item at once (the items stay) — handy for reusing a list next time.
+- **Share, rename, and delete from the list.** Each checklist row carries the same share / edit / delete icons as an event card: share to people or groups, rename inline, or delete.
+
+### Trips show as cards
+
+- **A trip now looks like any other event card.** Trips render through the same card as every event — badge, date, location, hashtags, and action menu — so the Trips section matches the rest of your feed.
+- **Expand a trip to reveal its events and checklists inline.** Each trip has an "Events (N)" expander and lists its checklists beneath it. Clicking a trip's date in the calendar lists the trip, and trips now appear on the This Month views.
+- **Sharing a trip cascades to its contents.** Sharing a trip shares the trip itself (not a bulk-share prompt) and extends the same audience to the events inside it.
+
+### Fixes
+
+- **Creating a checklist no longer fails.** A row-level-security rule rejected new checklists when the app read the row back on insert; owners can now create checklists normally.
+
 ## [0.7.2] - 2026-06-16
 
 ### Cloud-mode install fix
