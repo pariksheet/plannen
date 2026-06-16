@@ -12,6 +12,7 @@ import { obligationLabel } from '../utils/obligationLabel'
 import { CalendarGrid } from './CalendarGrid'
 import { TripsSection } from './TripsSection'
 import type { ChecklistRow } from '../lib/dbClient/types'
+import type { NewChecklistItem } from '../services/checklistService'
 import { EventCard } from './EventCard'
 import { buildWeekAgenda, eventDateLocal, overlappingIds, ymd } from '../utils/weekAgenda'
 import { defaultCity } from '../utils/homeCity'
@@ -52,7 +53,7 @@ export interface ScheduleOverviewProps {
   tripChecklistsOf?: (tripId: string) => ChecklistRow[]
   // Create a checklist attached to a trip (My Family forwards this so each
   // pinned trip gets a "+ Checklist" button).
-  onCreateChecklist?: (input: { title: string; event_id: string | null; items: string[] }) => Promise<void> | void
+  onCreateChecklist?: (input: { title: string; event_id: string | null; items: NewChecklistItem[] }) => Promise<void> | void
 }
 
 const sketchHand = "font-['Caveat'] tracking-tight"

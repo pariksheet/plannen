@@ -9,7 +9,7 @@ function ev(id: string, title: string): Event {
 }
 
 describe('ChecklistCreateForm', () => {
-  it('creates a checklist attached to a searched event, with items', async () => {
+  it('adds items as checkbox rows and creates the checklist attached to a searched event', async () => {
     const onCreate = vi.fn(async () => {})
     render(
       <ChecklistCreateForm
@@ -21,9 +21,29 @@ describe('ChecklistCreateForm', () => {
     await userEvent.type(screen.getByPlaceholderText('e.g. Packing'), 'Packing')
     await userEvent.type(screen.getByPlaceholderText('Search your events…'), 'canada')
     await userEvent.click(screen.getByText('Canada Trip'))
-    await userEvent.type(screen.getByPlaceholderText(/passport/), 'socks{enter}sunscreen')
+    // Each item is added as its own checkbox row (Enter or the Add button).
+    await userEvent.type(screen.getByPlaceholderText('Add an item…'), 'socks{enter}')
+    await userEvent.type(screen.getByPlaceholderText('Add an item…'), 'sunscreen{enter}')
     await userEvent.click(screen.getByRole('button', { name: 'Create' }))
-    expect(onCreate).toHaveBeenCalledWith({ title: 'Packing', event_id: 'e1', items: ['socks', 'sunscreen'] })
+    expect(onCreate).toHaveBeenCalledWith({
+      title: 'Packing',
+      event_id: 'e1',
+      items: [{ text: 'socks', checked: false }, { text: 'sunscreen', checked: false }],
+    })
+  })
+
+  it('lets an item be pre-checked as already done', async () => {
+    const onCreate = vi.fn(async () => {})
+    render(<ChecklistCreateForm events={[]} onCreate={onCreate} onClose={vi.fn()} />)
+    await userEvent.type(screen.getByPlaceholderText('e.g. Packing'), 'Packing')
+    await userEvent.type(screen.getByPlaceholderText('Add an item…'), 'passport{enter}')
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Check passport' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Create' }))
+    expect(onCreate).toHaveBeenCalledWith({
+      title: 'Packing',
+      event_id: null,
+      items: [{ text: 'passport', checked: true }],
+    })
   })
 
   it('creates a standalone checklist when no event is picked', async () => {

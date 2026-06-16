@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Briefcase, ChevronUp, ChevronDown, ListChecks, Plus } from 'lucide-react'
 import type { Event } from '../types/event'
 import type { ChecklistRow } from '../lib/dbClient/types'
+import type { NewChecklistItem } from '../services/checklistService'
 import { EventList } from './EventList'
 import { ChecklistCreateForm } from './ChecklistCreateForm'
 import { deleteContainer, syncTripSharing } from '../services/containerService'
@@ -29,7 +30,7 @@ interface TripsSectionProps {
   onOpenChecklist?: (id: string) => void
   /** Create a checklist (parent owns the data + reload). When given, each trip
    *  shows a "+ Checklist" button that opens the create form pre-attached. */
-  onCreateChecklist?: (input: { title: string; event_id: string | null; items: string[] }) => Promise<void> | void
+  onCreateChecklist?: (input: { title: string; event_id: string | null; items: NewChecklistItem[] }) => Promise<void> | void
 }
 
 /**
