@@ -270,10 +270,10 @@ export function EventShareModal({ event: initialEvent, onClose, onSuccess }: Eve
         )}
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={onClose} className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50">
+          <button type="button" onClick={onClose} className="min-h-[44px] px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50">
             Cancel
           </button>
-          <button type="button" onClick={handleSave} disabled={saving} className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
+          <button type="button" onClick={handleSave} disabled={saving} className="min-h-[44px] px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2">
             {saving ? <Loader className="h-4 w-4 animate-spin" /> : null}
             Save
           </button>

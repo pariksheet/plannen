@@ -144,7 +144,7 @@ export function RSVPButton({
                 setShowConflictModal(false)
                 setPendingStatus(null)
               }}
-              className="min-h-[40px] px-3 py-2 rounded-md bg-gray-100 text-gray-700 text-sm font-medium hover:bg-gray-200"
+              className="min-h-[44px] px-3 py-2 rounded-md bg-gray-100 text-gray-700 text-sm font-medium hover:bg-gray-200"
             >
               Cancel
             </button>
@@ -156,7 +156,7 @@ export function RSVPButton({
                 setPendingStatus(null)
                 if (next) await applyStatus(next)
               }}
-              className="min-h-[40px] px-3 py-2 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700"
+              className="min-h-[44px] px-3 py-2 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700"
             >
               Continue anyway
             </button>

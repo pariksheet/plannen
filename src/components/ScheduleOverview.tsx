@@ -11,6 +11,8 @@ import { attendanceLabel } from '../utils/attendanceLabel'
 import { obligationLabel } from '../utils/obligationLabel'
 import { CalendarGrid } from './CalendarGrid'
 import { TripsSection } from './TripsSection'
+import { Modal } from './Modal'
+import { ChecklistDetail } from './ChecklistDetail'
 import type { ChecklistRow } from '../lib/dbClient/types'
 import type { NewChecklistItem } from '../services/checklistService'
 import { EventCard } from './EventCard'
@@ -54,6 +56,10 @@ export interface ScheduleOverviewProps {
   // Create a checklist attached to a trip (My Family forwards this so each
   // pinned trip gets a "+ Checklist" button).
   onCreateChecklist?: (input: { title: string; event_id: string | null; items: NewChecklistItem[] }) => Promise<void> | void
+  // Reload the trip checklists after a checklist mutation (open/edit/check).
+  // The group Schedule view forwards its useChecklists reload so checked/total
+  // counts refresh once the checklist modal closes. Defaults to onShareSuccess.
+  onChecklistsChange?: () => void
 }
 
 const sketchHand = "font-['Caveat'] tracking-tight"
@@ -145,6 +151,11 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
   // Overdue to-dos live only in the Overdue section, never duplicated in the
   // week list below.
   const weekEvents = agenda.filter((e) => !isOverdueTodo(e, todayKey))
+  // A pinned trip's checklist opens in a modal here, exactly as in My Plans —
+  // so a shared-trip viewer (e.g. a My Family member) can open and collaborate,
+  // not just read the summary.
+  const [openChecklistId, setOpenChecklistId] = useState<string | null>(null)
+  const reloadChecklists = props.onChecklistsChange ?? props.onShareSuccess
 
   async function handleToggleTodo(e: Event) {
     if (e.completed_at) await uncompleteTodo(e.id)
@@ -171,7 +182,9 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
           onConvertKind={handleConvertKind}
           onHashtagClick={props.onHashtagClick}
           checklistsOf={props.tripChecklistsOf}
+          onOpenChecklist={setOpenChecklistId}
           onCreateChecklist={props.onCreateChecklist}
+          onChecklistsChange={reloadChecklists}
         />
       )}
       <TodayScheduleCard
@@ -208,6 +221,15 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
         onToggleTodo={handleToggleTodo}
         onConvertKind={handleConvertKind}
       />
+      {openChecklistId && (
+        <Modal
+          isOpen
+          title="Checklist"
+          onClose={() => { setOpenChecklistId(null); reloadChecklists() }}
+        >
+          <ChecklistDetail id={openChecklistId} onBack={() => { setOpenChecklistId(null); reloadChecklists() }} />
+        </Modal>
+      )}
     </div>
   )
 }

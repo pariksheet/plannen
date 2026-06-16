@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { ScheduleOverview } from './ScheduleOverview'
 import { Event } from '../types/event'
+import type { ChecklistRow } from '../lib/dbClient/types'
 
 vi.mock('../context/AuthContext', () => ({
   useAuth: vi.fn(() => ({ user: null })),
@@ -45,6 +46,11 @@ vi.mock('./EventCard', () => ({
 // CalendarGrid pulls heavy deps; stub to a marker.
 vi.mock('./CalendarGrid', () => ({
   CalendarGrid: () => <div data-testid="calendar-grid" />,
+}))
+// ChecklistDetail fetches a checklist on open; stub to a marker so the test
+// asserts the open-in-modal wiring, not the detail view's data layer.
+vi.mock('./ChecklistDetail', () => ({
+  ChecklistDetail: ({ id }: { id: string }) => <div data-testid="checklist-detail">detail:{id}</div>,
 }))
 vi.mock('../services/eventService', () => ({
   completeTodo: vi.fn(async () => ({ data: {}, error: null })),
@@ -604,5 +610,30 @@ describe('pinned trips (starred-group Schedule view)', () => {
     // the standard "Edit event" action — same as every other event card.
     await userEvent.click(within(card).getByRole('button', { name: 'Edit event' }))
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'trip1' }))
+  })
+
+  it('opens a pinned trip checklist in a modal so a shared-trip viewer can collaborate', async () => {
+    const checklist = { id: 'cl1', title: 'Packing', event_id: 'trip1', total: 2, done: 0 } as unknown as ChecklistRow
+    render(
+      <MemoryRouter>
+        <ScheduleOverview
+          events={[trip()]}
+          onEdit={vi.fn()}
+          onDelete={vi.fn()}
+          onShareSuccess={vi.fn()}
+          onHashtagClick={vi.fn()}
+          preferredVisitDates={{}}
+          pinTrips
+          tripChecklistsOf={(id) => (id === 'trip1' ? [checklist] : [])}
+        />
+      </MemoryRouter>
+    )
+    const card = screen.getByTestId('trips-section')
+    await userEvent.click(within(card).getByRole('button', { name: /trips/i }))
+    // The checklist row must be an actual button (was an inert <div> before the
+    // fix because the group Schedule view never passed onOpenChecklist).
+    const row = within(card).getByRole('button', { name: /^Packing/ })
+    await userEvent.click(row)
+    expect(screen.getByTestId('checklist-detail')).toHaveTextContent('detail:cl1')
   })
 })
