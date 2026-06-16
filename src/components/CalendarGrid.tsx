@@ -408,6 +408,7 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
             ) : (
               <EventList
                 events={selectedEvents}
+                childrenOf={(id) => events.filter((e) => e.group_id === id)}
                 onEdit={handleEdit}
                 onClone={onClone}
                 onDelete={onDelete}
