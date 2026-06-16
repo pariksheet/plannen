@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Briefcase, ChevronUp, ChevronDown, Share2, Pencil, Trash2 } from 'lucide-react'
+import { Briefcase, ChevronUp, ChevronDown, Share2, Pencil, Trash2, ListChecks } from 'lucide-react'
 import { format } from 'date-fns'
 import type { Event } from '../types/event'
+import type { ChecklistRow } from '../lib/dbClient/types'
 import { EventList } from './EventList'
 import { EventShareModal } from './EventShareModal'
 import { deleteContainer, syncTripSharing } from '../services/containerService'
@@ -22,6 +23,11 @@ interface TripsSectionProps {
   onHashtagClick: (tag: string) => void
   /** Whether the section starts expanded. Defaults to collapsed (My Plans). */
   defaultOpen?: boolean
+  /** Resolve a trip's checklists (with done/total). When given, they render
+   *  under the trip. Omit to hide checklists entirely. */
+  checklistsOf?: (tripId: string) => ChecklistRow[]
+  /** Open a checklist by id. When given, checklist rows become clickable. */
+  onOpenChecklist?: (id: string) => void
 }
 
 /**
@@ -34,6 +40,7 @@ interface TripsSectionProps {
 export function TripsSection({
   trips, childrenOf, onEditTrip, onDeleteEvent, onChange,
   onToggleTodo, onConvertKind, onHashtagClick, defaultOpen = false,
+  checklistsOf, onOpenChecklist,
 }: TripsSectionProps) {
   const [open, setOpen] = useState(defaultOpen)
   const [shareTrip, setShareTrip] = useState<Event | null>(null)
@@ -121,6 +128,30 @@ export function TripsSection({
                     viewMode="compact"
                   />
                 )}
+                {(() => {
+                  const cls = checklistsOf?.(t.id) ?? []
+                  if (cls.length === 0) return null
+                  return (
+                    <div className="mt-2 space-y-1">
+                      {cls.map((cl) => {
+                        const total = cl.total ?? 0
+                        const done = cl.done ?? 0
+                        const inner = (
+                          <>
+                            <ListChecks className="h-3.5 w-3.5 text-indigo-500 shrink-0" aria-hidden />
+                            <span className="truncate">{cl.title}</span>
+                            <span className="ml-auto text-gray-400 tabular-nums">{done}/{total}</span>
+                          </>
+                        )
+                        return onOpenChecklist ? (
+                          <button key={cl.id} type="button" onClick={() => onOpenChecklist(cl.id)} className="flex items-center gap-2 w-full text-left text-xs text-gray-700 rounded px-1.5 py-1 hover:bg-gray-50">{inner}</button>
+                        ) : (
+                          <div key={cl.id} className="flex items-center gap-2 w-full text-xs text-gray-600 px-1.5 py-1">{inner}</div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
               </div>
             )
           })}

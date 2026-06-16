@@ -15,6 +15,7 @@ import { Modal, ConfirmModal } from './Modal'
 import { deleteEvent } from '../services/eventService'
 import { ChevronUp, Settings, Star } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import { useChecklists } from '../hooks/useChecklists'
 import { getMyGroups } from '../services/groupService'
 
 // The persisted Compact / Calendar preference. 'schedule' is intentionally not a
@@ -34,6 +35,7 @@ export function MyGroups() {
   const primaryGroupId = profile?.primary_group_id ?? null
   const isPrimarySelected = !!primaryGroupId && selectedGroupId === primaryGroupId
   const [events, setEvents] = useState<Event[]>([])
+  const { checklists: groupChecklists } = useChecklists()
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -390,6 +392,7 @@ export function MyGroups() {
               heading={selectedGroupName ?? 'Schedule'}
               hideRoutines
               pinTrips
+              tripChecklistsOf={(id) => groupChecklists.filter((c) => c.event_id === id)}
               onEdit={handleEdit}
               onDelete={handleDeleteClick}
               onShareSuccess={refresh}

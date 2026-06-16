@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { Navigation } from '../components/Navigation'
@@ -12,7 +12,9 @@ import { InviteToApp } from '../components/InviteToApp'
 import { Modal } from '../components/Modal'
 import { ChecklistList } from '../components/ChecklistList'
 import { ChecklistDetail } from '../components/ChecklistDetail'
+import { ChecklistCreateForm } from '../components/ChecklistCreateForm'
 import { useChecklists } from '../hooks/useChecklists'
+import { listContainers, type Trip } from '../services/containerService'
 import { isTierZero } from '../lib/tier'
 import { X } from 'lucide-react'
 
@@ -21,13 +23,31 @@ const PRIVACY_NOTICE_DISMISSED_KEY = 'plannen_privacy_notice_dismissed'
 function ChecklistsView() {
   const { checklists, create, remove } = useChecklists()
   const [openId, setOpenId] = useState<string | null>(null)
+  const [showForm, setShowForm] = useState(false)
+  const [trips, setTrips] = useState<Trip[]>([])
+  useEffect(() => {
+    let cancelled = false
+    void listContainers().then(({ data }) => { if (!cancelled) setTrips(data) })
+    return () => { cancelled = true }
+  }, [])
+  const tripTitleById = useMemo(
+    () => Object.fromEntries(trips.map((t) => [t.id, t.title])),
+    [trips],
+  )
   if (openId) return <ChecklistDetail id={openId} onBack={() => setOpenId(null)} />
   return (
     <div className="space-y-4">
       <div className="max-w-2xl mx-auto flex justify-end">
-        <button type="button" onClick={() => void create({ title: 'New checklist' })} className="bg-indigo-600 text-white rounded-lg px-3 py-2 text-sm">New checklist</button>
+        <button type="button" onClick={() => setShowForm(true)} className="bg-indigo-600 text-white rounded-lg px-3 py-2 text-sm">New checklist</button>
       </div>
-      <ChecklistList checklists={checklists} onOpen={setOpenId} onDelete={(id) => void remove(id)} />
+      <ChecklistList checklists={checklists} tripTitleById={tripTitleById} onOpen={setOpenId} onDelete={(id) => void remove(id)} />
+      {showForm && (
+        <ChecklistCreateForm
+          trips={trips}
+          onCreate={(input) => create(input)}
+          onClose={() => setShowForm(false)}
+        />
+      )}
     </div>
   )
 }

@@ -11,6 +11,7 @@ import { attendanceLabel } from '../utils/attendanceLabel'
 import { obligationLabel } from '../utils/obligationLabel'
 import { CalendarGrid } from './CalendarGrid'
 import { TripsSection } from './TripsSection'
+import type { ChecklistRow } from '../lib/dbClient/types'
 import { EventCard } from './EventCard'
 import { buildWeekAgenda, eventDateLocal, overlappingIds, ymd } from '../utils/weekAgenda'
 import { defaultCity } from '../utils/homeCity'
@@ -46,6 +47,9 @@ export interface ScheduleOverviewProps {
   // Trips section in My Plans. Default keeps existing behaviour (My Plans renders
   // its own Trips section, so it leaves this off).
   pinTrips?: boolean
+  // The starred-group Schedule view forwards this so each pinned trip shows its
+  // checklists (read-only summaries). Omitted elsewhere → no checklists shown.
+  tripChecklistsOf?: (tripId: string) => ChecklistRow[]
 }
 
 const sketchHand = "font-['Caveat'] tracking-tight"
@@ -160,6 +164,7 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
           onToggleTodo={handleToggleTodo}
           onConvertKind={handleConvertKind}
           onHashtagClick={props.onHashtagClick}
+          checklistsOf={props.tripChecklistsOf}
           defaultOpen
         />
       )}

@@ -14,7 +14,9 @@ import { ScheduleOverview } from './ScheduleOverview'
 import { projectScheduleForDay } from '../services/schedulingService'
 import { dbClient } from '../lib/dbClient'
 import type { AttendanceInstanceRow, ResolvedObligationRow } from '../lib/dbClient/types'
-import { ConfirmModal, PromptModal } from './Modal'
+import { Modal, ConfirmModal, PromptModal } from './Modal'
+import { ChecklistDetail } from './ChecklistDetail'
+import { useChecklists } from '../hooks/useChecklists'
 import { Plus, ChevronUp, ChevronDown, Calendar, X, Eye } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -64,6 +66,8 @@ export function MyFeed() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingEvent, setEditingEvent] = useState<Event | undefined>()
+  const [openChecklistId, setOpenChecklistId] = useState<string | null>(null)
+  const { checklists: tripChecklists, reload: reloadChecklists } = useChecklists()
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [muteSenderPrompt, setMuteSenderPrompt] = useState<{ eventId: string; senderHint: string } | null>(null)
   const [feedError, setFeedError] = useState<string | null>(null)
@@ -453,6 +457,8 @@ export function MyFeed() {
         onToggleTodo={handleToggleTodo}
         onConvertKind={handleConvertKind}
         onHashtagClick={(tag) => { setActiveHashtag(tag); setShowPast(true) }}
+        checklistsOf={(id) => tripChecklists.filter((c) => c.event_id === id)}
+        onOpenChecklist={setOpenChecklistId}
       />
 
       {viewMode !== 'schedule' && (<>
@@ -654,6 +660,15 @@ export function MyFeed() {
         </button>
       )}
 
+      {openChecklistId && (
+        <Modal
+          isOpen
+          title="Checklist"
+          onClose={() => { setOpenChecklistId(null); void reloadChecklists() }}
+        >
+          <ChecklistDetail id={openChecklistId} onBack={() => { setOpenChecklistId(null); void reloadChecklists() }} />
+        </Modal>
+      )}
       {showForm && (
         <EventForm
           event={editingEvent}
