@@ -6,12 +6,23 @@ import { getMyConnections, type FriendUser } from '../services/relationshipServi
 import { getMyGroups } from '../services/groupService'
 import { getMyRsvp, setPreferredVisitDate } from '../services/rsvpService'
 import { uploadEventCover } from '../services/eventCoverService'
+import { listContainers, createContainer, assignToContainer, type Trip } from '../services/containerService'
 import { useAgent } from '../hooks/useAgent'
 import { isTierZero } from '../lib/tier'
 import { displayUserLabel } from '../utils/displayName'
 import { X, Loader, Upload, ChevronLeft, ChevronRight } from 'lucide-react'
 
 const WIZARD_STEPS = 4
+
+/** A Date as a local-time datetime-local string: yyyy-MM-ddThh:mm (no Z). */
+function fmtDateTimeLocal(d: Date): string {
+  const y = d.getFullYear()
+  const mo = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  const h = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${y}-${mo}-${day}T${h}:${min}`
+}
 
 /** Format a date string for <input type="datetime-local">: yyyy-MM-ddThh:mm (local time, no Z) */
 function toDateTimeLocal(value: string): string {
@@ -26,12 +37,24 @@ function toDateTimeLocal(value: string): string {
     d = new Date(s)
   }
   if (isNaN(d.getTime())) return ''
-  const y = d.getFullYear()
-  const mo = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  const h = String(d.getHours()).padStart(2, '0')
-  const min = String(d.getMinutes()).padStart(2, '0')
-  return `${y}-${mo}-${day}T${h}:${min}`
+  return fmtDateTimeLocal(d)
+}
+
+/** The next top-of-hour after `now`, as a datetime-local string. A sensible
+ *  default start time so the user isn't hand-building a date from scratch. */
+export function nextRoundedHourLocal(now: Date = new Date()): string {
+  const d = new Date(now)
+  d.setHours(d.getHours() + 1, 0, 0, 0)
+  return fmtDateTimeLocal(d)
+}
+
+/** Add one hour to a datetime-local string (used to default an end time). */
+export function plusOneHourLocal(local: string): string {
+  if (!local) return ''
+  const d = new Date(local)
+  if (isNaN(d.getTime())) return ''
+  d.setHours(d.getHours() + 1)
+  return fmtDateTimeLocal(d)
 }
 
 function PeoplePicker({ selectedIds, onChange }: { selectedIds: string[]; onChange: (ids: string[]) => void }) {
@@ -81,7 +104,7 @@ function GroupPicker({ selectedIds, onChange }: { selectedIds: string[]; onChang
 interface EventFormProps {
   event?: Event
   onClose: () => void
-  onSuccess: () => void
+  onSuccess: (result?: { event: Event; created: boolean }) => void
   initialData?: Partial<EventFormData>
 }
 
@@ -89,17 +112,31 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
   const [step, setStep] = useState(1)
   const [loading, setLoading] = useState(false)
   const [scraping, setScraping] = useState(false)
+  const [scrapeNote, setScrapeNote] = useState('')
   const [coverUploading, setCoverUploading] = useState(false)
   const [coverError, setCoverError] = useState('')
   const coverFileInputRef = useRef<HTMLInputElement>(null)
   const modalContentRef = useRef<HTMLDivElement>(null)
   const submitButtonRef = useRef<HTMLButtonElement>(null)
-  const createReminderButtonRef = useRef<HTMLButtonElement>(null)
+  const titleRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState('')
+  const [recurrenceFreq, setRecurrenceFreq] = useState<'none' | 'daily' | 'weekly' | 'monthly'>('none')
+  const [recurrenceCount, setRecurrenceCount] = useState(8)
   const [watchForNextOccurrence, setWatchForNextOccurrence] = useState(false)
   const [missedEvent, setMissedEvent] = useState(false)
   const [convertFromWatching, setConvertFromWatching] = useState(false)
   const [visitDateTime, setVisitDateTime] = useState('')
+  const [visitOnSpecificDay, setVisitOnSpecificDay] = useState(false)
+  const [trips, setTrips] = useState<Trip[]>([])
+  const [tripId, setTripId] = useState('')
+  const [partOfTrip, setPartOfTrip] = useState(false)
+  const [newTripName, setNewTripName] = useState('')
+  const [creatingTrip, setCreatingTrip] = useState(false)
+  const [myGroups, setMyGroups] = useState<{ id: string; name: string }[]>([])
+  // Whether the user has explicitly set this item's sharing. When false, a
+  // to-do/reminder filed under a trip inherits the trip's sharing; once true,
+  // the explicit choice wins (we pass skipInherit to assignToContainer).
+  const [sharingTouched, setSharingTouched] = useState(false)
   const [hashtagsInput, setHashtagsInput] = useState<string>(() => {
     const raw = (initialData as Partial<EventFormData> | undefined)?.hashtags ?? []
     return raw && raw.length ? raw.map((tag) => `#${tag}`).join(' ') : ''
@@ -123,11 +160,20 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
       shared_with_group_ids: [],
     }
     const raw = initialData ?? {}
+    // Smart defaults on create: seed the start to the next round hour and the
+    // end to an hour later, so the most-used fields aren't empty. On edit the
+    // effect below overwrites these from the event, so leave them blank.
+    const kind = raw.event_kind ?? base.event_kind
+    const rawStart = raw.start_date ? toDateTimeLocal(raw.start_date) : ''
+    const rawEnd = raw.end_date ? toDateTimeLocal(raw.end_date) : ''
+    const start_date = rawStart || (event ? base.start_date : nextRoundedHourLocal())
+    // Only events get an auto end (start + 1h). Reminders/to-dos start blank.
+    const end_date = rawEnd || (event || kind !== 'event' ? base.end_date : (start_date ? plusOneHourLocal(start_date) : base.end_date))
     return {
       ...base,
       ...raw,
-      start_date: raw.start_date ? toDateTimeLocal(raw.start_date) : base.start_date,
-      end_date: raw.end_date ? toDateTimeLocal(raw.end_date) : base.end_date,
+      start_date,
+      end_date,
       enrollment_deadline: raw.enrollment_deadline ? toDateTimeLocal(raw.enrollment_deadline) : base.enrollment_deadline,
       enrollment_start_date: raw.enrollment_start_date ? toDateTimeLocal(raw.enrollment_start_date) : base.enrollment_start_date,
     }
@@ -163,25 +209,148 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
       })
       getMyRsvp(event.id).then(({ data }) => {
         setVisitDateTime(data?.preferred_visit_date ? toDateTimeLocal(data.preferred_visit_date) : '')
+        setVisitOnSpecificDay(!!data?.preferred_visit_date)
       })
       setWatchForNextOccurrence(event.event_status === 'watching' || event.event_status === 'missed')
+      setTripId(event.group_id ?? '')
+      setPartOfTrip(!!event.group_id)
+      // An existing event already carries its own sharing — don't let a trip
+      // re-assignment overwrite it on save.
+      setSharingTouched(true)
     }
   }, [event])
+
+  // Load the user's trips (containers) to populate the "Part of a trip" picker.
+  useEffect(() => {
+    listContainers().then(({ data }) => setTrips(data))
+  }, [])
+
+  // Groups for the compact lean "Share with" picker (sharing-capable tiers only).
+  useEffect(() => {
+    if (!isTierZero()) getMyGroups().then(({ data }) => setMyGroups(data ?? []))
+  }, [])
+
+  // Toggle "add to a trip"; detach (and reset) when off. Selection defaults to
+  // the first trip via the effect below (which also handles trips loading late).
+  const handleTripToggle = (on: boolean) => {
+    setPartOfTrip(on)
+    if (!on) {
+      setTripId('')
+      setCreatingTrip(false)
+      setNewTripName('')
+    }
+  }
+
+  // When the box is on and trips are available, pre-select the first one so the
+  // dropdown and the stored selection never disagree.
+  useEffect(() => {
+    if (partOfTrip && !tripId && !creatingTrip && trips.length > 0) setTripId(trips[0].id)
+  }, [partOfTrip, tripId, creatingTrip, trips])
+
+  const handleCreateTrip = async () => {
+    const name = newTripName.trim()
+    if (!name) return
+    // Seed the new trip's dates from the event being filed under it, so a
+    // quick-created trip still has a sensible range (editable later).
+    const startIso = formData.start_date ? new Date(formData.start_date).toISOString() : undefined
+    const endIso = formData.end_date ? new Date(formData.end_date).toISOString() : null
+    const { data, error: e } = await createContainer(name, startIso, endIso)
+    if (e) { setError(e.message); return }
+    if (data) { setTrips((prev) => [...prev, data]); setTripId(data.id) }
+    setNewTripName('')
+    setCreatingTrip(false)
+  }
 
   useEffect(() => {
     modalContentRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
   }, [step])
 
-  const isLeanKind = formData.event_kind === 'reminder' || formData.event_kind === 'todo'
+  // Title is the one required field — focus it when the form opens so the user
+  // can type straight away. preventScroll keeps the modal's scroll-to-top from
+  // fighting the focus; Title now sits at the top of the fields so the caret is
+  // visible. (autoFocus is unreliable inside the scrolling modal.)
+  useEffect(() => {
+    const t = window.setTimeout(() => titleRef.current?.focus({ preventScroll: true }), 120)
+    return () => window.clearTimeout(t)
+  }, [])
 
-  const hasValidRange = Boolean(
+  const isLeanKind = formData.event_kind === 'reminder' || formData.event_kind === 'todo'
+  // A Trip is just an event that can hold children: optional dates, shareable,
+  // no URL / RSVP / recurrence / visit / watch.
+  const isContainer = formData.event_kind === 'container'
+
+  // Compact sharing control for lean kinds (to-do / reminder): a single select
+  // mapping to the same fields the full event form uses. "Just me" / "All my
+  // friends" / one entry per group (sharing with a single group is the common
+  // case). Picking anything marks sharing as explicitly chosen.
+  const leanShareValue =
+    formData.shared_with_friends === 'all'
+      ? 'all'
+      : (formData.shared_with_group_ids?.length ?? 0) > 0
+        ? `group:${formData.shared_with_group_ids[0]}`
+        : 'none'
+  const handleLeanShareChange = (val: string) => {
+    setSharingTouched(true)
+    if (val === 'all') {
+      setFormData((prev) => ({ ...prev, shared_with_friends: 'all', shared_with_user_ids: [], shared_with_group_ids: [] }))
+    } else if (val.startsWith('group:')) {
+      setFormData((prev) => ({ ...prev, shared_with_friends: 'none', shared_with_user_ids: [], shared_with_group_ids: [val.slice('group:'.length)] }))
+    } else {
+      setFormData((prev) => ({ ...prev, shared_with_friends: 'none', shared_with_user_ids: [], shared_with_group_ids: [] }))
+    }
+  }
+
+  // "Visit date" — which day of a multi-day event you plan to attend — only
+  // makes sense when the event actually spans more than one calendar day.
+  // A same-day event (even with a start/end time range) has nothing to choose.
+  const isMultiDay = Boolean(
     formData.event_kind === 'event' &&
     formData.start_date &&
     formData.end_date &&
-    new Date(formData.start_date).getTime() < new Date(formData.end_date).getTime()
+    formData.start_date.slice(0, 10) !== formData.end_date.slice(0, 10) &&
+    new Date(formData.end_date).getTime() > new Date(formData.start_date).getTime()
   )
 
-  const effectiveSteps = isLeanKind ? 2 : WIZARD_STEPS
+  // Toggle the "drop in on one day" option; default the day to the first day
+  // of the span when turning it on, clear it when turning it off.
+  const handleVisitToggle = (on: boolean) => {
+    setVisitOnSpecificDay(on)
+    setVisitDateTime(on ? (visitDateTime || formData.start_date) : '')
+  }
+
+  // The visit date to persist: null unless it's a multi-day event the user is
+  // dropping into on a specific day, clamped into [start, end] so a later date
+  // edit can't leave it dangling.
+  const clampedVisitIso = (): string | null => {
+    if (!isMultiDay || !visitOnSpecificDay || !visitDateTime) return null
+    let v = visitDateTime
+    if (v < formData.start_date) v = formData.start_date
+    if (formData.end_date && v > formData.end_date) v = formData.end_date
+    return new Date(v).toISOString()
+  }
+
+  // Plain-language summary of what a recurrence will produce — clarifies that
+  // the start/end set ONE session and shows when the series ends.
+  const recurrenceSummary = (): string => {
+    const count = Math.max(2, Math.min(52, recurrenceCount || 0))
+    const word = recurrenceFreq === 'weekly' ? 'weekly' : recurrenceFreq === 'daily' ? 'daily' : 'monthly'
+    let last = ''
+    if (formData.start_date) {
+      const d = new Date(formData.start_date)
+      if (!isNaN(d.getTime())) {
+        const n = count - 1
+        if (recurrenceFreq === 'weekly') d.setDate(d.getDate() + n * 7)
+        else if (recurrenceFreq === 'daily') d.setDate(d.getDate() + n)
+        else d.setMonth(d.getMonth() + n)
+        last = d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+      }
+    }
+    return `The date & time above set one session — it repeats ${word} ×${count}${last ? `, last on ${last}` : ''}.`
+  }
+
+  // Reminders/to-dos are a single screen. Trips skip the Options step (no
+  // watch/RSVP) → 3 steps. Full events use the 4-step flow.
+  const effectiveSteps = isLeanKind ? 1 : isContainer ? 3 : WIZARD_STEPS
   const canProceedStep1 = () => (formData.title ?? '').trim() !== ''
   const canProceedStep2 = () => (formData.start_date ?? '').trim() !== ''
   const canSubmitLeanFromStep1 = () => canProceedStep1() && canProceedStep2()
@@ -200,13 +369,35 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
   }
   const goBack = () => setStep((s) => Math.max(s - 1, 1))
 
+  // Keep the end coherent with the start. To-dos have no end. Events auto-fill
+  // an end an hour later (and bump it if the start moves past it). Reminders
+  // never get an auto end, but a manually-set one is bumped if it'd invert.
+  const handleStartChange = (value: string) => {
+    setFormData((prev) => {
+      if (prev.event_kind === 'todo') return { ...prev, start_date: value, end_date: '' }
+      const hasEnd = !!prev.end_date
+      const endBeforeStart = hasEnd && !!value && new Date(prev.end_date).getTime() <= new Date(value).getTime()
+      // Events and trips auto-fill an end; reminders only fix an inverted one.
+      const fill = (prev.event_kind === 'event' || prev.event_kind === 'container') ? (!hasEnd || endBeforeStart) : endBeforeStart
+      return {
+        ...prev,
+        start_date: value,
+        end_date: fill && value ? plusOneHourLocal(value) : prev.end_date,
+      }
+    })
+  }
+
   const handleUrlChange = async (url: string) => {
     setFormData((prev) => ({ ...prev, enrollment_url: url }))
+    setScrapeNote('')
     if (!event && url && url.startsWith('http')) {
       setScraping(true)
       setError('')
       try {
         const { data } = await scrapeUrl(url)
+        if (!data?.extracted) {
+          setScrapeNote("Couldn't read that link — add the details manually below.")
+        }
         if (data?.extracted) {
           const ex = data.extracted
           const updates: Partial<EventFormData> = {}
@@ -230,6 +421,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
         }
       } catch (err) {
         console.warn('Scrape failed', err)
+        setScrapeNote("Couldn't read that link — add the details manually below.")
       } finally {
         setScraping(false)
       }
@@ -287,26 +479,58 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (!isLeanKind && step < WIZARD_STEPS) {
+    if (!isLeanKind && step < effectiveSteps) {
       goNext()
       return
     }
     const native = e.nativeEvent as SubmitEvent
-    if (native.submitter != null && native.submitter !== submitButtonRef.current && native.submitter !== createReminderButtonRef.current) return
+    if (native.submitter != null && native.submitter !== submitButtonRef.current) return
+    // Single-step lean kinds skip the Next gates, so validate here.
+    if (isLeanKind && !canSubmitLeanFromStep1()) {
+      setError(!(formData.title ?? '').trim() ? 'Please enter a title.' : 'Please enter a date and time.')
+      return
+    }
+    // Guard against an inverted range before it silently reaches the DB.
+    if (
+      formData.start_date &&
+      formData.end_date &&
+      new Date(formData.end_date).getTime() <= new Date(formData.start_date).getTime()
+    ) {
+      setError('End time must be after the start time.')
+      if (!isLeanKind) setStep(2)
+      return
+    }
     setLoading(true)
     setError('')
     try {
+      const noEnrollment = isLeanKind || isContainer
       const dataToSubmit: EventFormData = {
         ...formData,
         start_date: new Date(formData.start_date).toISOString(),
         end_date: formData.end_date ? new Date(formData.end_date).toISOString() : '',
-        enrollment_url: isLeanKind ? '' : formData.enrollment_url,
-        enrollment_deadline: isLeanKind ? '' : (formData.enrollment_deadline ? new Date(formData.enrollment_deadline).toISOString() : ''),
-        enrollment_start_date: isLeanKind ? '' : (formData.enrollment_start_date ? new Date(formData.enrollment_start_date).toISOString() : ''),
+        enrollment_url: noEnrollment ? '' : formData.enrollment_url,
+        enrollment_deadline: noEnrollment ? '' : (formData.enrollment_deadline ? new Date(formData.enrollment_deadline).toISOString() : ''),
+        enrollment_start_date: noEnrollment ? '' : (formData.enrollment_start_date ? new Date(formData.enrollment_start_date).toISOString() : ''),
         image_url: formData.image_url?.trim() || '',
         shared_with_friends: formData.shared_with_friends,
         shared_with_user_ids: formData.shared_with_user_ids ?? [],
         shared_with_group_ids: formData.shared_with_group_ids ?? [],
+      }
+      // Recurrence is only materialised on create (the service fans out child
+      // sessions); editing the rule of an existing event isn't supported yet.
+      if (!event && formData.event_kind === 'event' && recurrenceFreq !== 'none') {
+        const start = new Date(dataToSubmit.start_date)
+        const dayCode = (['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'] as const)[start.getDay()]
+        const rule: Record<string, unknown> = {
+          frequency: recurrenceFreq,
+          count: Math.max(2, Math.min(52, recurrenceCount)),
+        }
+        if (recurrenceFreq === 'weekly') rule.days = [dayCode]
+        if (formData.end_date) {
+          const mins = Math.round((new Date(formData.end_date).getTime() - start.getTime()) / 60_000)
+          if (mins > 0) rule.session_duration_minutes = mins
+        }
+        dataToSubmit.recurrence_rule = rule
       }
       let statusOption: { newStatus: EventStatus } | undefined
       if (event) {
@@ -321,27 +545,38 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
           statusOption = { newStatus: 'watching' }
         }
       }
+      let result: { event: Event; created: boolean } | undefined
       if (event) {
         const { data: updatedEvent, error: err } = await updateEvent(event.id, dataToSubmit, statusOption)
         if (err) throw err
         if (updatedEvent && watchForNextOccurrence && (dataToSubmit.enrollment_url || event.enrollment_url)) {
           await createRecurringTask(updatedEvent.id, (dataToSubmit.enrollment_url || event.enrollment_url)!.trim())
         }
-        if (updatedEvent && hasValidRange) {
-          const preferredVisitIso = visitDateTime ? new Date(visitDateTime).toISOString() : null
-          const { error: visitErr } = await setPreferredVisitDate(updatedEvent.id, preferredVisitIso)
+        // Reconcile the visit date for every event edit: clamped when multi-day,
+        // cleared (null) when the event is now single-day, so no stale value
+        // survives shrinking the range. (No-op for events with no RSVP.)
+        if (updatedEvent && formData.event_kind === 'event') {
+          const { error: visitErr } = await setPreferredVisitDate(updatedEvent.id, clampedVisitIso())
           if (visitErr) throw visitErr
         }
+        if (updatedEvent) result = { event: updatedEvent, created: false }
       } else {
         const { data: createdEvent, error: err } = await createEvent(dataToSubmit, watchForNextOccurrence, missedEvent)
         if (err) throw err
-        if (createdEvent && hasValidRange && visitDateTime) {
-          const preferredVisitIso = new Date(visitDateTime).toISOString()
-          const { error: visitErr } = await setPreferredVisitDate(createdEvent.id, preferredVisitIso)
+        const visitIso = clampedVisitIso()
+        if (createdEvent && visitIso) {
+          const { error: visitErr } = await setPreferredVisitDate(createdEvent.id, visitIso)
           if (visitErr) throw visitErr
         }
+        if (createdEvent) result = { event: createdEvent, created: true }
       }
-      onSuccess()
+      // Attach to / detach from a trip if the selection changed (skip when
+      // editing a container itself — it can't belong to another trip).
+      if (result?.event && event?.event_kind !== 'container' && tripId !== (event?.group_id ?? '')) {
+        const { error: tripErr } = await assignToContainer(result.event.id, tripId || null, { skipInherit: sharingTouched })
+        if (tripErr) throw tripErr
+      }
+      onSuccess(result)
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
@@ -356,9 +591,13 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
         <div className="sticky top-0 bg-white border-b border-gray-200 px-4 sm:px-6 py-4 z-10">
           <div className="flex justify-between items-center gap-2">
             <h2 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">
-              {event
-                ? (formData.event_kind === 'reminder' ? 'Edit Reminder' : formData.event_kind === 'todo' ? 'Edit To-do' : 'Edit Event')
-                : (formData.event_kind === 'reminder' ? 'Create Reminder' : formData.event_kind === 'todo' ? 'Create To-do' : 'Create Event')}
+              {(() => {
+                const noun = formData.event_kind === 'reminder' ? 'Reminder'
+                  : formData.event_kind === 'todo' ? 'To-do'
+                  : formData.event_kind === 'container' ? 'Trip'
+                  : 'Event'
+                return `${event ? 'Edit' : 'Create'} ${noun}`
+              })()}
             </h2>
             <button
               type="button"
@@ -369,10 +608,14 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               <X className="h-6 w-6" />
             </button>
           </div>
-          <p className="text-xs text-gray-500 mt-1">Step {step} of {effectiveSteps}</p>
-          <div className="mt-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-            <div className="h-full bg-indigo-600 rounded-full transition-all duration-200" style={{ width: `${(step / effectiveSteps) * 100}%` }} />
-          </div>
+          {effectiveSteps > 1 && (
+            <>
+              <p className="text-xs text-gray-500 mt-1">Step {step} of {effectiveSteps}</p>
+              <div className="mt-2 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                <div className="h-full bg-indigo-600 rounded-full transition-all duration-200" style={{ width: `${(step / effectiveSteps) * 100}%` }} />
+              </div>
+            </>
+          )}
         </div>
         <form onSubmit={handleSubmit} className="p-4 sm:p-6 min-w-0 flex flex-col min-h-0">
           {error && (
@@ -381,52 +624,119 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
             </div>
           )}
           {step === 1 && (
-          <div className="space-y-6">
+          <div className="space-y-4">
           <div>
             <span className="block text-sm font-medium text-gray-700 mb-2">What is this?</span>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setFormData((prev) => ({ ...prev, event_kind: 'event' }))}
-                className={`min-h-[44px] flex-1 px-4 py-2.5 rounded-md text-sm font-medium border-2 transition-colors ${
-                  formData.event_kind === 'event'
-                    ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
-                }`}
-              >
-                Event
-              </button>
-              <button
-                type="button"
-                onClick={() => { setFormData((prev) => ({ ...prev, event_kind: 'reminder' })); setStep(1) }}
-                className={`min-h-[44px] flex-1 px-4 py-2.5 rounded-md text-sm font-medium border-2 transition-colors ${
-                  formData.event_kind === 'reminder'
-                    ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
-                }`}
-              >
-                Reminder
-              </button>
-              <button
-                type="button"
-                onClick={() => { setFormData((prev) => ({ ...prev, event_kind: 'todo' })); setStep(1) }}
-                className={`min-h-[44px] flex-1 px-4 py-2.5 rounded-md text-sm font-medium border-2 transition-colors ${
-                  formData.event_kind === 'todo'
-                    ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
-                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
-                }`}
-              >
-                To-do
-              </button>
-            </div>
+            {event && event.event_kind === 'container' ? (
+              <div className="inline-flex items-center px-4 py-2.5 rounded-md text-sm font-medium border-2 border-indigo-600 bg-indigo-50 text-indigo-700">Trip</div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFormData((prev) => ({ ...prev, event_kind: 'event', end_date: prev.end_date || (prev.start_date ? plusOneHourLocal(prev.start_date) : '') }))}
+                  className={`min-h-[44px] flex-1 min-w-[80px] px-4 py-2.5 rounded-md text-sm font-medium border-2 transition-colors ${
+                    formData.event_kind === 'event'
+                      ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  Event
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setFormData((prev) => ({ ...prev, event_kind: 'reminder', end_date: '' })); setStep(1) }}
+                  className={`min-h-[44px] flex-1 min-w-[80px] px-4 py-2.5 rounded-md text-sm font-medium border-2 transition-colors ${
+                    formData.event_kind === 'reminder'
+                      ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  Reminder
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setFormData((prev) => ({ ...prev, event_kind: 'todo', end_date: '' })); setStep(1) }}
+                  className={`min-h-[44px] flex-1 min-w-[80px] px-4 py-2.5 rounded-md text-sm font-medium border-2 transition-colors ${
+                    formData.event_kind === 'todo'
+                      ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  To-do
+                </button>
+                {!event && (
+                  <button
+                    type="button"
+                    onClick={() => { setFormData((prev) => ({ ...prev, event_kind: 'container', end_date: prev.end_date || (prev.start_date ? plusOneHourLocal(prev.start_date) : '') })); setStep(1) }}
+                    className={`min-h-[44px] flex-1 min-w-[80px] px-4 py-2.5 rounded-md text-sm font-medium border-2 transition-colors ${
+                      formData.event_kind === 'container'
+                        ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                        : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                    }`}
+                  >
+                    Trip
+                  </button>
+                )}
+              </div>
+            )}
             <p className="text-xs text-gray-500 mt-1">
               {formData.event_kind === 'reminder'
-                ? 'Simple appointment or thing to remember (no URL or RSVP). Reminders stay private.'
+                ? 'Simple appointment or thing to remember (no URL or RSVP).'
                 : formData.event_kind === 'todo'
                   ? 'A one-off task you check off when done.'
-                  : 'Event with optional link, RSVP, and sharing. Use Next to set date, sharing, and options.'}
+                  : formData.event_kind === 'container'
+                    ? 'A trip or plan that groups other events and to-dos under it. Set its dates and share it like any event.'
+                    : 'Event with optional link, RSVP, and sharing. Use Next to set date, sharing, and options.'}
             </p>
           </div>
+          {!isContainer && (
+            <div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={partOfTrip}
+                  onChange={(e) => handleTripToggle(e.target.checked)}
+                  className="h-4 w-4 text-indigo-600 rounded"
+                />
+                <span className="text-sm font-medium text-gray-700">Add to a trip</span>
+              </label>
+              {partOfTrip && (
+                <div className="mt-2">
+                  {(creatingTrip || trips.length === 0) ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        aria-label="New trip name"
+                        placeholder="e.g. Summer in Italy"
+                        value={newTripName}
+                        onChange={(e) => setNewTripName(e.target.value)}
+                        className="flex-1 min-w-0 px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                      />
+                      <button type="button" onClick={handleCreateTrip} disabled={!newTripName.trim()} className="min-h-[44px] px-3 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50">Create</button>
+                      <button
+                        type="button"
+                        onClick={() => { if (trips.length === 0) handleTripToggle(false); else { setCreatingTrip(false); setNewTripName('') } }}
+                        className="min-h-[44px] px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      id="trip"
+                      aria-label="Choose trip"
+                      value={tripId}
+                      onChange={(e) => { if (e.target.value === '__new__') { setCreatingTrip(true); setNewTripName('') } else setTripId(e.target.value) }}
+                      className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                    >
+                      {trips.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+                      <option value="__new__">＋ New trip…</option>
+                    </select>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {isLeanKind ? (
           <>
           <div>
@@ -435,6 +745,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               type="text"
               id="title"
               required
+              ref={titleRef}
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
               className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
@@ -451,28 +762,18 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
             />
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="start_date" className="block text-sm font-medium text-gray-700 mb-1">Start Date & Time *</label>
-              <input
-                type="datetime-local"
-                id="start_date"
-                required
-                value={formData.start_date}
-                onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
-                className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              />
-            </div>
-            <div>
-              <label htmlFor="end_date" className="block text-sm font-medium text-gray-700 mb-1">End Date & Time</label>
-              <input
-                type="datetime-local"
-                id="end_date"
-                value={formData.end_date}
-                onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
-                className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              />
-            </div>
+          <div>
+            <label htmlFor="start_date" className="block text-sm font-medium text-gray-700 mb-1">
+              {formData.event_kind === 'todo' ? 'Due date & time *' : 'Date & time *'}
+            </label>
+            <input
+              type="datetime-local"
+              id="start_date"
+              required
+              value={formData.start_date}
+              onChange={(e) => handleStartChange(e.target.value)}
+              className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            />
           </div>
           <div>
             <label htmlFor="hashtags" className="block text-sm font-medium text-gray-700 mb-1">Hashtags</label>
@@ -495,31 +796,64 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
             />
             <p className="text-xs text-gray-500 mt-1">Add up to 5 short tags without spaces.</p>
           </div>
+          {!isTierZero() && (
+          <div>
+            <label htmlFor="lean_share" className="block text-sm font-medium text-gray-700 mb-1">
+              Share with <span className="font-normal text-gray-400">— optional</span>
+            </label>
+            <select
+              id="lean_share"
+              aria-label="Share with"
+              value={leanShareValue}
+              onChange={(e) => handleLeanShareChange(e.target.value)}
+              className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            >
+              <option value="none">Just me</option>
+              <option value="all">All my friends</option>
+              {myGroups.map((g) => <option key={g.id} value={`group:${g.id}`}>{g.name}</option>)}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              {partOfTrip ? "Defaults to the trip's sharing. Change it to override." : 'Private by default — pick who can see this.'}
+            </p>
+          </div>
+          )}
           </>
           ) : (
           <>
           <div>
-            <label htmlFor="enrollment_url" className="block text-sm font-medium text-gray-700 mb-1">Event or registration URL</label>
-            <div className="relative">
-              <input
-                type="url"
-                id="enrollment_url"
-                value={formData.enrollment_url}
-                onChange={(e) => handleUrlChange(e.target.value)}
-                placeholder="https://www.example.com/event"
-                className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                disabled={scraping || extractingFromImage}
-              />
-              {(scraping || extractingFromImage) && (
-                <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                  <Loader className="h-5 w-5 animate-spin text-indigo-600" />
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              {scraping ? 'Fetching event information...' : extractingFromImage ? 'Extracting event details…' : "Optional. Add a link to sign up or get tickets. Leave blank for walk-in / first-come-first-serve events."}
-            </p>
-            <div className="mt-2 flex items-center gap-2">
+            <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+            <input
+              type="text"
+              id="title"
+              required
+              ref={titleRef}
+              value={formData.title}
+              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+              className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            />
+          </div>
+          {!isContainer && (
+          <div>
+            <label htmlFor="enrollment_url" className="block text-sm font-medium text-gray-700 mb-1">
+              Event link <span className="font-normal text-gray-400">— optional</span>
+            </label>
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1 min-w-0">
+                <input
+                  type="url"
+                  id="enrollment_url"
+                  value={formData.enrollment_url}
+                  onChange={(e) => handleUrlChange(e.target.value)}
+                  placeholder="https://…/event"
+                  className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  disabled={scraping || extractingFromImage}
+                />
+                {(scraping || extractingFromImage) && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <Loader className="h-5 w-5 animate-spin text-indigo-600" />
+                  </div>
+                )}
+              </div>
               <input
                 ref={extractPhotoFileInputRef}
                 type="file"
@@ -532,92 +866,86 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
                 type="button"
                 onClick={() => extractPhotoFileInputRef.current?.click()}
                 disabled={scraping || extractingFromImage}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-indigo-200 bg-indigo-50 text-sm font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+                title="Upload a flyer or poster to auto-fill the details"
+                className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-md border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex-shrink-0"
               >
-                {extractingFromImage ? (
-                  <>
-                    <Loader className="h-4 w-4 animate-spin" />
-                    Extracting…
-                  </>
-                ) : (
-                  <>
-                    <Upload className="h-4 w-4" />
-                    Upload photo to extract
-                  </>
-                )}
+                {extractingFromImage ? <Loader className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                <span className="hidden sm:inline">{extractingFromImage ? 'Scanning…' : 'Scan flyer'}</span>
               </button>
-              <span className="text-xs text-gray-500">Or upload a flyer or poster to auto-fill details.</span>
             </div>
+            <p className="text-xs text-gray-500 mt-1">
+              {scraping ? 'Fetching event information…' : extractingFromImage ? 'Extracting event details…' : 'Paste a sign-up or tickets link, or scan a flyer to auto-fill.'}
+            </p>
+            {scrapeNote && !scraping && (
+              <p className="text-xs text-amber-600 mt-1">{scrapeNote}</p>
+            )}
           </div>
+          )}
           <div>
-            <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Cover image <span className="font-normal text-gray-400">— optional</span>
+            </label>
             <input
-              type="text"
-              id="title"
-              required
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              ref={coverFileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0]
+                if (!file) return
+                setCoverError('')
+                setCoverUploading(true)
+                const { data: url, error: uploadErr } = await uploadEventCover(file)
+                setCoverUploading(false)
+                if (coverFileInputRef.current) coverFileInputRef.current.value = ''
+                if (uploadErr) {
+                  setCoverError(uploadErr.message)
+                  return
+                }
+                if (url) setFormData((prev) => ({ ...prev, image_url: url }))
+              }}
             />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Cover image</label>
-            <div className="space-y-2">
+            {formData.image_url ? (
+              <div className="flex items-center gap-3">
+                <img src={formData.image_url} alt="" className="h-14 w-14 rounded object-cover border border-gray-200" onError={() => setFormData((prev) => ({ ...prev, image_url: '' }))} />
+                <button
+                  type="button"
+                  onClick={() => setFormData((prev) => ({ ...prev, image_url: '' }))}
+                  className="text-sm text-gray-600 hover:text-red-600"
+                >
+                  Remove
+                </button>
+              </div>
+            ) : (
               <div className="flex items-center gap-2">
                 <input
-                  ref={coverFileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0]
-                    if (!file) return
-                    setCoverError('')
-                    setCoverUploading(true)
-                    const { data: url, error: uploadErr } = await uploadEventCover(file)
-                    setCoverUploading(false)
-                    if (coverFileInputRef.current) coverFileInputRef.current.value = ''
-                    if (uploadErr) {
-                      setCoverError(uploadErr.message)
-                      return
-                    }
-                    if (url) setFormData((prev) => ({ ...prev, image_url: url }))
-                  }}
+                  type="url"
+                  id="image_url"
+                  aria-label="Image URL"
+                  value={formData.image_url}
+                  onChange={(e) => { setCoverError(''); setFormData({ ...formData, image_url: e.target.value }) }}
+                  placeholder="Paste image URL"
+                  className="flex-1 min-w-0 px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                 />
                 <button
                   type="button"
                   onClick={() => coverFileInputRef.current?.click()}
                   disabled={coverUploading}
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  title="Upload from device — max 500KB, compressed automatically"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded-md border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex-shrink-0"
                 >
                   <Upload className="h-4 w-4" />
-                  {coverUploading ? 'Uploading…' : 'Upload from device'}
+                  <span className="hidden sm:inline">{coverUploading ? 'Uploading…' : 'Upload'}</span>
                 </button>
-                <span className="text-xs text-gray-500">max 500KB, compressed automatically</span>
               </div>
-              <p className="text-xs text-gray-500">Or paste image URL:</p>
-              <input
-                type="url"
-                id="image_url"
-                value={formData.image_url}
-                onChange={(e) => { setCoverError(''); setFormData({ ...formData, image_url: e.target.value }) }}
-                placeholder="https://example.com/event-image.jpg"
-                className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              />
-              {coverError && <p className="text-xs text-red-600">{coverError}</p>}
-              {formData.image_url && (
-                <div className="mt-1">
-                  <img src={formData.image_url} alt="" className="h-24 w-auto rounded border border-gray-200 object-cover" onError={() => setFormData((prev) => ({ ...prev, image_url: '' }))} />
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-gray-500 mt-1">Optional. Shows a photo on the card.</p>
+            )}
+            {coverError && <p className="text-xs text-red-600 mt-1">{coverError}</p>}
           </div>
           <div>
             <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">Description</label>
             <textarea
               id="description"
-              rows={4}
+              rows={2}
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
@@ -642,16 +970,14 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               placeholder="#summer #kids #camp (max 5)"
               className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
             />
-            <p className="text-xs text-gray-500 mt-1">
-              Add up to 5 short tags without spaces. They help you group and scan events later.
-            </p>
+            <p className="text-xs text-gray-500 mt-1">Up to 5 short tags, for grouping and scanning later.</p>
           </div>
           </>
           )}
           </div>
           )}
           {step === 2 && (
-          <div className="space-y-6">
+          <div className="space-y-4">
           {isLeanKind ? (
             <div className="p-4 bg-gray-50 border border-gray-200 rounded-md">
               <p className="text-sm font-medium text-gray-700">You&apos;re all set.</p>
@@ -683,7 +1009,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
                 id="start_date"
                 required
                 value={formData.start_date}
-                onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
+                onChange={(e) => handleStartChange(e.target.value)}
                 className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
               />
             </div>
@@ -698,61 +1024,102 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               />
             </div>
           </div>
-          {formData.event_kind === 'event' && (
+          {!event && formData.event_kind === 'event' && (
             <div>
-              <label htmlFor="visit_date_time" className="block text-sm font-medium text-gray-700 mb-1">
-                Visit date &amp; time (optional)
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="recurrence_freq" className="block text-sm font-medium text-gray-700 mb-1">Repeats</label>
+                  <select
+                    id="recurrence_freq"
+                    value={recurrenceFreq}
+                    onChange={(e) => setRecurrenceFreq(e.target.value as typeof recurrenceFreq)}
+                    className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    <option value="none">Does not repeat</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+                {recurrenceFreq !== 'none' && (
+                  <div>
+                    <label htmlFor="recurrence_count" className="block text-sm font-medium text-gray-700 mb-1">Number of occurrences</label>
+                    <input
+                      type="number"
+                      id="recurrence_count"
+                      min={2}
+                      max={52}
+                      value={recurrenceCount}
+                      onChange={(e) => setRecurrenceCount(Number(e.target.value))}
+                      className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                  </div>
+                )}
+              </div>
+              {recurrenceFreq !== 'none' && (
+                <p className="text-xs text-gray-500 mt-1">{recurrenceSummary()}</p>
+              )}
+            </div>
+          )}
+          {isMultiDay && (
+            <div>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={visitOnSpecificDay}
+                  onChange={(e) => handleVisitToggle(e.target.checked)}
+                  className="mt-1 h-4 w-4 text-indigo-600 rounded"
+                />
+                <span className="text-sm font-medium text-gray-700">I&apos;m only going on one day</span>
               </label>
-              <input
-                type="datetime-local"
-                id="visit_date_time"
-                value={visitDateTime}
-                min={formData.start_date || undefined}
-                max={formData.end_date || undefined}
-                onChange={(e) => setVisitDateTime(e.target.value)}
-                disabled={!hasValidRange}
-                className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                {hasValidRange
-                  ? 'Choose when you plan to attend. You can set this now while creating the event.'
-                  : 'Set both start and end date/time (with end after start) to enable visit date.'}
-              </p>
+              <p className="text-xs text-gray-500 mt-1 ml-6">For something that runs several days where you drop in once (a fair, an open day). Leave unchecked for a holiday you&apos;re on the whole time.</p>
+              {visitOnSpecificDay && (
+                <input
+                  type="datetime-local"
+                  id="visit_date_time"
+                  aria-label="Visit day"
+                  value={visitDateTime}
+                  min={formData.start_date || undefined}
+                  max={formData.end_date || undefined}
+                  onChange={(e) => setVisitDateTime(e.target.value)}
+                  className="mt-2 w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              )}
             </div>
           )}
-          {formData.event_kind === 'event' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="enrollment_start_date" className="block text-sm font-medium text-gray-700 mb-1">Registration opens</label>
-              <input
-                type="datetime-local"
-                id="enrollment_start_date"
-                value={formData.enrollment_start_date}
-                onChange={(e) => setFormData({ ...formData, enrollment_start_date: e.target.value })}
-                className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              />
+          {formData.event_kind === 'event' && !!(formData.enrollment_url?.trim() || formData.enrollment_start_date || formData.enrollment_deadline) && (
+          <div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="enrollment_start_date" className="block text-sm font-medium text-gray-700 mb-1">Registration opens</label>
+                <input
+                  type="datetime-local"
+                  id="enrollment_start_date"
+                  value={formData.enrollment_start_date}
+                  onChange={(e) => setFormData({ ...formData, enrollment_start_date: e.target.value })}
+                  className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+              <div>
+                <label htmlFor="enrollment_deadline" className="block text-sm font-medium text-gray-700 mb-1">Registration deadline</label>
+                <input
+                  type="datetime-local"
+                  id="enrollment_deadline"
+                  value={formData.enrollment_deadline}
+                  onChange={(e) => setFormData({ ...formData, enrollment_deadline: e.target.value })}
+                  className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
             </div>
-            <div>
-              <label htmlFor="enrollment_deadline" className="block text-sm font-medium text-gray-700 mb-1">Registration deadline</label>
-              <input
-                type="datetime-local"
-                id="enrollment_deadline"
-                value={formData.enrollment_deadline}
-                onChange={(e) => setFormData({ ...formData, enrollment_deadline: e.target.value })}
-                className="w-full px-3 py-2 min-h-[44px] border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              />
-            </div>
+            <p className="text-xs text-gray-500 mt-1">Optional. Leave both blank for walk-in events.</p>
           </div>
-          )}
-          {formData.event_kind === 'event' && (
-          <p className="text-xs text-gray-500 -mt-2 mb-2">Optional. Leave both blank for walk-in events.</p>
           )}
           </>
           )}
           </div>
           )}
           {step === 3 && (
-          <div className="space-y-6">
+          <div className="space-y-4">
           {isLeanKind ? (
             <div className="p-4 bg-gray-50 border border-gray-200 rounded-md">
               <p className="text-sm font-medium text-gray-700">
@@ -777,7 +1144,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
                     type="radio"
                     name="shared_with_friends"
                     checked={formData.shared_with_friends === 'none'}
-                    onChange={() => setFormData({ ...formData, shared_with_friends: 'none', shared_with_user_ids: [] })}
+                    onChange={() => { setSharingTouched(true); setFormData({ ...formData, shared_with_friends: 'none', shared_with_user_ids: [] }) }}
                     className="h-4 w-4 border-gray-300 text-indigo-600"
                   />
                   <span className="text-sm text-gray-700">None</span>
@@ -787,7 +1154,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
                     type="radio"
                     name="shared_with_friends"
                     checked={formData.shared_with_friends === 'all'}
-                    onChange={() => setFormData({ ...formData, shared_with_friends: 'all', shared_with_user_ids: [] })}
+                    onChange={() => { setSharingTouched(true); setFormData({ ...formData, shared_with_friends: 'all', shared_with_user_ids: [] }) }}
                     className="h-4 w-4 border-gray-300 text-indigo-600"
                   />
                   <span className="text-sm text-gray-700">All my friends</span>
@@ -797,7 +1164,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
                     type="radio"
                     name="shared_with_friends"
                     checked={formData.shared_with_friends === 'selected'}
-                    onChange={() => setFormData({ ...formData, shared_with_friends: 'selected' })}
+                    onChange={() => { setSharingTouched(true); setFormData({ ...formData, shared_with_friends: 'selected' }) }}
                     className="h-4 w-4 border-gray-300 text-indigo-600"
                   />
                   <span className="text-sm text-gray-700">Selected friends</span>
@@ -806,7 +1173,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               {formData.shared_with_friends === 'selected' && (
                 <PeoplePicker
                   selectedIds={formData.shared_with_user_ids}
-                  onChange={(ids) => setFormData((prev) => ({ ...prev, shared_with_user_ids: ids }))}
+                  onChange={(ids) => { setSharingTouched(true); setFormData((prev) => ({ ...prev, shared_with_user_ids: ids })) }}
                 />
               )}
             </div>
@@ -815,7 +1182,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               <p className="text-xs text-gray-500 mb-1">Events shared with a group are visible to everyone in that group.</p>
               <GroupPicker
                 selectedIds={formData.shared_with_group_ids}
-                onChange={(ids) => setFormData((prev) => ({ ...prev, shared_with_group_ids: ids }))}
+                onChange={(ids) => { setSharingTouched(true); setFormData((prev) => ({ ...prev, shared_with_group_ids: ids })) }}
               />
             </div>
           </div>
@@ -823,7 +1190,7 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
           </div>
           )}
           {step === 4 && (
-          <div className="space-y-6">
+          <div className="space-y-4">
           <p className="text-sm font-medium text-gray-700">Options</p>
           {isLeanKind && (
             <div className="p-4 bg-gray-50 border border-gray-200 rounded-md">
@@ -898,35 +1265,23 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
               </button>
             )}
             {step < effectiveSteps ? (
-              <>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    goNext()
-                  }}
-                  className="min-h-[44px] px-4 py-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 inline-flex items-center gap-1.5"
-                >
-                  Next
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-                {isLeanKind && step === 1 && !event && (
-                  <button
-                    ref={createReminderButtonRef}
-                    type="submit"
-                    disabled={loading || !canSubmitLeanFromStep1()}
-                    className="min-h-[44px] px-4 py-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
-                  >
-                    {loading ? 'Creating...' : 'Create'}
-                  </button>
-                )}
-              </>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  goNext()
+                }}
+                className="min-h-[44px] px-4 py-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 inline-flex items-center gap-1.5"
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </button>
             ) : (
               <button
                 ref={submitButtonRef}
                 type="submit"
-                disabled={loading}
+                disabled={loading || (isLeanKind && !canSubmitLeanFromStep1())}
                 className="min-h-[44px] px-4 py-2.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
               >
                 {loading ? 'Saving...' : event ? 'Update' : 'Create'}

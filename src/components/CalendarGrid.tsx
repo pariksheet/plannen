@@ -13,8 +13,9 @@ import {
   startOfWeek,
   subMonths,
 } from 'date-fns'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { Event } from '../types/event'
+import { ChevronLeft, ChevronRight, Plus } from 'lucide-react'
+import { Event, EventFormData } from '../types/event'
+import { useToast } from '../context/ToastContext'
 import { completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
 import { EventList } from './EventList'
 import { EventDetailsModal } from './EventDetailsModal'
@@ -41,11 +42,23 @@ interface CalendarGridProps {
 // Max dots rendered per kind in a compact cell before showing a "+" overflow.
 const DOT_CAP = 11
 
+// Max simultaneous trip bands drawn per day before extra trips are hidden.
+const MAX_TRIP_LANES = 3
+
 function toDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
+/** A datetime-local string for `day` at a sensible default hour (the next
+ *  round hour from now), used to seed the create form from a calendar day. */
+function dayAtDefaultHour(day: Date): string {
+  const hour = (new Date().getHours() + 1) % 24
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}T${pad(hour)}:00`
+}
+
 export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuccess, onDataChange, onClone, onHashtagClick, onDateSelect, showActions, showSidebar = true, compact = false }: CalendarGridProps) {
+  const { showToast } = useToast()
   const [currentMonth, setCurrentMonth] = useState<Date>(startOfMonth(new Date()))
   const [selectedDate, setSelectedDate] = useState<Date>(new Date())
   const selectDay = (day: Date) => {
@@ -56,6 +69,13 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
   const [rsvpVersion, setRsvpVersion] = useState(0)
   const [showForm, setShowForm] = useState(false)
   const [editingEvent, setEditingEvent] = useState<Event | undefined>()
+  const [createInitial, setCreateInitial] = useState<Partial<EventFormData> | undefined>()
+
+  const handleCreateOnDay = (day: Date) => {
+    setEditingEvent(undefined)
+    setCreateInitial({ start_date: dayAtDefaultHour(day) })
+    setShowForm(true)
+  }
 
   const currentYear = new Date().getFullYear()
   const yearOptions = Array.from({ length: 11 }, (_, i) => currentYear - 5 + i)
@@ -91,6 +111,8 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
       if (parentIds.has(event.id)) continue
       // Cancelled events don't belong on the calendar
       if (event.event_status === 'cancelled') continue
+      // Trips (containers) render as spanning bands, not per-day dots.
+      if (event.event_kind === 'container') continue
 
       const preferredVisitDate = preferredVisitDates[event.id]
       if (preferredVisitDate) {
@@ -125,6 +147,59 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
     }
     return byDay
   }, [events, preferredVisitDates])
+
+  // Trips (containers) draw as continuous bands across the days they span.
+  // Pack them into horizontal lanes (greedy) so non-overlapping trips reuse a
+  // lane and the same trip keeps one lane across week rows.
+  const tripBands = useMemo(() => {
+    const trips = events
+      .filter((e) => e.event_kind === 'container' && e.start_date && e.end_date)
+      .map((e) => ({
+        id: e.id,
+        title: e.title,
+        event: e,
+        s: startOfDay(new Date(e.start_date)).getTime(),
+        e2: startOfDay(new Date(e.end_date!)).getTime(),
+        lane: 0,
+      }))
+      .filter((t) => t.e2 >= t.s)
+      .sort((a, b) => a.s - b.s)
+    const laneEnds: number[] = []
+    for (const t of trips) {
+      let lane = laneEnds.findIndex((end) => end < t.s)
+      if (lane === -1) { lane = laneEnds.length; laneEnds.push(t.e2) }
+      else laneEnds[lane] = t.e2
+      t.lane = lane
+    }
+    return { trips, laneCount: Math.min(laneEnds.length, MAX_TRIP_LANES) }
+  }, [events])
+
+  const renderTripBands = (day: Date) => {
+    if (tripBands.laneCount === 0) return null
+    const dayMs = startOfDay(day).getTime()
+    const isWeekStart = day.getDay() === 1 // Monday — first column
+    return (
+      <div className="mt-0.5 space-y-0.5">
+        {Array.from({ length: tripBands.laneCount }).map((_, lane) => {
+          const t = tripBands.trips.find((x) => x.lane === lane && dayMs >= x.s && dayMs <= x.e2)
+          if (!t) return <div key={lane} className="h-3" aria-hidden />
+          const isStart = dayMs === t.s
+          const isEnd = dayMs === t.e2
+          return (
+            <button
+              key={lane}
+              type="button"
+              onClick={(ev) => { ev.stopPropagation(); setFocusedEvent(t.event) }}
+              title={t.title}
+              className={`block w-full h-3 bg-violet-500 text-white text-[9px] leading-3 px-1 truncate text-left hover:bg-violet-600 ${isStart ? 'rounded-l' : ''} ${isEnd ? 'rounded-r' : ''}`}
+            >
+              {isStart || isWeekStart ? t.title : ' '}
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
 
   const monthEventCount = useMemo(() => {
     const seen = new Set<string>()
@@ -249,6 +324,7 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
                       </span>
                     )}
                   </div>
+                  {renderTripBands(day)}
                   {compact && dayEvents.length > 0 && (
                     // One dot per item (blue = event, green = reminder, amber = todo), wrapped
                     // and capped so a busy day can't blow out the cell. The
@@ -310,6 +386,14 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
             {selectedEvents.length === 0 ? (
               <div className="text-center py-8 bg-white rounded-lg border border-gray-200">
                 <p className="text-gray-500 text-sm">No events on this day.</p>
+                <button
+                  type="button"
+                  onClick={() => handleCreateOnDay(selectedDate)}
+                  className="mt-3 inline-flex items-center gap-1 px-3 py-2 min-h-[40px] rounded-md border border-indigo-200 bg-indigo-50 text-indigo-700 text-sm font-medium hover:bg-indigo-100"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add event on this day
+                </button>
               </div>
             ) : (
               <EventList
@@ -348,13 +432,20 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
       {showForm && (
         <EventForm
           event={editingEvent}
+          initialData={editingEvent ? undefined : createInitial}
           onClose={() => {
             setShowForm(false)
             setEditingEvent(undefined)
+            setCreateInitial(undefined)
           }}
-          onSuccess={() => {
+          onSuccess={(result) => {
+            const wasEdit = !!editingEvent
             setShowForm(false)
             setEditingEvent(undefined)
+            setCreateInitial(undefined)
+            const kind = result?.event.event_kind
+            const label = kind === 'todo' ? 'To-do' : kind === 'reminder' ? 'Reminder' : 'Event'
+            showToast(result ? `${label} ${result.created ? 'created' : 'updated'}` : (wasEdit ? 'Saved' : 'Created'))
             onDataChange?.()
           }}
         />

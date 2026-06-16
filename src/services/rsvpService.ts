@@ -140,11 +140,36 @@ export async function getCreatorPreferredVisitDates(
   }
 }
 
-export async function getRsvpList(_eventId: string): Promise<{
-  data: { going: { id: string; email?: string; full_name?: string }[]; maybe: { id: string; email?: string; full_name?: string }[]; not_going: { id: string; email?: string; full_name?: string }[] } | null
+type RsvpUser = { id: string; email?: string; full_name?: string }
+type RsvpBuckets = { going: RsvpUser[]; maybe: RsvpUser[]; not_going: RsvpUser[] }
+
+export async function getRsvpList(eventId: string): Promise<{
+  data: RsvpBuckets | null
   error: Error | null
 }> {
-  // Listing all RSVPs for an event with joined user details is not surfaced
-  // by the v0 REST contract — return an empty bucket structure.
-  return { data: { going: [], maybe: [], not_going: [] }, error: null }
+  const empty: RsvpBuckets = { going: [], maybe: [], not_going: [] }
+  // Tier 0 is single-user — there's no roster of other people to list.
+  if (isTierZero()) return { data: empty, error: null }
+  try {
+    const rows = await fetchRsvpRows([eventId])
+    if (rows.length === 0) return { data: empty, error: null }
+    const userIds = Array.from(new Set(rows.map((r) => r.user_id)))
+    // Hydrate display names (RLS-scoped; degrades to id-only when not readable).
+    const { data: users } = await supabase
+      .from('users')
+      .select('id, email, full_name')
+      .in('id', userIds)
+    const byId = new Map((users ?? []).map((u) => [u.id as string, u as { email?: string; full_name?: string }]))
+    const buckets: RsvpBuckets = { going: [], maybe: [], not_going: [] }
+    for (const r of rows) {
+      const u = byId.get(r.user_id)
+      const entry: RsvpUser = { id: r.user_id, email: u?.email ?? undefined, full_name: u?.full_name ?? undefined }
+      if (r.status === 'going') buckets.going.push(entry)
+      else if (r.status === 'maybe') buckets.maybe.push(entry)
+      else if (r.status === 'not_going') buckets.not_going.push(entry)
+    }
+    return { data: buckets, error: null }
+  } catch (e) {
+    return { data: empty, error: e instanceof Error ? e : new Error('Get rsvp list failed') }
+  }
 }

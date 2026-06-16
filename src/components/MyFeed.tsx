@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Event, EventFormData, EventViewMode } from '../types/event'
 import { getMyFeedEvents } from '../services/viewService'
+import { getWishlistEvents } from '../services/wishlistService'
 import { getPreferredVisitDates } from '../services/rsvpService'
 import { buildFutureTimeline, TimelineItem } from '../utils/timeline'
 import { Timeline } from './Timeline'
+import { EventList } from './EventList'
 import { CalendarGrid } from './CalendarGrid'
 import { EventForm } from './EventForm'
 import { DiscoverButton } from './DiscoverButton'
@@ -13,9 +15,12 @@ import { projectScheduleForDay } from '../services/schedulingService'
 import { dbClient } from '../lib/dbClient'
 import type { AttendanceInstanceRow, ResolvedObligationRow } from '../lib/dbClient/types'
 import { ConfirmModal, PromptModal } from './Modal'
-import { Plus, ChevronUp, Calendar, X } from 'lucide-react'
+import { Plus, ChevronUp, ChevronDown, Calendar, X, Eye, Briefcase, Pencil, Trash2, Share2 } from 'lucide-react'
+import { format } from 'date-fns'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { deleteEvent, completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
+import { deleteContainer, syncTripSharing } from '../services/containerService'
 import { supabase } from '../lib/supabase'
 
 // Identifies events auto-created by the mailbox-sync routine.
@@ -53,6 +58,7 @@ function formatHumanDate(iso: string): string {
 
 export function MyFeed() {
   const { user } = useAuth()
+  const { showToast } = useToast()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const [events, setEvents] = useState<Event[]>([])
@@ -63,6 +69,9 @@ export function MyFeed() {
   const [muteSenderPrompt, setMuteSenderPrompt] = useState<{ eventId: string; senderHint: string } | null>(null)
   const [feedError, setFeedError] = useState<string | null>(null)
   const [preferredVisitDates, setPreferredVisitDates] = useState<Record<string, string | null>>({})
+  const [watchQueue, setWatchQueue] = useState<Event[]>([])
+  const [showWatchQueue, setShowWatchQueue] = useState(false)
+  const [showTrips, setShowTrips] = useState(false)
   const [attendancesToday, setAttendancesToday] = useState<AttendanceInstanceRow[]>([])
   const [obligationsToday, setObligationsToday] = useState<ResolvedObligationRow[]>([])
   const [subjectNames, setSubjectNames] = useState<Record<string, string>>({})
@@ -129,6 +138,9 @@ export function MyFeed() {
       const { data: preferred } = await getPreferredVisitDates(ids)
       setPreferredVisitDates(preferred ?? {})
     }
+    // The watch queue (watching + missed) regardless of the date window.
+    const { data: wl } = await getWishlistEvents()
+    setWatchQueue(wl ?? [])
     setLoading(false)
   }, [fromIso, toIso])
 
@@ -231,6 +243,25 @@ export function MyFeed() {
     setShowForm(true)
   }
 
+  const handleDeleteTrip = async (trip: Event) => {
+    if (!window.confirm(`Delete the trip "${trip.title}"? Its events and to-dos stay — they're just no longer grouped.`)) return
+    setFeedError(null)
+    const { error } = await deleteContainer(trip.id)
+    if (error) { setFeedError(error.message); return }
+    loadEvents()
+  }
+
+  const handleSyncTrip = async (trip: Event) => {
+    const ids = events.filter((e) => e.group_id === trip.id).map((e) => e.id)
+    if (ids.length === 0) return
+    if (!window.confirm(`Share all ${ids.length} item${ids.length === 1 ? '' : 's'} in "${trip.title}" with the same people as the trip?`)) return
+    setFeedError(null)
+    const { error } = await syncTripSharing(trip.id, ids)
+    if (error) { setFeedError(error.message); return }
+    showToast(`Shared ${ids.length} item${ids.length === 1 ? '' : 's'} like the trip`)
+    loadEvents()
+  }
+
   const handleDeleteClick = (eventId: string) => {
     setDeleteTargetId(eventId)
     setFeedError(null)
@@ -273,6 +304,8 @@ export function MyFeed() {
   }
 
   const filteredEvents = events
+    // Containers are shown in the Trips section, not as standalone timeline cards.
+    .filter((e) => e.event_kind !== 'container')
     .filter((e) => activeKindFilter.has(e.event_kind === 'session' || e.event_kind === 'container' ? 'event' : e.event_kind))
     .filter((e) => !activeHashtag || (e.hashtags ?? []).includes(activeHashtag))
     .filter((e) => {
@@ -282,6 +315,13 @@ export function MyFeed() {
       // Compare local-day keys so a multi-day event matches any day in its range.
       return ymd(start) <= selectedDate && selectedDate <= ymd(end)
     })
+  const trips = events
+    .filter((e) => e.event_kind === 'container')
+    .sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime())
+  const tripMembers = (tripId: string) =>
+    events
+      .filter((e) => e.group_id === tripId)
+      .sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime())
   const futureTimeline = buildFutureTimeline(filteredEvents, preferredVisitDates)
   const past = filteredEvents
     .filter((e) => e.event_status === 'past')
@@ -389,6 +429,126 @@ export function MyFeed() {
           </div>
         </div>
       </div>
+
+      {watchQueue.length > 0 && (
+        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowWatchQueue((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 text-left"
+            aria-expanded={showWatchQueue}
+          >
+            <span className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900">
+              <Eye className="h-4 w-4 text-indigo-500" />
+              Watching
+              <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-semibold">
+                {watchQueue.length}
+              </span>
+            </span>
+            {showWatchQueue ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
+          </button>
+          {showWatchQueue && (
+            <div className="px-4 pb-4 border-t border-gray-100 pt-3">
+              <p className="text-xs text-gray-500 mb-2">Events you're tracking for the next occurrence. Open one and edit it to turn it into a real event.</p>
+              <EventList
+                events={watchQueue}
+                onEdit={handleEdit}
+                onDelete={handleDeleteClick}
+                onShareSuccess={loadEvents}
+                onHashtagClick={(tag) => { setActiveHashtag(tag); setShowPast(true) }}
+                showActions
+                showWatchButton={false}
+                viewMode="compact"
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {trips.length > 0 && (
+        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowTrips((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 text-left"
+            aria-expanded={showTrips}
+          >
+            <span className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900">
+              <Briefcase className="h-4 w-4 text-indigo-500" />
+              Trips
+              <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-semibold">
+                {trips.length}
+              </span>
+            </span>
+            {showTrips ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
+          </button>
+          {showTrips && (
+            <div className="px-4 pb-4 border-t border-gray-100 pt-3 space-y-4">
+              {trips.map((t) => {
+                const members = tripMembers(t.id)
+                const range = t.end_date
+                  ? `${format(new Date(t.start_date), 'd MMM')} – ${format(new Date(t.end_date), 'd MMM yyyy')}`
+                  : format(new Date(t.start_date), 'd MMM yyyy')
+                return (
+                  <div key={t.id}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{t.title}</p>
+                        <p className="text-xs text-gray-500">{range}</p>
+                      </div>
+                      <div className="flex items-center flex-shrink-0">
+                        {members.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handleSyncTrip(t)}
+                            className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center text-gray-400 hover:text-indigo-600"
+                            aria-label={`Share items in ${t.title} like the trip`}
+                            title="Share everything in this trip with the same people as the trip"
+                          >
+                            <Share2 className="h-4 w-4" />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleEdit(t)}
+                          className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center text-gray-400 hover:text-indigo-600"
+                          aria-label={`Edit trip ${t.title}`}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTrip(t)}
+                          className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center text-gray-400 hover:text-red-600"
+                          aria-label={`Delete trip ${t.title}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                    {members.length === 0 ? (
+                      <p className="text-xs text-gray-500 mt-1">Nothing in this trip yet. Add events or to-dos to it from the create form.</p>
+                    ) : (
+                      <EventList
+                        events={members}
+                        onEdit={handleEdit}
+                        onDelete={handleDeleteClick}
+                        onShareSuccess={loadEvents}
+                        onToggleTodo={handleToggleTodo}
+                        onConvertKind={handleConvertKind}
+                        onHashtagClick={(tag) => { setActiveHashtag(tag); setShowPast(true) }}
+                        showActions
+                        showWatchButton={false}
+                        viewMode="compact"
+                      />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {viewMode !== 'schedule' && (<>
       <div className="flex justify-center items-center gap-2 flex-wrap pb-1 -mx-1 px-1">
@@ -521,7 +681,7 @@ export function MyFeed() {
             />
           ) : viewMode === 'calendar' ? (
             <CalendarGrid
-              events={filteredEvents}
+              events={[...filteredEvents, ...trips]}
               preferredVisitDates={preferredVisitDates}
               onDelete={handleDeleteClick}
               onShareSuccess={loadEvents}
@@ -578,6 +738,17 @@ export function MyFeed() {
         </div>
       )}
 
+      {!showForm && (
+        <button
+          type="button"
+          onClick={handleCreate}
+          aria-label="Create event"
+          className="sm:hidden fixed bottom-5 right-5 z-40 inline-flex items-center justify-center h-14 w-14 rounded-full bg-indigo-600 text-white shadow-lg hover:bg-indigo-700 active:scale-95 transition-transform"
+        >
+          <Plus className="h-7 w-7" />
+        </button>
+      )}
+
       {showForm && (
         <EventForm
           event={editingEvent}
@@ -587,10 +758,24 @@ export function MyFeed() {
             setEditingEvent(undefined)
             setInitialFormData(null)
           }}
-          onSuccess={() => {
+          onSuccess={(result) => {
+            const wasEdit = !!editingEvent
             setShowForm(false)
             setEditingEvent(undefined)
             setInitialFormData(null)
+            if (result?.event) {
+              // Guarantee the saved event is within the fetch window so it's
+              // actually visible after the reload (e.g. a far-future camp).
+              const startYmd = ymd(new Date(result.event.start_date))
+              if (!windowExpandedRef.current && (startYmd < fromIso || startYmd > toIso)) {
+                windowExpandedRef.current = true
+              }
+              const kind = result.event.event_kind
+              const label = kind === 'todo' ? 'To-do' : kind === 'reminder' ? 'Reminder' : 'Event'
+              showToast(`${label} ${result.created ? 'created' : 'updated'}`)
+            } else {
+              showToast(wasEdit ? 'Saved' : 'Created')
+            }
             loadEvents()
           }}
         />

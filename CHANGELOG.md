@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-16
+
+### Web UI parity — do it in the app, not just via the assistant
+
+- **Things that used to need the assistant now have a home in the web app.** This release closes the biggest gaps between what the assistant could do and what the UI exposed: your saved sources, profile facts (add and correct them inline), and mail mute rules are now browsable and editable; attendances, obligations, and blackout windows have management screens; and one-off activity logging is available directly from the app.
+- **Stubbed service paths are live again.** Several UI actions that silently did nothing now actually call through to the backend, so what the screen shows matches what's stored.
+
+### Event creation — a faster, clearer form
+
+- **A leaner, less cluttered create/edit flow.** The form now adapts to what you're making: to-dos and reminders are a single screen instead of a multi-step wizard, the title field is focused the moment the form opens, and the confusing "Type" field is gone. The cover-image and event-link rows were compacted (with a matching neutral "Scan flyer" button), reminders no longer ask for an end time, and a recurrence summary spells out exactly which dates a repeat will create.
+- **"Trip" is a first-class thing you can create.** Alongside Event, Reminder, and To-do, you can now make a Trip directly from the form and file other items under it with a simple "Add to a trip" checkbox.
+- **Visit date only appears when it makes sense.** The "which day are you going?" field is now hidden behind a one-day checkbox and only shows for events that actually span multiple days; it's clamped and reconciled on save so a stale value can't linger after you change the dates.
+
+### Trips across the calendar and schedule
+
+- **Trips show as spanning bands on the calendar** and as distinct violet "trip" rows in the schedule lists, so a multi-day plan reads as one block instead of scattered dots.
+- **Events and to-dos filed under a trip inherit the trip's sharing by default**, with a one-click "sync" button to push the trip's current sharing onto everything in it. The inherited setting is just a starting point — a compact "Share with" control on events, to-dos, and reminders lets you override it per item, and your explicit choice always wins.
+
+### Schedule view polish
+
+- **Only completed to-dos get struck through** — past events and reminders stay legible — and each row carries a small icon for its kind. The month calendar's day view gained the same kind icons and a working to-do checkbox you can tick straight from the schedule.
+
 ## [0.6.5] - 2026-06-15
 
 ### Daily brief — surface overdue to-dos

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronUp, Trash2, EyeOff } from 'lucide-react'
+import { ChevronDown, ChevronUp, Trash2, EyeOff, Pencil, Plus, Check, X } from 'lucide-react'
 import { dbClient } from '../lib/dbClient'
 import type { FactRow } from '../lib/dbClient/types'
 
@@ -16,6 +16,11 @@ export function ProfileFacts() {
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pendingId, setPendingId] = useState<string | null>(null)
+  const [showAdd, setShowAdd] = useState(false)
+  const [addForm, setAddForm] = useState({ subject: 'user', predicate: '', value: '' })
+  const [saving, setSaving] = useState(false)
+  const [correctingId, setCorrectingId] = useState<string | null>(null)
+  const [correctValue, setCorrectValue] = useState('')
 
   useEffect(() => {
     if (!open || loaded) return
@@ -54,6 +59,61 @@ export function ProfileFacts() {
       setFacts((prev) => prev.filter((f) => f.id !== fact.id))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to delete fact')
+    } finally {
+      setPendingId(null)
+    }
+  }
+
+  const handleAdd = async () => {
+    const predicate = addForm.predicate.trim().replace(/\s+/g, '_')
+    const value = addForm.value.trim()
+    if (!predicate || !value) return
+    setSaving(true)
+    setError(null)
+    try {
+      const row = await dbClient.profile.upsertFact({
+        subject: addForm.subject.trim() || 'user',
+        predicate,
+        value,
+        confidence: 1,
+        source: 'user',
+      })
+      setFacts((prev) => [...prev, row])
+      setShowAdd(false)
+      setAddForm({ subject: 'user', predicate: '', value: '' })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to add fact')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const startCorrect = (fact: FactRow) => {
+    setCorrectingId(fact.id)
+    setCorrectValue(fact.value)
+  }
+
+  // Correct = replace: insert the corrected value, then forget the old row.
+  // (profile_facts has no UPDATE route in Tier 0, so we compose from the
+  // primitives that exist in every tier.)
+  const handleCorrect = async (fact: FactRow) => {
+    const value = correctValue.trim()
+    if (!value || value === fact.value) { setCorrectingId(null); return }
+    setPendingId(fact.id)
+    setError(null)
+    try {
+      const row = await dbClient.profile.upsertFact({
+        subject: fact.subject,
+        predicate: fact.predicate,
+        value,
+        confidence: 1,
+        source: 'user',
+      })
+      await dbClient.profile.deleteFact(fact.id)
+      setFacts((prev) => prev.filter((f) => f.id !== fact.id).concat(row))
+      setCorrectingId(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to correct fact')
     } finally {
       setPendingId(null)
     }
@@ -113,41 +173,144 @@ export function ProfileFacts() {
                         : 'border-gray-200 bg-white text-gray-800'
                     }`}
                   >
-                    <span className="flex-1">
-                      <span className="font-medium">{fact.predicate.replace(/_/g, ' ')}</span>
-                      {' '}
-                      <span>{fact.value}</span>
-                      <span className="ml-2 text-xs text-gray-400">
-                        ({Math.round(fact.confidence * 100)}%)
+                    {correctingId === fact.id ? (
+                      <span className="flex-1 flex items-center gap-2">
+                        <span className="font-medium whitespace-nowrap">{fact.predicate.replace(/_/g, ' ')}</span>
+                        <input
+                          type="text"
+                          aria-label="Corrected value"
+                          value={correctValue}
+                          onChange={(e) => setCorrectValue(e.target.value)}
+                          className="flex-1 min-w-0 px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleCorrect(fact)}
+                          disabled={pendingId === fact.id}
+                          className="p-1.5 min-h-[40px] min-w-[40px] flex items-center justify-center text-green-600 hover:bg-green-50 rounded disabled:opacity-50 flex-shrink-0"
+                          aria-label="Save correction"
+                        >
+                          <Check className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCorrectingId(null)}
+                          className="p-1.5 min-h-[40px] min-w-[40px] flex items-center justify-center text-gray-400 hover:bg-gray-100 rounded flex-shrink-0"
+                          aria-label="Cancel correction"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
                       </span>
-                    </span>
-                    {!fact.is_historical && (
-                      <button
-                        type="button"
-                        onClick={() => handleMarkHistorical(fact)}
-                        disabled={pendingId === fact.id}
-                        className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-gray-400 hover:text-amber-600 disabled:opacity-50 flex-shrink-0"
-                        title="Mark as no longer true"
-                        aria-label="Mark fact as historical"
-                      >
-                        <EyeOff className="h-4 w-4" />
-                      </button>
+                    ) : (
+                      <>
+                        <span className="flex-1">
+                          <span className="font-medium">{fact.predicate.replace(/_/g, ' ')}</span>
+                          {' '}
+                          <span>{fact.value}</span>
+                          <span className="ml-2 text-xs text-gray-400">
+                            ({Math.round(fact.confidence * 100)}%)
+                          </span>
+                        </span>
+                        {!fact.is_historical && (
+                          <button
+                            type="button"
+                            onClick={() => startCorrect(fact)}
+                            disabled={pendingId === fact.id}
+                            className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-gray-400 hover:text-indigo-600 disabled:opacity-50 flex-shrink-0"
+                            title="Correct this fact"
+                            aria-label="Correct fact"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                        )}
+                        {!fact.is_historical && (
+                          <button
+                            type="button"
+                            onClick={() => handleMarkHistorical(fact)}
+                            disabled={pendingId === fact.id}
+                            className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-gray-400 hover:text-amber-600 disabled:opacity-50 flex-shrink-0"
+                            title="Mark as no longer true"
+                            aria-label="Mark fact as historical"
+                          >
+                            <EyeOff className="h-4 w-4" />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(fact)}
+                          disabled={pendingId === fact.id}
+                          className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-gray-400 hover:text-red-600 disabled:opacity-50 flex-shrink-0"
+                          title="Forget this fact"
+                          aria-label="Delete fact"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(fact)}
-                      disabled={pendingId === fact.id}
-                      className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center text-gray-400 hover:text-red-600 disabled:opacity-50 flex-shrink-0"
-                      title="Forget this fact"
-                      aria-label="Delete fact"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
                   </li>
                 ))}
               </ul>
             </div>
           ))}
+
+          {loaded && !loading && (
+            showAdd ? (
+              <div className="border border-indigo-200 rounded-lg p-3 bg-indigo-50 space-y-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <input
+                    type="text"
+                    aria-label="Fact subject"
+                    placeholder="Who (e.g. you)"
+                    value={addForm.subject}
+                    onChange={(e) => setAddForm((f) => ({ ...f, subject: e.target.value }))}
+                    className="px-2 py-2 min-h-[40px] text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                  <input
+                    type="text"
+                    aria-label="Fact predicate"
+                    placeholder="relation (e.g. likes)"
+                    value={addForm.predicate}
+                    onChange={(e) => setAddForm((f) => ({ ...f, predicate: e.target.value }))}
+                    className="px-2 py-2 min-h-[40px] text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                  <input
+                    type="text"
+                    aria-label="Fact value"
+                    placeholder="value (e.g. hiking)"
+                    value={addForm.value}
+                    onChange={(e) => setAddForm((f) => ({ ...f, value: e.target.value }))}
+                    className="px-2 py-2 min-h-[40px] text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setShowAdd(false); setAddForm({ subject: 'user', predicate: '', value: '' }) }}
+                    className="min-h-[40px] px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAdd}
+                    disabled={saving || !addForm.predicate.trim() || !addForm.value.trim()}
+                    className="min-h-[40px] px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    {saving ? 'Saving…' : 'Add fact'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowAdd(true)}
+                className="inline-flex items-center gap-1 min-h-[40px] px-2 py-1.5 text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+              >
+                <Plus className="h-4 w-4" />
+                Add a fact
+              </button>
+            )
+          )}
         </div>
       )}
     </div>
