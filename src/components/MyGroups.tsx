@@ -389,6 +389,7 @@ export function MyGroups() {
               preferredVisitDates={preferredVisitDates}
               heading={selectedGroupName ?? 'Schedule'}
               hideRoutines
+              pinTrips
               onEdit={handleEdit}
               onDelete={handleDeleteClick}
               onShareSuccess={refresh}

@@ -40,6 +40,11 @@ export interface ScheduleOverviewProps {
   // group Schedule view sets this so a shared dashboard shows only group events,
   // never the viewer's private routines.
   hideRoutines?: boolean
+  // When true (the starred-group Schedule view), trip containers are lifted out
+  // of the inline agenda and pinned in a "Trips" card at the top — mirroring the
+  // Trips section in My Plans. Default keeps existing behaviour (My Plans renders
+  // its own Trips section, so it leaves this off).
+  pinTrips?: boolean
 }
 
 const sketchHand = "font-['Caveat'] tracking-tight"
@@ -118,13 +123,57 @@ function isOverdueTodo(event: Event, todayKey: string): boolean {
   return eventDateLocal(event) < todayKey
 }
 
+// Trip containers pinned above the agenda (starred-group Schedule view). Mirrors
+// the Trips section in My Plans; only upcoming/ongoing trips are shown, and a
+// click opens the trip.
+function TripsCard({ trips, onOpen }: { trips: Event[]; onOpen: (e: Event) => void }) {
+  const todayKey = todayIso()
+  const upcoming = trips
+    .filter((t) => !t.end_date || ymd(new Date(t.end_date)) >= todayKey)
+    .slice()
+    .sort((a, b) => a.start_date.localeCompare(b.start_date))
+  if (upcoming.length === 0) return null
+  const fmt = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  return (
+    <section data-testid="trips-card" className={`rounded-xl border-2 border-violet-200/80 bg-violet-50/50 p-4 ${sketchBody}`}>
+      <h3 className={`${sketchHand} text-3xl text-violet-900 mb-2`}>
+        Trips
+        <span className="ml-2 align-middle text-sm font-sans not-italic bg-violet-100 text-violet-700 border border-violet-200 rounded-full px-2 py-0.5">
+          {upcoming.length}
+        </span>
+      </h3>
+      <ul className="space-y-1">
+        {upcoming.map((t) => (
+          <li key={t.id}>
+            <button
+              type="button"
+              onClick={() => onOpen(t)}
+              className="flex items-center gap-2 w-full text-left rounded px-1.5 py-1 hover:bg-violet-100/60"
+            >
+              <Briefcase className="h-4 w-4 text-violet-600 shrink-0" aria-hidden />
+              <span className="font-medium text-gray-900 truncate">{t.title}</span>
+              <span className="text-sm text-gray-500 ml-auto whitespace-nowrap">
+                {t.end_date ? `${fmt(t.start_date)} – ${fmt(t.end_date)}` : fmt(t.start_date)}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 export function ScheduleOverview(props: ScheduleOverviewProps) {
   // Cancelled events don't belong on a schedule — filter once for every card.
   const events = props.events.filter((e) => e.event_status !== 'cancelled')
   const todayKey = todayIso()
+  // When pinning trips, lift containers out of the inline lists so they aren't
+  // duplicated — they render in the Trips card at the top instead.
+  const trips = props.pinTrips ? events.filter((e) => e.event_kind === 'container') : []
+  const agenda = props.pinTrips ? events.filter((e) => e.event_kind !== 'container') : events
   // Overdue to-dos live only in the Overdue section, never duplicated in the
   // week list below.
-  const weekEvents = events.filter((e) => !isOverdueTodo(e, todayKey))
+  const weekEvents = agenda.filter((e) => !isOverdueTodo(e, todayKey))
 
   async function handleToggleTodo(e: Event) {
     if (e.completed_at) await uncompleteTodo(e.id)
@@ -140,6 +189,7 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
   return (
     <div className="space-y-4 w-full min-w-0">
       <HeaderStrip heading={props.heading ?? 'Your Schedule'} />
+      {props.pinTrips && <TripsCard trips={trips} onOpen={props.onEdit} />}
       <TodayScheduleCard
         attendances={props.attendancesToday ?? []}
         obligations={props.obligationsToday ?? []}
@@ -165,7 +215,7 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
         hideRoutines={props.hideRoutines}
       />
       <ThisMonthCard
-        events={events}
+        events={agenda}
         preferredVisitDates={props.preferredVisitDates}
         onEdit={props.onEdit}
         onDelete={props.onDelete}

@@ -559,3 +559,44 @@ describe('ScheduleOverview — today schedule card', () => {
     expect(within(card).queryByText(/overlaps/i)).not.toBeInTheDocument()
   })
 })
+
+describe('pinned trips (starred-group Schedule view)', () => {
+  function renderPinned(events: Event[], onEdit = vi.fn()) {
+    return render(
+      <MemoryRouter>
+        <ScheduleOverview
+          events={events}
+          onEdit={onEdit}
+          onDelete={vi.fn()}
+          onShareSuccess={vi.fn()}
+          onHashtagClick={vi.fn()}
+          preferredVisitDates={{}}
+          pinTrips
+        />
+      </MemoryRouter>
+    )
+  }
+
+  const trip = () => makeEvent({
+    id: 'trip1', title: 'Canada Trip', event_kind: 'container',
+    start_date: midWeekIso(), end_date: '2099-12-31',
+  })
+
+  it('pins an upcoming trip container in a Trips card', () => {
+    renderPinned([trip()])
+    const card = screen.getByTestId('trips-card')
+    expect(within(card).getByText('Canada Trip')).toBeInTheDocument()
+  })
+
+  it('renders no Trips card when pinTrips is off', () => {
+    renderOverview([trip()])
+    expect(screen.queryByTestId('trips-card')).toBeNull()
+  })
+
+  it('clicking a pinned trip opens it via onEdit', async () => {
+    const onEdit = vi.fn()
+    renderPinned([trip()], onEdit)
+    await userEvent.click(within(screen.getByTestId('trips-card')).getByText('Canada Trip'))
+    expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'trip1' }))
+  })
+})
