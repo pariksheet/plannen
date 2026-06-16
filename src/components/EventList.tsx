@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { Event, EventViewMode } from '../types/event'
 import { EventCard } from './EventCard'
@@ -8,7 +8,7 @@ interface EventListProps {
   onEdit?: (event: Event) => void
   onClone?: (event: Event) => void
   onDelete?: (eventId: string) => void
-  onShareSuccess?: () => void
+  onShareSuccess?: (event: Event) => void
   onHashtagClick?: (tag: string) => void
   onToggleTodo?: (event: Event) => void
   onConvertKind?: (event: Event, kind: 'reminder' | 'todo') => void
@@ -22,6 +22,9 @@ interface EventListProps {
    *  an "Events (N)" toggle that expands its children inline (as compact cards),
    *  so a trip looks like any other event card everywhere it appears. */
   childrenOf?: (tripId: string) => Event[]
+  /** Render extra content beneath each top-level card (e.g. a trip's checklist).
+   *  Not threaded into expanded children — top level only. */
+  renderItemFooter?: (event: Event) => ReactNode
 }
 
 export function EventList({
@@ -40,6 +43,7 @@ export function EventList({
   viewMode = 'compact',
   emptyMessage = 'No events found',
   childrenOf,
+  renderItemFooter,
 }: EventListProps) {
   const [openTrips, setOpenTrips] = useState<Record<string, boolean>>({})
   if (events.length === 0) {
@@ -70,7 +74,8 @@ export function EventList({
             viewMode={viewMode}
           />
         )
-        if (!kids) return <div key={event.id}>{card}</div>
+        const footer = renderItemFooter?.(event)
+        if (!kids) return <div key={event.id}>{card}{footer}</div>
         const isOpen = !!openTrips[event.id]
         return (
           <div key={event.id}>
@@ -106,6 +111,7 @@ export function EventList({
                 )
               )}
             </div>
+            {footer}
           </div>
         )
       })}

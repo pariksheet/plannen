@@ -1,13 +1,10 @@
 import { useState } from 'react'
-import { Briefcase, ChevronUp, ChevronDown, Share2, Pencil, Trash2, ListChecks, Plus } from 'lucide-react'
-import { format } from 'date-fns'
+import { Briefcase, ChevronUp, ChevronDown, ListChecks, Plus } from 'lucide-react'
 import type { Event } from '../types/event'
 import type { ChecklistRow } from '../lib/dbClient/types'
 import { EventList } from './EventList'
-import { EventShareModal } from './EventShareModal'
 import { ChecklistCreateForm } from './ChecklistCreateForm'
 import { deleteContainer, syncTripSharing } from '../services/containerService'
-import { tripSummary } from './tripSummary'
 
 interface TripsSectionProps {
   /** Trip containers (event_kind='container') to list. */
@@ -36,12 +33,16 @@ interface TripsSectionProps {
 }
 
 /**
- * The "Trips" section — a collapsible card listing trip containers. Each trip is
- * a compact card (title, date, actions, summary line) that expands inline via a
- * chevron to reveal its child events and checklists together. Shared verbatim
- * between My Plans (MyFeed) and the starred-group Schedule view (ScheduleOverview)
- * so both render the identical UX. Sharing a trip cascades the new audience onto
- * its children.
+ * The "Trips" section — a collapsible panel listing trip containers. Each trip
+ * renders through the shared {@link EventList}/EventCard, identical to the
+ * Watching panel and every other place an event appears, so a trip looks like
+ * any other event card (badge, date, location, hashtags, action menu) and gets
+ * the built-in "Events (N)" expander for its children. The only trip-specific
+ * additions are wired through callbacks: deleting a trip removes just the
+ * container (children stay), sharing a trip cascades its audience onto its
+ * children, and each trip's checklists render in a footer beneath its card.
+ * Shared verbatim between My Plans (MyFeed) and the starred-group Schedule view
+ * (ScheduleOverview).
  */
 export function TripsSection({
   trips, childrenOf, onEditTrip, onDeleteEvent, onChange,
@@ -49,16 +50,63 @@ export function TripsSection({
   checklistsOf, onOpenChecklist, onCreateChecklist,
 }: TripsSectionProps) {
   const [open, setOpen] = useState(defaultOpen)
-  const [shareTrip, setShareTrip] = useState<Event | null>(null)
   const [createForTrip, setCreateForTrip] = useState<Event | null>(null)
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   if (trips.length === 0) return null
 
-  const handleDeleteTrip = async (trip: Event) => {
+  const tripIds = new Set(trips.map((t) => t.id))
+
+  // EventList delete is shared by trips and their expanded children: a trip
+  // (container) removes just the container; a child is a normal event delete.
+  const handleDelete = async (id: string) => {
+    const trip = trips.find((t) => t.id === id)
+    if (!trip) return onDeleteEvent(id)
     if (!window.confirm(`Delete the trip "${trip.title}"? Its events and to-dos stay — they're just no longer grouped.`)) return
     const { error } = await deleteContainer(trip.id)
     if (error) return
     onChange()
+  }
+
+  // Sharing a trip cascades its new audience onto its children. EventCard hands
+  // back the shared event, so the cascade fires only for the trip — not when a
+  // child event is shared on its own.
+  const handleShareSuccess = (event: Event) => {
+    void (async () => {
+      if (tripIds.has(event.id)) {
+        const childIds = childrenOf(event.id).map((e) => e.id)
+        if (childIds.length) await syncTripSharing(event.id, childIds)
+      }
+      onChange()
+    })()
+  }
+
+  const renderChecklist = (trip: Event) => {
+    if (!checklistsOf && !onCreateChecklist) return null
+    const checklists = checklistsOf?.(trip.id) ?? []
+    return (
+      <div className="mt-1 ml-1 space-y-1">
+        {checklists.map((cl) => {
+          const total = cl.total ?? 0
+          const done = cl.done ?? 0
+          const inner = (
+            <>
+              <ListChecks className="h-3.5 w-3.5 text-indigo-500 shrink-0" aria-hidden />
+              <span className="truncate">{cl.title}</span>
+              <span className="ml-auto text-gray-400 tabular-nums">{done}/{total}</span>
+            </>
+          )
+          return onOpenChecklist ? (
+            <button key={cl.id} type="button" onClick={() => onOpenChecklist(cl.id)} className="flex items-center gap-2 w-full text-left text-xs text-gray-700 rounded px-1.5 py-1 hover:bg-gray-50">{inner}</button>
+          ) : (
+            <div key={cl.id} className="flex items-center gap-2 w-full text-xs text-gray-600 px-1.5 py-1">{inner}</div>
+          )
+        })}
+        {onCreateChecklist && (
+          <button type="button" onClick={() => setCreateForTrip(trip)} className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 px-1.5 py-1">
+            <Plus className="h-3.5 w-3.5" /> Checklist
+          </button>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -79,110 +127,21 @@ export function TripsSection({
         {open ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
       </button>
       {open && (
-        <div className="px-4 pb-4 border-t border-gray-100 pt-3 space-y-4">
-          {trips.map((t) => {
-            const members = childrenOf(t.id)
-            const checklists = checklistsOf?.(t.id) ?? []
-            const isOpen = !!expanded[t.id]
-            const range = t.end_date
-              ? `${format(new Date(t.start_date), 'd MMM')} – ${format(new Date(t.end_date), 'd MMM yyyy')}`
-              : format(new Date(t.start_date), 'd MMM yyyy')
-            return (
-              <div
-                key={t.id}
-                className="bg-gradient-to-br from-white to-indigo-50/40 rounded-lg shadow hover:shadow-md transition-all duration-200 border border-gray-100 border-l-4 border-l-indigo-500 p-3 sm:p-4"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 truncate">{t.title}</p>
-                    <p className="text-xs text-gray-500">{range}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">{tripSummary(members.length, checklists)}</p>
-                  </div>
-                  <div className="flex items-center flex-shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setShareTrip(t)}
-                      className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center text-gray-400 hover:text-indigo-600"
-                      aria-label={`Share trip ${t.title}`}
-                      title="Share this trip"
-                    >
-                      <Share2 className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onEditTrip(t)}
-                      className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center text-gray-400 hover:text-indigo-600"
-                      aria-label={`Edit trip ${t.title}`}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleDeleteTrip(t)}
-                      className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center text-gray-400 hover:text-red-600"
-                      aria-label={`Delete trip ${t.title}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setExpanded((m) => ({ ...m, [t.id]: !m[t.id] }))}
-                      aria-expanded={isOpen}
-                      aria-label={isOpen ? `Collapse trip ${t.title}` : `Expand trip ${t.title}`}
-                      className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center text-gray-400 hover:text-gray-900"
-                    >
-                      {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
-                {isOpen && (
-                  <div className="mt-2 space-y-2">
-                    {members.length === 0 ? (
-                      <p className="text-xs text-gray-500">Nothing in this trip yet. Add events or to-dos to it from the create form.</p>
-                    ) : (
-                      <EventList
-                        events={members}
-                        onEdit={onEditTrip}
-                        onDelete={onDeleteEvent}
-                        onShareSuccess={onChange}
-                        onToggleTodo={onToggleTodo}
-                        onConvertKind={onConvertKind}
-                        onHashtagClick={onHashtagClick}
-                        showActions
-                        showWatchButton={false}
-                        viewMode="compact"
-                      />
-                    )}
-                    {(checklistsOf || onCreateChecklist) && (
-                      <div className="space-y-1">
-                        {checklists.map((cl) => {
-                          const total = cl.total ?? 0
-                          const done = cl.done ?? 0
-                          const inner = (
-                            <>
-                              <ListChecks className="h-3.5 w-3.5 text-indigo-500 shrink-0" aria-hidden />
-                              <span className="truncate">{cl.title}</span>
-                              <span className="ml-auto text-gray-400 tabular-nums">{done}/{total}</span>
-                            </>
-                          )
-                          return onOpenChecklist ? (
-                            <button key={cl.id} type="button" onClick={() => onOpenChecklist(cl.id)} className="flex items-center gap-2 w-full text-left text-xs text-gray-700 rounded px-1.5 py-1 hover:bg-gray-50">{inner}</button>
-                          ) : (
-                            <div key={cl.id} className="flex items-center gap-2 w-full text-xs text-gray-600 px-1.5 py-1">{inner}</div>
-                          )
-                        })}
-                        {onCreateChecklist && (
-                          <button type="button" onClick={() => setCreateForTrip(t)} className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 px-1.5 py-1">
-                            <Plus className="h-3.5 w-3.5" /> Checklist
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })}
+        <div className="px-4 pb-4 border-t border-gray-100 pt-3">
+          <EventList
+            events={trips}
+            childrenOf={childrenOf}
+            onEdit={onEditTrip}
+            onDelete={(id) => void handleDelete(id)}
+            onShareSuccess={handleShareSuccess}
+            onToggleTodo={onToggleTodo}
+            onConvertKind={onConvertKind}
+            onHashtagClick={onHashtagClick}
+            showActions
+            showWatchButton={false}
+            viewMode="compact"
+            renderItemFooter={renderChecklist}
+          />
         </div>
       )}
       {createForTrip && onCreateChecklist && (
@@ -191,25 +150,6 @@ export function TripsSection({
           defaultEventId={createForTrip.id}
           onCreate={onCreateChecklist}
           onClose={() => setCreateForTrip(null)}
-        />
-      )}
-      {shareTrip && (
-        <EventShareModal
-          event={shareTrip}
-          onClose={() => setShareTrip(null)}
-          onSuccess={() => {
-            const trip = shareTrip
-            setShareTrip(null)
-            void (async () => {
-              // Cascade the trip's new sharing onto its children so the whole
-              // trip (band + its events) shows for the same people/groups.
-              if (trip) {
-                const childIds = childrenOf(trip.id).map((e) => e.id)
-                if (childIds.length) await syncTripSharing(trip.id, childIds)
-              }
-              onChange()
-            })()
-          }}
         />
       )}
     </div>

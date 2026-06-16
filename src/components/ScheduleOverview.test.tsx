@@ -600,7 +600,9 @@ describe('pinned trips (starred-group Schedule view)', () => {
     renderPinned([trip()], onEdit)
     const card = screen.getByTestId('trips-section')
     await userEvent.click(within(card).getByRole('button', { name: /trips/i }))
-    await userEvent.click(within(card).getByLabelText('Edit trip Canada Trip'))
+    // The trip now renders through the shared EventCard, so its edit control is
+    // the standard "Edit event" action — same as every other event card.
+    await userEvent.click(within(card).getByRole('button', { name: 'Edit event' }))
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'trip1' }))
   })
 })

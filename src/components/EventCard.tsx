@@ -101,7 +101,7 @@ interface EventCardProps {
   onEdit?: (event: Event) => void
   onClone?: (event: Event) => void
   onDelete?: (eventId: string) => void
-  onShareSuccess?: () => void
+  onShareSuccess?: (event: Event) => void
   onHashtagClick?: (tag: string) => void
   /** Called when the todo checkbox is toggled. */
   onToggleTodo?: (event: Event) => void
@@ -346,7 +346,7 @@ export function EventCard({
         <EventShareModal
           event={event}
           onClose={() => setShowShareModal(false)}
-          onSuccess={() => { setShowShareModal(false); onShareSuccess?.() }}
+          onSuccess={() => { setShowShareModal(false); onShareSuccess?.(event) }}
         />
       )}
       {showInviteModal && (
