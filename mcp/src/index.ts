@@ -21,6 +21,7 @@ import { whisperAvailable, transcribeAudioBytes, extFromContentType } from './tr
 import { parseSourceUrl, normaliseTags, validateName, validateSourceType } from './sources.js'
 import { weekBoundaryStart, isPracticeDueOn, remainingThisPeriod } from './practices.js'
 import { expandAndSuppress, resolveOverride, projectObligation, type AttendanceRow, type AttendanceInstance, type BlackoutWindow, type ObligationRow } from './scheduling.js'
+import { nextPosition, accessibleChecklistSql } from './checklists.js'
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -2602,6 +2603,187 @@ async function getDailyBriefing(args: { date?: string } = {}) {
   })
 }
 
+// ── Checklists ────────────────────────────────────────────────────────────────
+
+async function createChecklist(args: { title: string; event_id?: string | null; items?: string[] }) {
+  const id = await uid()
+  return await withUserContext(id, async (c) => {
+    if (args.event_id) {
+      const { rows: ev } = await c.query(
+        `SELECT 1 FROM plannen.events WHERE id = $1 AND created_by = $2 AND event_kind = 'container'`,
+        [args.event_id, id],
+      )
+      if (ev.length === 0) throw new Error('event_id must be a container you own')
+    }
+    const { rows: cl } = await c.query(
+      `INSERT INTO plannen.checklists (title, event_id, created_by) VALUES ($1,$2,$3) RETURNING *`,
+      [args.title, args.event_id ?? null, id],
+    )
+    const checklist = cl[0]
+    const items = (args.items ?? []).filter((t) => t.trim().length > 0)
+    let createdItems: unknown[] = []
+    if (items.length > 0) {
+      const values = items.map((_, i) => `($1, $${i + 2}, ${i})`).join(', ')
+      const { rows } = await c.query(
+        `INSERT INTO plannen.checklist_items (checklist_id, text, position)
+         VALUES ${values} RETURNING *`,
+        [checklist.id, ...items],
+      )
+      createdItems = rows
+    }
+    return { ...checklist, items: createdItems }
+  })
+}
+
+async function addChecklistItems(args: { checklist_id: string; items: string[] }) {
+  const id = await uid()
+  return await withUserContext(id, async (c) => {
+    const { rows: ok } = await c.query(
+      `SELECT 1 WHERE ${accessibleChecklistSql('$1', '$2')}`,
+      [args.checklist_id, id],
+    )
+    if (ok.length === 0) throw new Error('checklist not found or not shared with you')
+    const { rows: existing } = await c.query(
+      `SELECT position FROM plannen.checklist_items WHERE checklist_id = $1`,
+      [args.checklist_id],
+    )
+    const start = nextPosition(existing as Array<{ position: number }>)
+    const items = args.items.filter((t) => t.trim().length > 0)
+    if (items.length === 0) return []
+    const values = items.map((_, i) => `($1, $${i + 2}, ${start + i})`).join(', ')
+    const { rows } = await c.query(
+      `INSERT INTO plannen.checklist_items (checklist_id, text, position)
+       VALUES ${values} RETURNING *`,
+      [args.checklist_id, ...items],
+    )
+    return rows
+  })
+}
+
+async function listChecklists(args: { event_id?: string | null }) {
+  const id = await uid()
+  return await withUserContext(id, async (c) => {
+    const params: unknown[] = [id]
+    let where = accessibleChecklistSql('cl.id', '$1')
+    if (args.event_id) { params.push(args.event_id); where += ` AND cl.event_id = $${params.length}` }
+    const { rows } = await c.query(
+      `SELECT cl.*,
+              COALESCE(i.total, 0)  AS total,
+              COALESCE(i.done, 0)   AS done
+         FROM plannen.checklists cl
+         LEFT JOIN (
+           SELECT checklist_id,
+                  count(*) AS total,
+                  count(checked_at) AS done
+             FROM plannen.checklist_items GROUP BY checklist_id
+         ) i ON i.checklist_id = cl.id
+        WHERE ${where}
+        ORDER BY cl.created_at DESC`,
+      params,
+    )
+    return rows
+  })
+}
+
+async function getChecklist(args: { checklist_id: string }) {
+  const id = await uid()
+  return await withUserContext(id, async (c) => {
+    const { rows: cl } = await c.query(
+      `SELECT * FROM plannen.checklists cl WHERE cl.id = $1 AND ${accessibleChecklistSql('cl.id', '$2')}`,
+      [args.checklist_id, id],
+    )
+    if (cl.length === 0) throw new Error('checklist not found or not shared with you')
+    const { rows: items } = await c.query(
+      `SELECT * FROM plannen.checklist_items WHERE checklist_id = $1 ORDER BY position ASC, created_at ASC`,
+      [args.checklist_id],
+    )
+    return { ...cl[0], items }
+  })
+}
+
+async function setChecklistItemChecked(itemId: string, checked: boolean) {
+  const id = await uid()
+  return await withUserContext(id, async (c) => {
+    const { rows } = await c.query(
+      `UPDATE plannen.checklist_items it
+          SET checked_at = ${checked ? 'now()' : 'NULL'},
+              checked_by = ${checked ? '$2' : 'NULL'}
+        WHERE it.id = $1
+          AND ${accessibleChecklistSql('it.checklist_id', '$2')}
+        RETURNING *`,
+      [itemId, id],
+    )
+    if (rows.length === 0) throw new Error('item not found or not shared with you')
+    return rows[0]
+  })
+}
+
+async function updateChecklistItem(args: { item_id: string; text: string }) {
+  const id = await uid()
+  return await withUserContext(id, async (c) => {
+    const { rows } = await c.query(
+      `UPDATE plannen.checklist_items it SET text = $3
+        WHERE it.id = $1 AND ${accessibleChecklistSql('it.checklist_id', '$2')}
+        RETURNING *`,
+      [args.item_id, id, args.text],
+    )
+    if (rows.length === 0) throw new Error('item not found or not shared with you')
+    return rows[0]
+  })
+}
+
+async function deleteChecklistItem(itemId: string) {
+  const id = await uid()
+  return await withUserContext(id, async (c) => {
+    const { rows } = await c.query(
+      `DELETE FROM plannen.checklist_items it
+        WHERE it.id = $1 AND ${accessibleChecklistSql('it.checklist_id', '$2')}
+        RETURNING id`,
+      [itemId, id],
+    )
+    if (rows.length === 0) throw new Error('item not found or not shared with you')
+    return { deleted: rows[0].id }
+  })
+}
+
+async function shareChecklist(args: { checklist_id: string; user_ids?: string[]; group_ids?: string[] }) {
+  const id = await uid()
+  return await withUserContext(id, async (c) => {
+    const { rows: own } = await c.query(
+      `SELECT 1 FROM plannen.checklists WHERE id = $1 AND created_by = $2`,
+      [args.checklist_id, id],
+    )
+    if (own.length === 0) throw new Error('only the owner can share a checklist')
+    for (const uid2 of args.user_ids ?? []) {
+      await c.query(
+        `INSERT INTO plannen.checklist_shared_with_users (checklist_id, user_id)
+         VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+        [args.checklist_id, uid2],
+      )
+    }
+    for (const gid of args.group_ids ?? []) {
+      await c.query(
+        `INSERT INTO plannen.checklist_shared_with_groups (checklist_id, group_id)
+         VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+        [args.checklist_id, gid],
+      )
+    }
+    return { shared: true }
+  })
+}
+
+async function deleteChecklist(checklistId: string) {
+  const id = await uid()
+  return await withUserContext(id, async (c) => {
+    const { rows } = await c.query(
+      `DELETE FROM plannen.checklists WHERE id = $1 AND created_by = $2 RETURNING id`,
+      [checklistId, id],
+    )
+    if (rows.length === 0) throw new Error('checklist not found or you are not the owner')
+    return { deleted: rows[0].id }
+  })
+}
+
 // ── Tool registry ─────────────────────────────────────────────────────────────
 
 const TOOLS: Tool[] = [
@@ -3598,6 +3780,106 @@ const TOOLS: Tool[] = [
       },
     },
   },
+  {
+    name: 'create_checklist',
+    description: 'Create a lean checklist (packing/shopping/etc). NOT todos — items never appear in the agenda/briefing/list_events. Optionally pass items to fill it in one shot, and event_id to attach it to a trip container.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        event_id: { type: ['string', 'null'], description: 'Container event id to attach to (optional).' },
+        items: { type: 'array', items: { type: 'string' }, description: 'Initial item texts, in order.' },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'add_checklist_items',
+    description: 'Append items to an existing checklist. Allowed for anyone the list is shared with.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        checklist_id: { type: 'string' },
+        items: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['checklist_id', 'items'],
+    },
+  },
+  {
+    name: 'list_checklists',
+    description: 'List checklists you own or that are shared with you, each with {done,total} progress. Optional event_id filters to one trip.',
+    inputSchema: {
+      type: 'object',
+      properties: { event_id: { type: ['string', 'null'] } },
+    },
+  },
+  {
+    name: 'get_checklist',
+    description: 'Get one checklist with its items (ordered) and each item\'s checked_at/checked_by.',
+    inputSchema: {
+      type: 'object',
+      properties: { checklist_id: { type: 'string' } },
+      required: ['checklist_id'],
+    },
+  },
+  {
+    name: 'check_checklist_item',
+    description: 'Tick a checklist item (stamps checked_at + checked_by = you).',
+    inputSchema: {
+      type: 'object',
+      properties: { item_id: { type: 'string' } },
+      required: ['item_id'],
+    },
+  },
+  {
+    name: 'uncheck_checklist_item',
+    description: 'Untick a checklist item (clears checked_at + checked_by).',
+    inputSchema: {
+      type: 'object',
+      properties: { item_id: { type: 'string' } },
+      required: ['item_id'],
+    },
+  },
+  {
+    name: 'update_checklist_item',
+    description: 'Edit a checklist item\'s text.',
+    inputSchema: {
+      type: 'object',
+      properties: { item_id: { type: 'string' }, text: { type: 'string' } },
+      required: ['item_id', 'text'],
+    },
+  },
+  {
+    name: 'delete_checklist_item',
+    description: 'Delete a single checklist item.',
+    inputSchema: {
+      type: 'object',
+      properties: { item_id: { type: 'string' } },
+      required: ['item_id'],
+    },
+  },
+  {
+    name: 'share_checklist',
+    description: 'Share a checklist with users and/or friend groups (owner only). Empty arrays are a no-op, never a clear.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        checklist_id: { type: 'string' },
+        user_ids: { type: 'array', items: { type: 'string' } },
+        group_ids: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['checklist_id'],
+    },
+  },
+  {
+    name: 'delete_checklist',
+    description: 'Delete a checklist and all its items (owner only).',
+    inputSchema: {
+      type: 'object',
+      properties: { checklist_id: { type: 'string' } },
+      required: ['checklist_id'],
+    },
+  },
 ]
 
 // ── Server ────────────────────────────────────────────────────────────────────
@@ -3887,6 +4169,16 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
           return { content: [{ type: 'text', text: JSON.stringify(rows[0]) }] }
         })
       }
+      case 'create_checklist':        result = await createChecklist(args as Parameters<typeof createChecklist>[0]); break
+      case 'add_checklist_items':     result = await addChecklistItems(args as Parameters<typeof addChecklistItems>[0]); break
+      case 'list_checklists':         result = await listChecklists(args as Parameters<typeof listChecklists>[0]); break
+      case 'get_checklist':           result = await getChecklist(args as Parameters<typeof getChecklist>[0]); break
+      case 'check_checklist_item':    result = await setChecklistItemChecked((args as { item_id: string }).item_id, true); break
+      case 'uncheck_checklist_item':  result = await setChecklistItemChecked((args as { item_id: string }).item_id, false); break
+      case 'update_checklist_item':   result = await updateChecklistItem(args as Parameters<typeof updateChecklistItem>[0]); break
+      case 'delete_checklist_item':   result = await deleteChecklistItem((args as { item_id: string }).item_id); break
+      case 'share_checklist':         result = await shareChecklist(args as Parameters<typeof shareChecklist>[0]); break
+      case 'delete_checklist':        result = await deleteChecklist((args as { checklist_id: string }).checklist_id); break
       default: throw new Error(`Unknown tool: ${name}`)
     }
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
