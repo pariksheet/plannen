@@ -255,6 +255,7 @@ export const tier0: DbClient = {
     list: (p) => api<ChecklistRow[]>(`/api/checklists${qs({ event_id: p?.event_id ?? undefined })}`),
     get: (id) => api<ChecklistRow>(`/api/checklists/${id}`),
     create: (i) => api<ChecklistRow>('/api/checklists', { method: 'POST', body: JSON.stringify(i) }),
+    update: (id, patch) => api<ChecklistRow>(`/api/checklists/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     delete: async (id) => { await api(`/api/checklists/${id}`, { method: 'DELETE' }) },
     addItems: (id, items) => api<ChecklistItemRow[]>(`/api/checklists/${id}/items`, { method: 'POST', body: JSON.stringify({ items }) }),
     setItemChecked: (itemId, checked) => api<ChecklistItemRow>(`/api/checklists/items/${itemId}/checked`, { method: 'PATCH', body: JSON.stringify({ checked }) }),

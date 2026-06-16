@@ -764,6 +764,7 @@ export const tier1: DbClient = {
         : []
       return cl
     },
+    update: async (id, patch) => unwrap(await supabase.from('checklists').update({ title: patch.title }).eq('id', id).select().single()) as ChecklistRow,
     delete: async (id) => { const { error } = await supabase.from('checklists').delete().eq('id', id); if (error) throw new Error(error.message) },
     addItems: async (id, items) => {
       const userId = await currentUserId()

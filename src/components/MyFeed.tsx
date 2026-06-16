@@ -460,6 +460,7 @@ export function MyFeed() {
         checklistsOf={(id) => tripChecklists.filter((c) => c.event_id === id)}
         onOpenChecklist={setOpenChecklistId}
         onCreateChecklist={createTripChecklist}
+        onChecklistsChange={() => void reloadChecklists()}
       />
 
       {viewMode !== 'schedule' && (<>

@@ -24,6 +24,7 @@ export const createChecklist = async (input: { title: string; event_id?: string 
   await Promise.all(toCheck.map((row) => dbClient.checklists.setItemChecked(row.id, true)))
   return dbClient.checklists.get(cl.id)
 }
+export const renameChecklist = (id: string, title: string): Promise<ChecklistRow> => dbClient.checklists.update(id, { title })
 export const deleteChecklist = (id: string): Promise<void> => dbClient.checklists.delete(id)
 export const addChecklistItems = (id: string, items: string[]): Promise<ChecklistItemRow[]> => dbClient.checklists.addItems(id, items)
 export const setChecklistItemChecked = (itemId: string, checked: boolean): Promise<ChecklistItemRow> => dbClient.checklists.setItemChecked(itemId, checked)

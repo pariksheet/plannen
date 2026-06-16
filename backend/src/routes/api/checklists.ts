@@ -15,6 +15,7 @@ function accessibleSql(idCol: string, userParam: string): string {
 }
 
 const CreateInput = z.object({ title: z.string().min(1), event_id: z.string().uuid().nullish(), items: z.array(z.string()).optional() })
+const UpdateInput = z.object({ title: z.string().min(1) })
 const ItemsInput = z.object({ items: z.array(z.string()) })
 const CheckedInput = z.object({ checked: z.boolean() })
 const TextInput = z.object({ text: z.string().min(1) })
@@ -137,6 +138,21 @@ checklists.post('/', async (c) => {
       ).rows
     }
     return c.json({ data: { ...cl[0], items } }, 201)
+  })
+})
+
+checklists.patch('/:id', async (c) => {
+  const userId = c.var.userId
+  const id = c.req.param('id')
+  const parsed = UpdateInput.safeParse(await c.req.json())
+  if (!parsed.success) throw new HttpError(400, 'VALIDATION', 'title required')
+  return await withUserContext(userId, async (db) => {
+    const { rows } = await db.query(
+      `UPDATE plannen.checklists SET title = $3, updated_at = now() WHERE id = $1 AND created_by = $2 RETURNING *`,
+      [id, userId, parsed.data.title],
+    )
+    if (rows.length === 0) throw new HttpError(404, 'NOT_FOUND', 'checklist not found')
+    return c.json({ data: rows[0] })
   })
 })
 

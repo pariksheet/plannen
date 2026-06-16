@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Briefcase, ChevronUp, ChevronDown, ListChecks, Plus } from 'lucide-react'
+import { Briefcase, ChevronUp, ChevronDown, ListChecks, Plus, Share2, Pencil, Trash2, Check, X } from 'lucide-react'
 import type { Event } from '../types/event'
 import type { ChecklistRow } from '../lib/dbClient/types'
-import type { NewChecklistItem } from '../services/checklistService'
+import { renameChecklist, deleteChecklist, type NewChecklistItem } from '../services/checklistService'
 import { EventList } from './EventList'
 import { ChecklistCreateForm } from './ChecklistCreateForm'
+import { ChecklistShareModal } from './ChecklistShareModal'
 import { deleteContainer, syncTripSharing } from '../services/containerService'
 
 interface TripsSectionProps {
@@ -31,6 +32,8 @@ interface TripsSectionProps {
   /** Create a checklist (parent owns the data + reload). When given, each trip
    *  shows a "+ Checklist" button that opens the create form pre-attached. */
   onCreateChecklist?: (input: { title: string; event_id: string | null; items: NewChecklistItem[] }) => Promise<void> | void
+  /** Reload the checklist data after a rename/delete/share. Defaults to onChange. */
+  onChecklistsChange?: () => void
 }
 
 /**
@@ -48,13 +51,28 @@ interface TripsSectionProps {
 export function TripsSection({
   trips, childrenOf, onEditTrip, onDeleteEvent, onChange,
   onToggleTodo, onConvertKind, onHashtagClick, defaultOpen = false,
-  checklistsOf, onOpenChecklist, onCreateChecklist,
+  checklistsOf, onOpenChecklist, onCreateChecklist, onChecklistsChange,
 }: TripsSectionProps) {
   const [open, setOpen] = useState(defaultOpen)
   const [createForTrip, setCreateForTrip] = useState<Event | null>(null)
+  const [shareChecklistRow, setShareChecklistRow] = useState<ChecklistRow | null>(null)
+  const [renameId, setRenameId] = useState<string | null>(null)
+  const [renameText, setRenameText] = useState('')
   if (trips.length === 0) return null
 
   const tripIds = new Set(trips.map((t) => t.id))
+  const reloadChecklists = onChecklistsChange ?? onChange
+
+  const saveRename = async () => {
+    const id = renameId, title = renameText.trim()
+    setRenameId(null)
+    if (id && title) { await renameChecklist(id, title); reloadChecklists() }
+  }
+  const handleDeleteChecklist = async (cl: ChecklistRow) => {
+    if (!window.confirm(`Delete the checklist "${cl.title}"? This can't be undone.`)) return
+    await deleteChecklist(cl.id)
+    reloadChecklists()
+  }
 
   // EventList delete is shared by trips and their expanded children: a trip
   // (container) removes just the container; a child is a normal event delete.
@@ -88,6 +106,21 @@ export function TripsSection({
         {checklists.map((cl) => {
           const total = cl.total ?? 0
           const done = cl.done ?? 0
+          if (renameId === cl.id) {
+            return (
+              <div key={cl.id} className="flex items-center gap-1 text-xs">
+                <input
+                  autoFocus
+                  value={renameText}
+                  onChange={(e) => setRenameText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void saveRename(); if (e.key === 'Escape') setRenameId(null) }}
+                  className="flex-1 min-w-0 border border-gray-200 rounded px-1.5 py-1 text-xs"
+                />
+                <button type="button" onClick={() => void saveRename()} aria-label="Save name" className="p-1.5 text-gray-400 hover:text-green-600"><Check className="h-3.5 w-3.5" /></button>
+                <button type="button" onClick={() => setRenameId(null)} aria-label="Cancel rename" className="p-1.5 text-gray-400 hover:text-gray-700"><X className="h-3.5 w-3.5" /></button>
+              </div>
+            )
+          }
           const inner = (
             <>
               <ListChecks className="h-3.5 w-3.5 text-indigo-500 shrink-0" aria-hidden />
@@ -95,10 +128,19 @@ export function TripsSection({
               <span className="ml-auto text-gray-400 tabular-nums">{done}/{total}</span>
             </>
           )
-          return onOpenChecklist ? (
-            <button key={cl.id} type="button" onClick={() => onOpenChecklist(cl.id)} className="flex items-center gap-2 w-full text-left text-xs text-gray-700 rounded px-1.5 py-1 hover:bg-gray-50">{inner}</button>
-          ) : (
-            <div key={cl.id} className="flex items-center gap-2 w-full text-xs text-gray-600 px-1.5 py-1">{inner}</div>
+          return (
+            <div key={cl.id} className="flex items-center gap-1 text-xs">
+              {onOpenChecklist ? (
+                <button type="button" onClick={() => onOpenChecklist(cl.id)} className="flex items-center gap-2 flex-1 min-w-0 text-left text-gray-700 rounded px-1.5 py-1 hover:bg-gray-50">{inner}</button>
+              ) : (
+                <div className="flex items-center gap-2 flex-1 min-w-0 text-gray-600 px-1.5 py-1">{inner}</div>
+              )}
+              <div className="flex items-center flex-shrink-0">
+                <button type="button" onClick={() => setShareChecklistRow(cl)} aria-label={`Share checklist ${cl.title}`} title="Share" className="p-1.5 text-gray-400 hover:text-indigo-600"><Share2 className="h-3.5 w-3.5" /></button>
+                <button type="button" onClick={() => { setRenameId(cl.id); setRenameText(cl.title) }} aria-label={`Rename checklist ${cl.title}`} title="Rename" className="p-1.5 text-gray-400 hover:text-indigo-600"><Pencil className="h-3.5 w-3.5" /></button>
+                <button type="button" onClick={() => void handleDeleteChecklist(cl)} aria-label={`Delete checklist ${cl.title}`} title="Delete" className="p-1.5 text-gray-400 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
+              </div>
+            </div>
           )
         })}
         {onCreateChecklist && (
@@ -151,6 +193,14 @@ export function TripsSection({
           defaultEventId={createForTrip.id}
           onCreate={onCreateChecklist}
           onClose={() => setCreateForTrip(null)}
+        />
+      )}
+      {shareChecklistRow && (
+        <ChecklistShareModal
+          checklistId={shareChecklistRow.id}
+          title={shareChecklistRow.title}
+          onClose={() => setShareChecklistRow(null)}
+          onShared={reloadChecklists}
         />
       )}
     </div>
