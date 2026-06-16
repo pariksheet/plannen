@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-06-16
+
+### Cloud-mode install fix
+
+- **`npx plannen init --mode=cloud_sb` no longer crashes at the dev-server step.** When the Tier 2 setup flow offered to start `npm run dev`, it failed with an internal `ReferenceError` because the per-profile environment wasn't passed through to that step. The dev server now launches with the correct profile env.
+
 ## [0.7.1] - 2026-06-16
 
 ### Starred group gets the full view switcher
