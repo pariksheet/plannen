@@ -115,10 +115,10 @@ checklists.post('/', async (c) => {
   return await withUserContext(userId, async (db) => {
     if (p.event_id) {
       const { rows: ev } = await db.query(
-        `SELECT 1 FROM plannen.events WHERE id = $1 AND created_by = $2 AND event_kind = 'container'`,
+        `SELECT 1 FROM plannen.events WHERE id = $1 AND created_by = $2`,
         [p.event_id, userId],
       )
-      if (ev.length === 0) throw new HttpError(400, 'VALIDATION', 'event_id must be a container you own')
+      if (ev.length === 0) throw new HttpError(400, 'VALIDATION', 'event_id must be an event you own')
     }
     const { rows: cl } = await db.query(
       `INSERT INTO plannen.checklists (title, event_id, created_by) VALUES ($1,$2,$3) RETURNING *`,

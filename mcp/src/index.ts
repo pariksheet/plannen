@@ -2610,10 +2610,10 @@ async function createChecklist(args: { title: string; event_id?: string | null; 
   return await withUserContext(id, async (c) => {
     if (args.event_id) {
       const { rows: ev } = await c.query(
-        `SELECT 1 FROM plannen.events WHERE id = $1 AND created_by = $2 AND event_kind = 'container'`,
+        `SELECT 1 FROM plannen.events WHERE id = $1 AND created_by = $2`,
         [args.event_id, id],
       )
-      if (ev.length === 0) throw new Error('event_id must be a container you own')
+      if (ev.length === 0) throw new Error('event_id must be an event you own')
     }
     const { rows: cl } = await c.query(
       `INSERT INTO plannen.checklists (title, event_id, created_by) VALUES ($1,$2,$3) RETURNING *`,
@@ -3782,7 +3782,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'create_checklist',
-    description: 'Create a lean checklist (packing/shopping/etc). NOT todos — items never appear in the agenda/briefing/list_events. Optionally pass items to fill it in one shot, and event_id to attach it to a trip container.',
+    description: 'Create a lean checklist (packing/shopping/etc). NOT todos — items never appear in the agenda/briefing/list_events. Optionally pass items to fill it in one shot, and event_id to attach it to any event (e.g. a trip).',
     inputSchema: {
       type: 'object',
       properties: {

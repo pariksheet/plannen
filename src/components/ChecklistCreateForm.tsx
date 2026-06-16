@@ -1,25 +1,34 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Modal } from './Modal'
-import type { Trip } from '../services/containerService'
+import type { Event } from '../types/event'
 
 interface Props {
-  trips: Trip[]
+  /** Events the checklist can attach to (any event the user owns). */
+  events: Event[]
   onCreate: (input: { title: string; event_id: string | null; items: string[] }) => Promise<void> | void
   onClose: () => void
-  /** Pre-select a trip (e.g. when launched from a trip). */
+  /** Pre-select an event (e.g. when launched from that event's detail). */
   defaultEventId?: string | null
 }
 
 /**
- * Create a checklist — title, an optional trip to attach it to, and optional
- * starter items (one per line). Picking a trip sets the checklist's event_id so
- * it belongs to that trip container.
+ * Create a checklist — title, an optional event to attach it to (searchable
+ * over all your events), and optional starter items (one per line). Picking an
+ * event sets the checklist's event_id so it belongs to that event.
  */
-export function ChecklistCreateForm({ trips, onCreate, onClose, defaultEventId = null }: Props) {
+export function ChecklistCreateForm({ events, onCreate, onClose, defaultEventId = null }: Props) {
   const [title, setTitle] = useState('')
   const [eventId, setEventId] = useState<string | null>(defaultEventId)
+  const [query, setQuery] = useState('')
   const [itemsText, setItemsText] = useState('')
   const [busy, setBusy] = useState(false)
+
+  const selected = events.find((e) => e.id === eventId) ?? null
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const matches = q ? events.filter((e) => e.title.toLowerCase().includes(q)) : events
+    return matches.slice(0, 30)
+  }, [events, query])
 
   const submit = async () => {
     const t = title.trim()
@@ -32,6 +41,11 @@ export function ChecklistCreateForm({ trips, onCreate, onClose, defaultEventId =
     } finally {
       setBusy(false)
     }
+  }
+
+  const fmtDate = (iso: string) => {
+    const d = new Date(iso)
+    return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
   }
 
   return (
@@ -48,17 +62,42 @@ export function ChecklistCreateForm({ trips, onCreate, onClose, defaultEventId =
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Attach to trip (optional)</label>
-          <select
-            value={eventId ?? ''}
-            onChange={(e) => setEventId(e.target.value || null)}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"
-          >
-            <option value="">— None (standalone) —</option>
-            {trips.map((t) => (
-              <option key={t.id} value={t.id}>{t.title}</option>
-            ))}
-          </select>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Attach to event (optional)</label>
+          {selected ? (
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center text-sm bg-violet-50 text-violet-700 border border-violet-100 rounded-lg px-2 py-1 max-w-full truncate" title={selected.title}>
+                {selected.title}
+              </span>
+              <button type="button" onClick={() => { setEventId(null); setQuery('') }} className="text-xs text-gray-500 hover:text-gray-700">Clear</button>
+            </div>
+          ) : (
+            <div>
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search your events…"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+              />
+              {query.trim() && (
+                <ul className="mt-1 max-h-44 overflow-y-auto border border-gray-100 rounded-lg divide-y divide-gray-50">
+                  {filtered.length === 0 ? (
+                    <li className="px-3 py-2 text-xs text-gray-400">No matching events</li>
+                  ) : filtered.map((e) => (
+                    <li key={e.id}>
+                      <button
+                        type="button"
+                        onClick={() => { setEventId(e.id); setQuery('') }}
+                        className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                      >
+                        <span className="truncate">{e.title}</span>
+                        <span className="ml-auto text-xs text-gray-400 whitespace-nowrap">{fmtDate(e.start_date)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Items (optional, one per line)</label>

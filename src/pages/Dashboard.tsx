@@ -14,7 +14,8 @@ import { ChecklistList } from '../components/ChecklistList'
 import { ChecklistDetail } from '../components/ChecklistDetail'
 import { ChecklistCreateForm } from '../components/ChecklistCreateForm'
 import { useChecklists } from '../hooks/useChecklists'
-import { listContainers, type Trip } from '../services/containerService'
+import { getUserEvents } from '../services/eventService'
+import type { Event } from '../types/event'
 import { isTierZero } from '../lib/tier'
 import { X } from 'lucide-react'
 
@@ -24,15 +25,15 @@ function ChecklistsView() {
   const { checklists, create, remove } = useChecklists()
   const [openId, setOpenId] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
-  const [trips, setTrips] = useState<Trip[]>([])
+  const [events, setEvents] = useState<Event[]>([])
   useEffect(() => {
     let cancelled = false
-    void listContainers().then(({ data }) => { if (!cancelled) setTrips(data) })
+    void getUserEvents('').then(({ data }) => { if (!cancelled && data) setEvents(data) })
     return () => { cancelled = true }
   }, [])
-  const tripTitleById = useMemo(
-    () => Object.fromEntries(trips.map((t) => [t.id, t.title])),
-    [trips],
+  const eventTitleById = useMemo(
+    () => Object.fromEntries(events.map((e) => [e.id, e.title])),
+    [events],
   )
   if (openId) return <ChecklistDetail id={openId} onBack={() => setOpenId(null)} />
   return (
@@ -40,10 +41,10 @@ function ChecklistsView() {
       <div className="max-w-2xl mx-auto flex justify-end">
         <button type="button" onClick={() => setShowForm(true)} className="bg-indigo-600 text-white rounded-lg px-3 py-2 text-sm">New checklist</button>
       </div>
-      <ChecklistList checklists={checklists} tripTitleById={tripTitleById} onOpen={setOpenId} onDelete={(id) => void remove(id)} />
+      <ChecklistList checklists={checklists} eventTitleById={eventTitleById} onOpen={setOpenId} onDelete={(id) => void remove(id)} />
       {showForm && (
         <ChecklistCreateForm
-          trips={trips}
+          events={events}
           onCreate={(input) => create(input)}
           onClose={() => setShowForm(false)}
         />

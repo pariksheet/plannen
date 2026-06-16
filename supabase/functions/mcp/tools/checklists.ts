@@ -17,7 +17,7 @@ function accessibleChecklistSql(idCol: string, userParam: string): string {
 const definitions: ToolDefinition[] = [
   {
     name: 'create_checklist',
-    description: 'Create a lean checklist (packing/shopping/etc). NOT todos — items never appear in the agenda/briefing/list_events. Optionally pass items to fill it in one shot, and event_id to attach it to a trip container.',
+    description: 'Create a lean checklist (packing/shopping/etc). NOT todos — items never appear in the agenda/briefing/list_events. Optionally pass items to fill it in one shot, and event_id to attach it to any event (e.g. a trip).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -121,10 +121,10 @@ const createChecklist: ToolHandler = async (args, ctx) => {
   const a = args as { title: string; event_id?: string | null; items?: string[] }
   if (a.event_id) {
     const { rows: ev } = await ctx.client.query(
-      `SELECT 1 FROM plannen.events WHERE id = $1 AND created_by = $2 AND event_kind = 'container'`,
+      `SELECT 1 FROM plannen.events WHERE id = $1 AND created_by = $2`,
       [a.event_id, ctx.userId],
     )
-    if (ev.length === 0) throw new Error('event_id must be a container you own')
+    if (ev.length === 0) throw new Error('event_id must be an event you own')
   }
   const { rows: cl } = await ctx.client.query(
     `INSERT INTO plannen.checklists (title, event_id, created_by) VALUES ($1,$2,$3) RETURNING *`,
