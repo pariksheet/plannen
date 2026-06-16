@@ -7,6 +7,7 @@ import { EventList } from './EventList'
 import { EventShareModal } from './EventShareModal'
 import { ChecklistCreateForm } from './ChecklistCreateForm'
 import { deleteContainer, syncTripSharing } from '../services/containerService'
+import { tripSummary } from './tripSummary'
 
 interface TripsSectionProps {
   /** Trip containers (event_kind='container') to list. */
@@ -35,11 +36,12 @@ interface TripsSectionProps {
 }
 
 /**
- * The "Trips" section — a collapsible card listing trip containers, each with
- * share / edit / delete and an expandable list of its child events/todos. Shared
- * verbatim between My Plans (MyFeed) and the starred-group Schedule view
- * (ScheduleOverview) so both render the identical UX. Sharing a trip cascades
- * the new audience onto its children.
+ * The "Trips" section — a collapsible card listing trip containers. Each trip is
+ * a compact card (title, date, actions, summary line) that expands inline via a
+ * chevron to reveal its child events and checklists together. Shared verbatim
+ * between My Plans (MyFeed) and the starred-group Schedule view (ScheduleOverview)
+ * so both render the identical UX. Sharing a trip cascades the new audience onto
+ * its children.
  */
 export function TripsSection({
   trips, childrenOf, onEditTrip, onDeleteEvent, onChange,
@@ -49,7 +51,7 @@ export function TripsSection({
   const [open, setOpen] = useState(defaultOpen)
   const [shareTrip, setShareTrip] = useState<Event | null>(null)
   const [createForTrip, setCreateForTrip] = useState<Event | null>(null)
-  const [openEvents, setOpenEvents] = useState<Record<string, boolean>>({})
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   if (trips.length === 0) return null
 
   const handleDeleteTrip = async (trip: Event) => {
@@ -80,6 +82,8 @@ export function TripsSection({
         <div className="px-4 pb-4 border-t border-gray-100 pt-3 space-y-4">
           {trips.map((t) => {
             const members = childrenOf(t.id)
+            const checklists = checklistsOf?.(t.id) ?? []
+            const isOpen = !!expanded[t.id]
             const range = t.end_date
               ? `${format(new Date(t.start_date), 'd MMM')} – ${format(new Date(t.end_date), 'd MMM yyyy')}`
               : format(new Date(t.start_date), 'd MMM yyyy')
@@ -89,6 +93,7 @@ export function TripsSection({
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-gray-900 truncate">{t.title}</p>
                     <p className="text-xs text-gray-500">{range}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{tripSummary(members.length, checklists)}</p>
                   </div>
                   <div className="flex items-center flex-shrink-0">
                     <button
@@ -116,22 +121,22 @@ export function TripsSection({
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
-                  </div>
-                </div>
-                {members.length === 0 ? (
-                  <p className="text-xs text-gray-500 mt-1">Nothing in this trip yet. Add events or to-dos to it from the create form.</p>
-                ) : (
-                  <div className="mt-1">
                     <button
                       type="button"
-                      onClick={() => setOpenEvents((m) => ({ ...m, [t.id]: !m[t.id] }))}
-                      aria-expanded={!!openEvents[t.id]}
-                      className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 hover:text-gray-900 px-1.5 py-1"
+                      onClick={() => setExpanded((m) => ({ ...m, [t.id]: !m[t.id] }))}
+                      aria-expanded={isOpen}
+                      aria-label={isOpen ? `Collapse trip ${t.title}` : `Expand trip ${t.title}`}
+                      className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center text-gray-400 hover:text-gray-900"
                     >
-                      Events ({members.length})
-                      {openEvents[t.id] ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                      {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                     </button>
-                    {openEvents[t.id] && (
+                  </div>
+                </div>
+                {isOpen && (
+                  <div className="mt-2 space-y-2">
+                    {members.length === 0 ? (
+                      <p className="text-xs text-gray-500">Nothing in this trip yet. Add events or to-dos to it from the create form.</p>
+                    ) : (
                       <EventList
                         events={members}
                         onEdit={onEditTrip}
@@ -145,30 +150,30 @@ export function TripsSection({
                         viewMode="compact"
                       />
                     )}
-                  </div>
-                )}
-                {(checklistsOf || onCreateChecklist) && (
-                  <div className="mt-2 space-y-1">
-                    {(checklistsOf?.(t.id) ?? []).map((cl) => {
-                      const total = cl.total ?? 0
-                      const done = cl.done ?? 0
-                      const inner = (
-                        <>
-                          <ListChecks className="h-3.5 w-3.5 text-indigo-500 shrink-0" aria-hidden />
-                          <span className="truncate">{cl.title}</span>
-                          <span className="ml-auto text-gray-400 tabular-nums">{done}/{total}</span>
-                        </>
-                      )
-                      return onOpenChecklist ? (
-                        <button key={cl.id} type="button" onClick={() => onOpenChecklist(cl.id)} className="flex items-center gap-2 w-full text-left text-xs text-gray-700 rounded px-1.5 py-1 hover:bg-gray-50">{inner}</button>
-                      ) : (
-                        <div key={cl.id} className="flex items-center gap-2 w-full text-xs text-gray-600 px-1.5 py-1">{inner}</div>
-                      )
-                    })}
-                    {onCreateChecklist && (
-                      <button type="button" onClick={() => setCreateForTrip(t)} className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 px-1.5 py-1">
-                        <Plus className="h-3.5 w-3.5" /> Checklist
-                      </button>
+                    {(checklistsOf || onCreateChecklist) && (
+                      <div className="space-y-1">
+                        {checklists.map((cl) => {
+                          const total = cl.total ?? 0
+                          const done = cl.done ?? 0
+                          const inner = (
+                            <>
+                              <ListChecks className="h-3.5 w-3.5 text-indigo-500 shrink-0" aria-hidden />
+                              <span className="truncate">{cl.title}</span>
+                              <span className="ml-auto text-gray-400 tabular-nums">{done}/{total}</span>
+                            </>
+                          )
+                          return onOpenChecklist ? (
+                            <button key={cl.id} type="button" onClick={() => onOpenChecklist(cl.id)} className="flex items-center gap-2 w-full text-left text-xs text-gray-700 rounded px-1.5 py-1 hover:bg-gray-50">{inner}</button>
+                          ) : (
+                            <div key={cl.id} className="flex items-center gap-2 w-full text-xs text-gray-600 px-1.5 py-1">{inner}</div>
+                          )
+                        })}
+                        {onCreateChecklist && (
+                          <button type="button" onClick={() => setCreateForTrip(t)} className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 px-1.5 py-1">
+                            <Plus className="h-3.5 w-3.5" /> Checklist
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
