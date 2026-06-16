@@ -751,6 +751,13 @@ export const tier1: DbClient = {
     },
     create: async (input) => {
       const userId = await currentUserId()
+      // Mirror the MCP/backend guard: an attached event must be a container the
+      // caller owns. RLS already scopes the row to the user; we additionally
+      // require event_kind='container' so a checklist can't attach to a plain event.
+      if (input.event_id) {
+        const { data: ev } = await supabase.from('events').select('id').eq('id', input.event_id).eq('created_by', userId).eq('event_kind', 'container').maybeSingle()
+        if (!ev) throw new Error('event_id must be a container you own')
+      }
       const cl = unwrap(await supabase.from('checklists').insert({ title: input.title, event_id: input.event_id ?? null, created_by: userId }).select().single()) as ChecklistRow
       const texts = (input.items ?? []).filter((t) => t.trim().length > 0)
       cl.items = texts.length
