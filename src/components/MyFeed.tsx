@@ -14,13 +14,14 @@ import { ScheduleOverview } from './ScheduleOverview'
 import { projectScheduleForDay } from '../services/schedulingService'
 import { dbClient } from '../lib/dbClient'
 import type { AttendanceInstanceRow, ResolvedObligationRow } from '../lib/dbClient/types'
-import { ConfirmModal, PromptModal } from './Modal'
-import { Plus, ChevronUp, ChevronDown, Calendar, X, Eye, Briefcase, Pencil, Trash2, Share2 } from 'lucide-react'
-import { format } from 'date-fns'
+import { Modal, ConfirmModal, PromptModal } from './Modal'
+import { ChecklistDetail } from './ChecklistDetail'
+import { useChecklists } from '../hooks/useChecklists'
+import { Plus, ChevronUp, ChevronDown, Calendar, X, Eye } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { deleteEvent, completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
-import { deleteContainer, syncTripSharing } from '../services/containerService'
+import { TripsSection } from './TripsSection'
 import { supabase } from '../lib/supabase'
 
 // Identifies events auto-created by the mailbox-sync routine.
@@ -65,13 +66,14 @@ export function MyFeed() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingEvent, setEditingEvent] = useState<Event | undefined>()
+  const [openChecklistId, setOpenChecklistId] = useState<string | null>(null)
+  const { checklists: tripChecklists, reload: reloadChecklists, create: createTripChecklist } = useChecklists()
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [muteSenderPrompt, setMuteSenderPrompt] = useState<{ eventId: string; senderHint: string } | null>(null)
   const [feedError, setFeedError] = useState<string | null>(null)
   const [preferredVisitDates, setPreferredVisitDates] = useState<Record<string, string | null>>({})
   const [watchQueue, setWatchQueue] = useState<Event[]>([])
   const [showWatchQueue, setShowWatchQueue] = useState(false)
-  const [showTrips, setShowTrips] = useState(false)
   const [attendancesToday, setAttendancesToday] = useState<AttendanceInstanceRow[]>([])
   const [obligationsToday, setObligationsToday] = useState<ResolvedObligationRow[]>([])
   const [subjectNames, setSubjectNames] = useState<Record<string, string>>({})
@@ -241,25 +243,6 @@ export function MyFeed() {
   const handleEdit = (event: Event) => {
     setEditingEvent(event)
     setShowForm(true)
-  }
-
-  const handleDeleteTrip = async (trip: Event) => {
-    if (!window.confirm(`Delete the trip "${trip.title}"? Its events and to-dos stay — they're just no longer grouped.`)) return
-    setFeedError(null)
-    const { error } = await deleteContainer(trip.id)
-    if (error) { setFeedError(error.message); return }
-    loadEvents()
-  }
-
-  const handleSyncTrip = async (trip: Event) => {
-    const ids = events.filter((e) => e.group_id === trip.id).map((e) => e.id)
-    if (ids.length === 0) return
-    if (!window.confirm(`Share all ${ids.length} item${ids.length === 1 ? '' : 's'} in "${trip.title}" with the same people as the trip?`)) return
-    setFeedError(null)
-    const { error } = await syncTripSharing(trip.id, ids)
-    if (error) { setFeedError(error.message); return }
-    showToast(`Shared ${ids.length} item${ids.length === 1 ? '' : 's'} like the trip`)
-    loadEvents()
   }
 
   const handleDeleteClick = (eventId: string) => {
@@ -465,90 +448,20 @@ export function MyFeed() {
         </div>
       )}
 
-      {trips.length > 0 && (
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setShowTrips((v) => !v)}
-            className="w-full flex items-center justify-between px-4 py-3 text-left"
-            aria-expanded={showTrips}
-          >
-            <span className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900">
-              <Briefcase className="h-4 w-4 text-indigo-500" />
-              Trips
-              <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-semibold">
-                {trips.length}
-              </span>
-            </span>
-            {showTrips ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
-          </button>
-          {showTrips && (
-            <div className="px-4 pb-4 border-t border-gray-100 pt-3 space-y-4">
-              {trips.map((t) => {
-                const members = tripMembers(t.id)
-                const range = t.end_date
-                  ? `${format(new Date(t.start_date), 'd MMM')} – ${format(new Date(t.end_date), 'd MMM yyyy')}`
-                  : format(new Date(t.start_date), 'd MMM yyyy')
-                return (
-                  <div key={t.id}>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-gray-900 truncate">{t.title}</p>
-                        <p className="text-xs text-gray-500">{range}</p>
-                      </div>
-                      <div className="flex items-center flex-shrink-0">
-                        {members.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => handleSyncTrip(t)}
-                            className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center text-gray-400 hover:text-indigo-600"
-                            aria-label={`Share items in ${t.title} like the trip`}
-                            title="Share everything in this trip with the same people as the trip"
-                          >
-                            <Share2 className="h-4 w-4" />
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleEdit(t)}
-                          className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center text-gray-400 hover:text-indigo-600"
-                          aria-label={`Edit trip ${t.title}`}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteTrip(t)}
-                          className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center text-gray-400 hover:text-red-600"
-                          aria-label={`Delete trip ${t.title}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                    {members.length === 0 ? (
-                      <p className="text-xs text-gray-500 mt-1">Nothing in this trip yet. Add events or to-dos to it from the create form.</p>
-                    ) : (
-                      <EventList
-                        events={members}
-                        onEdit={handleEdit}
-                        onDelete={handleDeleteClick}
-                        onShareSuccess={loadEvents}
-                        onToggleTodo={handleToggleTodo}
-                        onConvertKind={handleConvertKind}
-                        onHashtagClick={(tag) => { setActiveHashtag(tag); setShowPast(true) }}
-                        showActions
-                        showWatchButton={false}
-                        viewMode="compact"
-                      />
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      )}
+      <TripsSection
+        trips={trips}
+        childrenOf={tripMembers}
+        onEditTrip={handleEdit}
+        onDeleteEvent={handleDeleteClick}
+        onChange={loadEvents}
+        onToggleTodo={handleToggleTodo}
+        onConvertKind={handleConvertKind}
+        onHashtagClick={(tag) => { setActiveHashtag(tag); setShowPast(true) }}
+        checklistsOf={(id) => tripChecklists.filter((c) => c.event_id === id)}
+        onOpenChecklist={setOpenChecklistId}
+        onCreateChecklist={createTripChecklist}
+        onChecklistsChange={() => void reloadChecklists()}
+      />
 
       {viewMode !== 'schedule' && (<>
       <div className="flex justify-center items-center gap-2 flex-wrap pb-1 -mx-1 px-1">
@@ -666,7 +579,7 @@ export function MyFeed() {
 
           {viewMode === 'schedule' ? (
             <ScheduleOverview
-              events={filteredEvents}
+              events={[...filteredEvents, ...trips]}
               preferredVisitDates={preferredVisitDates}
               attendancesToday={attendancesToday}
               obligationsToday={obligationsToday}
@@ -749,6 +662,15 @@ export function MyFeed() {
         </button>
       )}
 
+      {openChecklistId && (
+        <Modal
+          isOpen
+          title="Checklist"
+          onClose={() => { setOpenChecklistId(null); void reloadChecklists() }}
+        >
+          <ChecklistDetail id={openChecklistId} onBack={() => { setOpenChecklistId(null); void reloadChecklists() }} />
+        </Modal>
+      )}
       {showForm && (
         <EventForm
           event={editingEvent}

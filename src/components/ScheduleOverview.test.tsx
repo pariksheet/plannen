@@ -559,3 +559,50 @@ describe('ScheduleOverview — today schedule card', () => {
     expect(within(card).queryByText(/overlaps/i)).not.toBeInTheDocument()
   })
 })
+
+describe('pinned trips (starred-group Schedule view)', () => {
+  function renderPinned(events: Event[], onEdit = vi.fn()) {
+    return render(
+      <MemoryRouter>
+        <ScheduleOverview
+          events={events}
+          onEdit={onEdit}
+          onDelete={vi.fn()}
+          onShareSuccess={vi.fn()}
+          onHashtagClick={vi.fn()}
+          preferredVisitDates={{}}
+          pinTrips
+        />
+      </MemoryRouter>
+    )
+  }
+
+  const trip = () => makeEvent({
+    id: 'trip1', title: 'Canada Trip', event_kind: 'container',
+    start_date: midWeekIso(), end_date: '2099-12-31',
+  })
+
+  it('pins a Trips section for trip containers, collapsed by default', () => {
+    renderPinned([trip()])
+    const card = screen.getByTestId('trips-section')
+    expect(within(card).getByText('Trips')).toBeInTheDocument()
+    // collapsed by default (like My Plans) — the trip title is hidden until expanded
+    expect(within(card).queryByText('Canada Trip')).toBeNull()
+  })
+
+  it('renders no Trips section when pinTrips is off', () => {
+    renderOverview([trip()])
+    expect(screen.queryByTestId('trips-section')).toBeNull()
+  })
+
+  it('expanding then clicking a pinned trip opens it via onEdit', async () => {
+    const onEdit = vi.fn()
+    renderPinned([trip()], onEdit)
+    const card = screen.getByTestId('trips-section')
+    await userEvent.click(within(card).getByRole('button', { name: /trips/i }))
+    // The trip now renders through the shared EventCard, so its edit control is
+    // the standard "Edit event" action — same as every other event card.
+    await userEvent.click(within(card).getByRole('button', { name: 'Edit event' }))
+    expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'trip1' }))
+  })
+})

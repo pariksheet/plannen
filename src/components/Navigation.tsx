@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Menu, X, LogOut, LayoutDashboard, UsersRound, Users, Shield, Settings, UserCircle, BookOpen, Download, Star } from 'lucide-react'
+import { Menu, X, LogOut, LayoutDashboard, UsersRound, Users, Shield, Settings, UserCircle, BookOpen, Download, Star, ClipboardList } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
 import { useInstallPrompt } from '../hooks/useInstallPrompt'
@@ -8,7 +8,7 @@ import { usePrimaryGroup } from '../hooks/usePrimaryGroup'
 import { isTierZero } from '../lib/tier'
 import { Logo } from './Logo'
 
-type View = 'today' | 'feed' | 'people' | 'groups' | 'stories' | 'settings'
+type View = 'today' | 'feed' | 'people' | 'groups' | 'stories' | 'checklists' | 'settings'
 
 interface NavigationProps {
   currentView: View
@@ -48,6 +48,7 @@ export function Navigation({ currentView, onViewChange, onSignOut, onInviteClick
   const tabs: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
     { id: 'feed', label: 'My Plans', icon: LayoutDashboard },
     { id: 'stories', label: 'My Stories', icon: BookOpen },
+    { id: 'checklists', label: 'Checklists', icon: ClipboardList },
     ...(showSocialTabs
       ? [
           { id: 'people' as const, label: 'My People', icon: Users },

@@ -22,6 +22,7 @@ import { wishlist } from './routes/api/wishlist.js'
 import { settings } from './routes/api/settings.js'
 import { agentTasks } from './routes/api/agentTasks.js'
 import { practices } from './routes/api/practices.js'
+import { checklists } from './routes/api/checklists.js'
 import { scheduling } from './routes/api/scheduling.js'
 import { briefings } from './routes/api/briefings.js'
 import { mailboxIgnoreRules } from './routes/api/mailbox-ignore-rules.js'
@@ -95,6 +96,7 @@ app.route('/api/wishlist', wishlist)
 app.route('/api/settings', settings)
 app.route('/api/agent-tasks', agentTasks)
 app.route('/api/practices', practices)
+app.route('/api/checklists', checklists)
 app.route('/api/scheduling', scheduling)
 app.route('/api/briefings', briefings)
 app.route('/api/mailbox-ignore-rules', mailboxIgnoreRules)

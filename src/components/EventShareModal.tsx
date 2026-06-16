@@ -147,7 +147,7 @@ export function EventShareModal({ event: initialEvent, onClose, onSuccess }: Eve
   // WhatsApp share affordance only.
   if (tierZero) {
     return (
-      <Modal isOpen onClose={onClose} title="Share event">
+      <Modal isOpen onClose={onClose} title="Share">
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2">
             {nativeShare && (
@@ -190,7 +190,7 @@ export function EventShareModal({ event: initialEvent, onClose, onSuccess }: Eve
   }
 
   return (
-    <Modal isOpen onClose={onClose} title={isSeriesParent ? `Share series · ${event.title}` : 'Share event'}>
+    <Modal isOpen onClose={onClose} title={isSeriesParent ? `Share series · ${event.title}` : 'Share'}>
       <div className="space-y-4">
         <div className="flex flex-wrap gap-2">
           {nativeShare && (

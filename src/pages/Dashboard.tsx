@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { Navigation } from '../components/Navigation'
@@ -10,12 +10,50 @@ import { MyStories } from '../components/MyStories'
 import { Settings } from '../components/Settings'
 import { InviteToApp } from '../components/InviteToApp'
 import { Modal } from '../components/Modal'
+import { ChecklistList } from '../components/ChecklistList'
+import { ChecklistDetail } from '../components/ChecklistDetail'
+import { ChecklistCreateForm } from '../components/ChecklistCreateForm'
+import { useChecklists } from '../hooks/useChecklists'
+import { getUserEvents } from '../services/eventService'
+import type { Event } from '../types/event'
 import { isTierZero } from '../lib/tier'
 import { X } from 'lucide-react'
 
 const PRIVACY_NOTICE_DISMISSED_KEY = 'plannen_privacy_notice_dismissed'
 
-type View = 'today' | 'feed' | 'people' | 'groups' | 'stories' | 'settings'
+function ChecklistsView() {
+  const { checklists, create, remove } = useChecklists()
+  const [openId, setOpenId] = useState<string | null>(null)
+  const [showForm, setShowForm] = useState(false)
+  const [events, setEvents] = useState<Event[]>([])
+  useEffect(() => {
+    let cancelled = false
+    void getUserEvents('').then(({ data }) => { if (!cancelled && data) setEvents(data) })
+    return () => { cancelled = true }
+  }, [])
+  const eventTitleById = useMemo(
+    () => Object.fromEntries(events.map((e) => [e.id, e.title])),
+    [events],
+  )
+  if (openId) return <ChecklistDetail id={openId} onBack={() => setOpenId(null)} />
+  return (
+    <div className="space-y-4">
+      <div className="max-w-2xl mx-auto flex justify-end">
+        <button type="button" onClick={() => setShowForm(true)} className="bg-indigo-600 text-white rounded-lg px-3 py-2 text-sm">New checklist</button>
+      </div>
+      <ChecklistList checklists={checklists} eventTitleById={eventTitleById} onOpen={setOpenId} onDelete={(id) => void remove(id)} />
+      {showForm && (
+        <ChecklistCreateForm
+          events={events}
+          onCreate={(input) => create(input)}
+          onClose={() => setShowForm(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+type View = 'today' | 'feed' | 'people' | 'groups' | 'stories' | 'checklists' | 'settings'
 
 // Tier 0 hides the social feeds (no backend wiring). A saved bookmark to
 // ?view=people/groups (or the legacy family/friends) falls back to the feed.
@@ -25,7 +63,7 @@ function parseView(v: string | null): View {
   // Legacy aliases — bookmarks that still point at the old family/friends tabs.
   if (v === 'family' || v === 'friends') return isTierZero() ? 'feed' : 'people'
   if (v === 'today' || v === 'feed' || v === 'people' ||
-      v === 'groups' || v === 'stories' || v === 'settings') {
+      v === 'groups' || v === 'stories' || v === 'checklists' || v === 'settings') {
     if (isTierZero() && SOCIAL_VIEWS.includes(v as View)) return 'feed'
     return v
   }
@@ -115,6 +153,7 @@ export function Dashboard() {
         {currentView === 'today' && <Today />}
         {currentView === 'feed' && <MyFeed />}
         {currentView === 'stories' && <MyStories />}
+        {currentView === 'checklists' && <ChecklistsView />}
         {currentView === 'people' && <MyPeople />}
         {currentView === 'groups' && <MyGroups />}
         {currentView === 'settings' && <Settings />}

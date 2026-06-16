@@ -55,6 +55,12 @@ export async function getMyConnections(): Promise<{ data: FriendUser[]; error: E
   return { data: await hydrateUsers(ids), error: null }
 }
 
+/** Resolve a set of user ids to {id, email, full_name} for display (e.g. who
+ *  created/checked a checklist item). Tier 0 returns nulls (single-user). */
+export async function getUsersByIds(ids: string[]): Promise<FriendUser[]> {
+  return hydrateUsers(Array.from(new Set(ids)))
+}
+
 const TIER0_UNSUPPORTED = 'Relationship requests are not available in single-user mode.'
 
 export async function sendRelationshipRequest(

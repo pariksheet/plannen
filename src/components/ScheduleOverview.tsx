@@ -10,6 +10,9 @@ import type {
 import { attendanceLabel } from '../utils/attendanceLabel'
 import { obligationLabel } from '../utils/obligationLabel'
 import { CalendarGrid } from './CalendarGrid'
+import { TripsSection } from './TripsSection'
+import type { ChecklistRow } from '../lib/dbClient/types'
+import type { NewChecklistItem } from '../services/checklistService'
 import { EventCard } from './EventCard'
 import { buildWeekAgenda, eventDateLocal, overlappingIds, ymd } from '../utils/weekAgenda'
 import { defaultCity } from '../utils/homeCity'
@@ -40,6 +43,17 @@ export interface ScheduleOverviewProps {
   // group Schedule view sets this so a shared dashboard shows only group events,
   // never the viewer's private routines.
   hideRoutines?: boolean
+  // When true (the starred-group Schedule view), trip containers are lifted out
+  // of the inline agenda and pinned in a "Trips" card at the top — mirroring the
+  // Trips section in My Plans. Default keeps existing behaviour (My Plans renders
+  // its own Trips section, so it leaves this off).
+  pinTrips?: boolean
+  // The starred-group Schedule view forwards this so each pinned trip shows its
+  // checklists (read-only summaries). Omitted elsewhere → no checklists shown.
+  tripChecklistsOf?: (tripId: string) => ChecklistRow[]
+  // Create a checklist attached to a trip (My Family forwards this so each
+  // pinned trip gets a "+ Checklist" button).
+  onCreateChecklist?: (input: { title: string; event_id: string | null; items: NewChecklistItem[] }) => Promise<void> | void
 }
 
 const sketchHand = "font-['Caveat'] tracking-tight"
@@ -122,9 +136,15 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
   // Cancelled events don't belong on a schedule — filter once for every card.
   const events = props.events.filter((e) => e.event_status !== 'cancelled')
   const todayKey = todayIso()
+  // When pinning trips, lift containers out of the WEEK list so they aren't
+  // duplicated there — they render in the Trips card at the top instead. They
+  // still belong on the month calendar below (as a band), so This Month keeps
+  // the full events.
+  const trips = props.pinTrips ? events.filter((e) => e.event_kind === 'container') : []
+  const agenda = props.pinTrips ? events.filter((e) => e.event_kind !== 'container') : events
   // Overdue to-dos live only in the Overdue section, never duplicated in the
   // week list below.
-  const weekEvents = events.filter((e) => !isOverdueTodo(e, todayKey))
+  const weekEvents = agenda.filter((e) => !isOverdueTodo(e, todayKey))
 
   async function handleToggleTodo(e: Event) {
     if (e.completed_at) await uncompleteTodo(e.id)
@@ -140,6 +160,20 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
   return (
     <div className="space-y-4 w-full min-w-0">
       <HeaderStrip heading={props.heading ?? 'Your Schedule'} />
+      {props.pinTrips && (
+        <TripsSection
+          trips={trips}
+          childrenOf={(id) => agenda.filter((e) => e.group_id === id).slice().sort((a, b) => a.start_date.localeCompare(b.start_date))}
+          onEditTrip={props.onEdit}
+          onDeleteEvent={props.onDelete}
+          onChange={props.onShareSuccess}
+          onToggleTodo={handleToggleTodo}
+          onConvertKind={handleConvertKind}
+          onHashtagClick={props.onHashtagClick}
+          checklistsOf={props.tripChecklistsOf}
+          onCreateChecklist={props.onCreateChecklist}
+        />
+      )}
       <TodayScheduleCard
         attendances={props.attendancesToday ?? []}
         obligations={props.obligationsToday ?? []}

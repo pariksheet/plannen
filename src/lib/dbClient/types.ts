@@ -118,6 +118,29 @@ export type PracticeCompletionRow = {
   completed_on: string
 }
 
+export type ChecklistItemRow = {
+  id: string
+  checklist_id: string
+  text: string
+  checked_at: string | null
+  checked_by: string | null
+  created_by: string | null
+  position: number
+  created_at: string
+}
+
+export type ChecklistRow = {
+  id: string
+  title: string
+  event_id: string | null
+  created_by: string
+  created_at: string
+  updated_at: string
+  items?: ChecklistItemRow[] // embedded on get/list (tier1) or returned by backend (tier0)
+  done?: number              // progress, populated by list
+  total?: number
+}
+
 // ── attendances + derived obligations (unified scheduling, Phase 2/3) ────────
 // Persisted rows. Mirrors plannen.attendances / plannen.obligations.
 export type AttendanceRow = Record<string, unknown> & {
@@ -438,6 +461,18 @@ export type DbClient = {
     markDone: (input: { practice_id: string; completed_on?: string; family_member_id?: string | null }) => Promise<void>
     unmarkDone: (input: { practice_id: string; completed_on: string; family_member_id?: string | null }) => Promise<void>
     completionsThisWeek: (date: string) => Promise<PracticeCompletionRow[]>
+  }
+  checklists: {
+    list: (params?: { event_id?: string | null }) => Promise<ChecklistRow[]>
+    get: (id: string) => Promise<ChecklistRow>
+    create: (input: { title: string; event_id?: string | null; items?: string[] }) => Promise<ChecklistRow>
+    update: (id: string, patch: { title: string }) => Promise<ChecklistRow>
+    delete: (id: string) => Promise<void>
+    addItems: (id: string, items: string[]) => Promise<ChecklistItemRow[]>
+    setItemChecked: (itemId: string, checked: boolean) => Promise<ChecklistItemRow>
+    updateItem: (itemId: string, text: string) => Promise<ChecklistItemRow>
+    deleteItem: (itemId: string) => Promise<void>
+    share: (id: string, input: { user_ids?: string[]; group_ids?: string[] }) => Promise<void>
   }
   briefings: {
     getByDate: (date: string) => Promise<DailyBriefingRow | null>

@@ -8,6 +8,7 @@ import { RSVPList } from './RSVPList'
 import { PreferredVisitDate } from './PreferredVisitDate'
 import { EventMemoryComponent } from './EventMemory'
 import { EventStorySection } from './EventStorySection'
+import { EventChecklists } from './EventChecklists'
 import { getEventWatchTask, acknowledgeWatchUpdate } from '../services/agentTaskService'
 import { getEvent } from '../services/eventService'
 import { dbClient } from '../lib/dbClient'
@@ -319,6 +320,7 @@ export function EventDetailsModal({
             <EventStorySection eventId={event.id} />
           </div>
         )}
+        {!isReminder && <EventChecklists event={event} />}
         {onClone && (
           <div className="pt-4 border-t border-gray-200 flex justify-end">
             <button
