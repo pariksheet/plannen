@@ -33,6 +33,13 @@ export interface ScheduleOverviewProps {
   // built by the parent (MyFeed) from already-loaded people. Used to label a chip
   // on events that represent someone else's time. Optional → no chip when absent.
   subjectNames?: Record<string, string>
+  // Header label. Defaults to the personal "Your Schedule"; the starred-group
+  // Schedule view (MyGroups) passes the group name, e.g. "My Family".
+  heading?: string
+  // When true, the week card omits the current user's personal routines. The
+  // group Schedule view sets this so a shared dashboard shows only group events,
+  // never the viewer's private routines.
+  hideRoutines?: boolean
 }
 
 const sketchHand = "font-['Caveat'] tracking-tight"
@@ -132,7 +139,7 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
 
   return (
     <div className="space-y-4 w-full min-w-0">
-      <HeaderStrip />
+      <HeaderStrip heading={props.heading ?? 'Your Schedule'} />
       <TodayScheduleCard
         attendances={props.attendancesToday ?? []}
         obligations={props.obligationsToday ?? []}
@@ -155,6 +162,7 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
         onToggleTodo={handleToggleTodo}
         onConvertKind={handleConvertKind}
         subjectNames={props.subjectNames}
+        hideRoutines={props.hideRoutines}
       />
       <ThisMonthCard
         events={events}
@@ -170,7 +178,7 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
   )
 }
 
-function HeaderStrip() {
+function HeaderStrip({ heading }: { heading: string }) {
   const [weather, setWeather] = useState<TodayWeather | null>(null)
   const today = new Date()
   const dateLabel = today.toLocaleDateString(undefined, {
@@ -185,7 +193,7 @@ function HeaderStrip() {
   }, [])
   return (
     <header className="flex items-baseline justify-between">
-      <h2 className={`${sketchHand} text-4xl sm:text-5xl text-gray-900`}>Your Schedule</h2>
+      <h2 className={`${sketchHand} text-4xl sm:text-5xl text-gray-900`}>{heading}</h2>
       <div className={`${sketchBody} text-right`}>
         <div className="text-base text-gray-700">{dateLabel}</div>
         {weather && (
@@ -386,7 +394,7 @@ function OverdueCard({ events, ...actions }: { events: Event[] } & ActionProps) 
   )
 }
 
-function WeekCard({ events, subjectNames, ...actions }: { events: Event[]; subjectNames?: Record<string, string> } & ActionProps) {
+function WeekCard({ events, subjectNames, hideRoutines, ...actions }: { events: Event[]; subjectNames?: Record<string, string>; hideRoutines?: boolean } & ActionProps) {
   const now = useNow()
   const [range, setRange] = useState<'today' | 'this-week' | 'next-week'>('today')
   const addDays = (d: Date, n: number): Date => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
@@ -399,7 +407,10 @@ function WeekCard({ events, subjectNames, ...actions }: { events: Event[]; subje
         ? buildWeekAgenda(events, addDays(now, 7), now)
         : buildWeekAgenda(events, now)
   const todayKey = todayIso()
-  const { routines, toggle: toggleRoutine } = useTodayRoutines(todayKey)
+  // Hook is always called (rules of hooks); group mode just discards the result
+  // so a shared dashboard never surfaces the viewer's personal routines.
+  const { routines: allRoutines, toggle: toggleRoutine } = useTodayRoutines(todayKey)
+  const routines = hideRoutines ? [] : allRoutines
   // Minutes-of-day for ordering today's rows; untimed events sort first (−1),
   // timed events by clock time, routines by part-of-day (anytime → Infinity, last).
   const eventMins = (e: Event): number => {
