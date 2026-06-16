@@ -222,7 +222,17 @@ export function CalendarGrid({ events, preferredVisitDates, onDelete, onShareSuc
   }
 
   const selectedKey = toDateKey(selectedDate)
-  const selectedEvents = (eventsByDay.get(selectedKey) ?? [])
+  // Containers are kept out of eventsByDay (they render as bands, not per-day
+  // entries), but the clicked-day detail should still list any trip whose range
+  // spans that day — otherwise clicking a date inside a trip shows nothing.
+  const selectedMs = startOfDay(selectedDate).getTime()
+  const selectedTrips = events.filter((e) => {
+    if (e.event_kind !== 'container' || !e.start_date) return false
+    const s = startOfDay(new Date(e.start_date)).getTime()
+    const en = e.end_date ? startOfDay(new Date(e.end_date)).getTime() : s
+    return s <= selectedMs && en >= selectedMs
+  })
+  const selectedEvents = [...selectedTrips, ...(eventsByDay.get(selectedKey) ?? [])]
     .slice()
     .sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime())
 
