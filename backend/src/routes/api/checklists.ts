@@ -127,11 +127,12 @@ checklists.post('/', async (c) => {
     const texts = (p.items ?? []).filter((t) => t.trim().length > 0)
     let items: unknown[] = []
     if (texts.length) {
-      const values = texts.map((_, i) => `($1, $${i + 2}, ${i})`).join(', ')
+      const byParam = texts.length + 2
+      const values = texts.map((_, i) => `($1, $${i + 2}, ${i}, $${byParam})`).join(', ')
       items = (
         await db.query(
-          `INSERT INTO plannen.checklist_items (checklist_id, text, position) VALUES ${values} RETURNING *`,
-          [cl[0].id, ...texts],
+          `INSERT INTO plannen.checklist_items (checklist_id, text, position, created_by) VALUES ${values} RETURNING *`,
+          [cl[0].id, ...texts, userId],
         )
       ).rows
     }
@@ -171,10 +172,11 @@ checklists.post('/:id/items', async (c) => {
       existing.length === 0 ? 0 : Math.max(...existing.map((r: { position: number }) => r.position)) + 1
     const texts = parsed.data.items.filter((t) => t.trim().length > 0)
     if (!texts.length) return c.json({ data: [] })
-    const values = texts.map((_, i) => `($1, $${i + 2}, ${start + i})`).join(', ')
+    const byParam = texts.length + 2
+    const values = texts.map((_, i) => `($1, $${i + 2}, ${start + i}, $${byParam})`).join(', ')
     const { rows } = await db.query(
-      `INSERT INTO plannen.checklist_items (checklist_id, text, position) VALUES ${values} RETURNING *`,
-      [id, ...texts],
+      `INSERT INTO plannen.checklist_items (checklist_id, text, position, created_by) VALUES ${values} RETURNING *`,
+      [id, ...texts, userId],
     )
     return c.json({ data: rows }, 201)
   })

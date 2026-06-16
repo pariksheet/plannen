@@ -134,10 +134,11 @@ const createChecklist: ToolHandler = async (args, ctx) => {
   const items = (a.items ?? []).filter((t) => t.trim().length > 0)
   let createdItems: unknown[] = []
   if (items.length > 0) {
-    const values = items.map((_, i) => `($1, $${i + 2}, ${i})`).join(', ')
+    const byParam = items.length + 2
+    const values = items.map((_, i) => `($1, $${i + 2}, ${i}, $${byParam})`).join(', ')
     const { rows } = await ctx.client.query(
-      `INSERT INTO plannen.checklist_items (checklist_id, text, position) VALUES ${values} RETURNING *`,
-      [checklist.id, ...items],
+      `INSERT INTO plannen.checklist_items (checklist_id, text, position, created_by) VALUES ${values} RETURNING *`,
+      [checklist.id, ...items, ctx.userId],
     )
     createdItems = rows
   }
@@ -154,10 +155,11 @@ const addChecklistItems: ToolHandler = async (args, ctx) => {
   const start = existing.length === 0 ? 0 : Math.max(...existing.map((r: { position: number }) => r.position)) + 1
   const items = a.items.filter((t) => t.trim().length > 0)
   if (items.length === 0) return []
-  const values = items.map((_, i) => `($1, $${i + 2}, ${start + i})`).join(', ')
+  const byParam = items.length + 2
+  const values = items.map((_, i) => `($1, $${i + 2}, ${start + i}, $${byParam})`).join(', ')
   const { rows } = await ctx.client.query(
-    `INSERT INTO plannen.checklist_items (checklist_id, text, position) VALUES ${values} RETURNING *`,
-    [a.checklist_id, ...items])
+    `INSERT INTO plannen.checklist_items (checklist_id, text, position, created_by) VALUES ${values} RETURNING *`,
+    [a.checklist_id, ...items, ctx.userId])
   return rows
 }
 

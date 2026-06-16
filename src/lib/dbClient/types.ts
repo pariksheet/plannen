@@ -124,6 +124,7 @@ export type ChecklistItemRow = {
   text: string
   checked_at: string | null
   checked_by: string | null
+  created_by: string | null
   position: number
   created_at: string
 }

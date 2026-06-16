@@ -12,7 +12,11 @@ const { create, setItemChecked, get } = vi.hoisted(() => ({
 }))
 vi.mock('../lib/dbClient', () => ({ dbClient: { checklists: { create, setItemChecked, get } } }))
 
-import { createChecklist, setChecklistItemChecked } from './checklistService'
+import { createChecklist, setChecklistItemChecked, resetChecklistItems } from './checklistService'
+import type { ChecklistItemRow } from '../lib/dbClient/types'
+
+const item = (id: string, checked: boolean): ChecklistItemRow =>
+  ({ id, checklist_id: 'c1', text: id, checked_at: checked ? 'now' : null, checked_by: null, created_by: null, position: 0, created_at: 'now' })
 
 beforeEach(() => { create.mockClear(); setItemChecked.mockClear(); get.mockClear() })
 
@@ -45,5 +49,13 @@ describe('checklistService', () => {
   it('setChecklistItemChecked passes the checked flag', async () => {
     await setChecklistItemChecked('i1', true)
     expect(setItemChecked).toHaveBeenCalledWith('i1', true)
+  })
+
+  it('resetChecklistItems unchecks only the checked items', async () => {
+    await resetChecklistItems([item('a', true), item('b', false), item('c', true)])
+    expect(setItemChecked).toHaveBeenCalledTimes(2)
+    expect(setItemChecked).toHaveBeenCalledWith('a', false)
+    expect(setItemChecked).toHaveBeenCalledWith('c', false)
+    expect(setItemChecked).not.toHaveBeenCalledWith('b', false)
   })
 })

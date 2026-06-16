@@ -2623,11 +2623,12 @@ async function createChecklist(args: { title: string; event_id?: string | null; 
     const items = (args.items ?? []).filter((t) => t.trim().length > 0)
     let createdItems: unknown[] = []
     if (items.length > 0) {
-      const values = items.map((_, i) => `($1, $${i + 2}, ${i})`).join(', ')
+      const byParam = items.length + 2
+      const values = items.map((_, i) => `($1, $${i + 2}, ${i}, $${byParam})`).join(', ')
       const { rows } = await c.query(
-        `INSERT INTO plannen.checklist_items (checklist_id, text, position)
+        `INSERT INTO plannen.checklist_items (checklist_id, text, position, created_by)
          VALUES ${values} RETURNING *`,
-        [checklist.id, ...items],
+        [checklist.id, ...items, id],
       )
       createdItems = rows
     }
@@ -2650,11 +2651,12 @@ async function addChecklistItems(args: { checklist_id: string; items: string[] }
     const start = nextPosition(existing as Array<{ position: number }>)
     const items = args.items.filter((t) => t.trim().length > 0)
     if (items.length === 0) return []
-    const values = items.map((_, i) => `($1, $${i + 2}, ${start + i})`).join(', ')
+    const byParam = items.length + 2
+    const values = items.map((_, i) => `($1, $${i + 2}, ${start + i}, $${byParam})`).join(', ')
     const { rows } = await c.query(
-      `INSERT INTO plannen.checklist_items (checklist_id, text, position)
+      `INSERT INTO plannen.checklist_items (checklist_id, text, position, created_by)
        VALUES ${values} RETURNING *`,
-      [args.checklist_id, ...items],
+      [args.checklist_id, ...items, id],
     )
     return rows
   })

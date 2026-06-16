@@ -760,15 +760,16 @@ export const tier1: DbClient = {
       const cl = unwrap(await supabase.from('checklists').insert({ title: input.title, event_id: input.event_id ?? null, created_by: userId }).select().single()) as ChecklistRow
       const texts = (input.items ?? []).filter((t) => t.trim().length > 0)
       cl.items = texts.length
-        ? unwrap(await supabase.from('checklist_items').insert(texts.map((text, position) => ({ checklist_id: cl.id, text, position }))).select()) as ChecklistItemRow[]
+        ? unwrap(await supabase.from('checklist_items').insert(texts.map((text, position) => ({ checklist_id: cl.id, text, position, created_by: userId }))).select()) as ChecklistItemRow[]
         : []
       return cl
     },
     delete: async (id) => { const { error } = await supabase.from('checklists').delete().eq('id', id); if (error) throw new Error(error.message) },
     addItems: async (id, items) => {
+      const userId = await currentUserId()
       const { data: existing } = await supabase.from('checklist_items').select('position').eq('checklist_id', id)
       const start = existing && existing.length ? Math.max(...existing.map((r) => r.position as number)) + 1 : 0
-      const rows = items.filter((t) => t.trim().length > 0).map((text, i) => ({ checklist_id: id, text, position: start + i }))
+      const rows = items.filter((t) => t.trim().length > 0).map((text, i) => ({ checklist_id: id, text, position: start + i, created_by: userId }))
       if (!rows.length) return []
       return unwrap(await supabase.from('checklist_items').insert(rows).select()) as ChecklistItemRow[]
     },

@@ -27,6 +27,11 @@ export const createChecklist = async (input: { title: string; event_id?: string 
 export const deleteChecklist = (id: string): Promise<void> => dbClient.checklists.delete(id)
 export const addChecklistItems = (id: string, items: string[]): Promise<ChecklistItemRow[]> => dbClient.checklists.addItems(id, items)
 export const setChecklistItemChecked = (itemId: string, checked: boolean): Promise<ChecklistItemRow> => dbClient.checklists.setItemChecked(itemId, checked)
+
+/** Uncheck every currently-checked item in a checklist (keeps the items). */
+export const resetChecklistItems = async (items: ChecklistItemRow[]): Promise<void> => {
+  await Promise.all(items.filter((i) => i.checked_at != null).map((i) => dbClient.checklists.setItemChecked(i.id, false)))
+}
 export const updateChecklistItem = (itemId: string, text: string): Promise<ChecklistItemRow> => dbClient.checklists.updateItem(itemId, text)
 export const deleteChecklistItem = (itemId: string): Promise<void> => dbClient.checklists.deleteItem(itemId)
 export const shareChecklist = (id: string, input: { user_ids?: string[]; group_ids?: string[] }): Promise<void> => dbClient.checklists.share(id, input)
