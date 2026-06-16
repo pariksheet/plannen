@@ -165,7 +165,6 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
           onConvertKind={handleConvertKind}
           onHashtagClick={props.onHashtagClick}
           checklistsOf={props.tripChecklistsOf}
-          defaultOpen
         />
       )}
       <TodayScheduleCard

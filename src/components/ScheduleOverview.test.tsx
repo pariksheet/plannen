@@ -582,21 +582,25 @@ describe('pinned trips (starred-group Schedule view)', () => {
     start_date: midWeekIso(), end_date: '2099-12-31',
   })
 
-  it('pins an upcoming trip container in a Trips card', () => {
+  it('pins a Trips section for trip containers, collapsed by default', () => {
     renderPinned([trip()])
     const card = screen.getByTestId('trips-section')
-    expect(within(card).getByText('Canada Trip')).toBeInTheDocument()
+    expect(within(card).getByText('Trips')).toBeInTheDocument()
+    // collapsed by default (like My Plans) — the trip title is hidden until expanded
+    expect(within(card).queryByText('Canada Trip')).toBeNull()
   })
 
-  it('renders no Trips card when pinTrips is off', () => {
+  it('renders no Trips section when pinTrips is off', () => {
     renderOverview([trip()])
     expect(screen.queryByTestId('trips-section')).toBeNull()
   })
 
-  it('clicking a pinned trip opens it via onEdit', async () => {
+  it('expanding then clicking a pinned trip opens it via onEdit', async () => {
     const onEdit = vi.fn()
     renderPinned([trip()], onEdit)
-    await userEvent.click(within(screen.getByTestId('trips-section')).getByLabelText('Edit trip Canada Trip'))
+    const card = screen.getByTestId('trips-section')
+    await userEvent.click(within(card).getByRole('button', { name: /trips/i }))
+    await userEvent.click(within(card).getByLabelText('Edit trip Canada Trip'))
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'trip1' }))
   })
 })
