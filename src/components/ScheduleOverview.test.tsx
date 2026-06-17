@@ -557,9 +557,11 @@ describe('ScheduleOverview — today schedule card', () => {
     expect(attendance).toHaveTextContent('example school (08:30–15:30)')
     expect(attendance).toHaveTextContent('indicative')
     expect(attendance.className).toContain('text-gray-400')
-    // Obligation is actionable, labelled "drop · …" with its anchor time.
+    // Obligation is actionable: source name (no "drop ·" prefix) + a drop badge + anchor time.
     const obligation = within(card).getByTestId('obligation-row')
-    expect(obligation).toHaveTextContent('drop · example school')
+    expect(obligation).toHaveTextContent('example school')
+    expect(obligation).not.toHaveTextContent('drop · example school')
+    expect(obligation).toHaveTextContent('drop') // role still shown as a badge
     expect(obligation).toHaveTextContent('08:15')
     // No conflict/overlap marker on indicative attendances.
     expect(within(card).queryByText(/overlaps/i)).not.toBeInTheDocument()

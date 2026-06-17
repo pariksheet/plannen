@@ -263,7 +263,7 @@ function HeaderStrip({ heading }: { heading: string }) {
 }
 
 // Read-only "Today on a schedule" card. Two distinct kinds of row:
-//  • Obligations — ACTIONABLE timed drop/pick tasks ("drop · Milo @ school").
+//  • Obligations — ACTIONABLE timed drop/pick tasks (source name + a drop/pick badge).
 //    Rendered like timed items (time + label), but NOT editable here (creation
 //    is agent-driven).
 //  • Attendances — INDICATIVE context (a member is somewhere on a schedule).

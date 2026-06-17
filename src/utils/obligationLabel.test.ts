@@ -16,16 +16,16 @@ function ob(overrides: Partial<ResolvedObligationRow> = {}): ResolvedObligationR
 }
 
 describe('obligationLabel', () => {
-  it('labels a drop with its source name', () => {
-    expect(obligationLabel(ob())).toBe('drop · example school')
+  it('is just the source name (drop role shown separately as a badge)', () => {
+    expect(obligationLabel(ob())).toBe('example school')
   })
 
-  it('labels a pick with its source name', () => {
+  it('is just the source name for a pick', () => {
     expect(obligationLabel(ob({ role: 'pick', source_name: 'summer camp' })))
-      .toBe('pick · summer camp')
+      .toBe('summer camp')
   })
 
-  it('uses a middot separator', () => {
-    expect(obligationLabel(ob())).toContain('·')
+  it('does not prefix the role or a separator', () => {
+    expect(obligationLabel(ob())).not.toMatch(/drop|pick|·/)
   })
 })
