@@ -1,5 +1,8 @@
 import { supabase } from '../lib/supabase'
 import { isTierZero } from '../lib/tier'
+import type { Event } from '../types/event'
+
+export interface ShareSummary { groups: number; users: number; all: boolean; assigned: number }
 
 // Unified event sharing (replaces event_shared_with_groups/users +
 // shared_with_friends). One row per (event, target). RLS lets the event
@@ -35,6 +38,43 @@ export async function getSharesFor(eventId: string): Promise<{ data: EventShare[
   } catch (e) {
     return { data: [], error: e instanceof Error ? e : new Error('getSharesFor failed') }
   }
+}
+
+/**
+ * Attach a `shared_summary` (derived from event_shares) to each event in one
+ * batch query, so cards/badges reflect the real sharing state instead of the
+ * dormant shared_with_friends column. Tier 0 leaves events untouched.
+ */
+export async function attachShareSummaries(events: Event[]): Promise<Event[]> {
+  if (isTierZero() || events.length === 0) return events
+  try {
+    const ids = events.map((e) => e.id)
+    const { data, error } = await supabase
+      .from('event_shares')
+      .select('event_id, target_type, level')
+      .in('event_id', ids)
+    if (error || !data) return events
+    const byId = new Map<string, ShareSummary>()
+    for (const row of data as { event_id: string; target_type: ShareTargetType; level: ShareLevel }[]) {
+      const s = byId.get(row.event_id) ?? { groups: 0, users: 0, all: false, assigned: 0 }
+      if (row.target_type === 'group') s.groups++
+      else if (row.target_type === 'user') s.users++
+      else if (row.target_type === 'all') s.all = true
+      if (row.level === 'assigned') s.assigned++
+      byId.set(row.event_id, s)
+    }
+    return events.map((e) => ({ ...e, shared_summary: byId.get(e.id) ?? { groups: 0, users: 0, all: false, assigned: 0 } }))
+  } catch {
+    return events
+  }
+}
+
+/** True when an event is shared with anyone (any target). */
+export function isShared(event: Event): boolean {
+  const s = event.shared_summary
+  if (s) return s.groups > 0 || s.users > 0 || s.all
+  // Fallback to the legacy column when no summary was attached.
+  return (event.shared_with_friends ?? 'none') !== 'none'
 }
 
 /** Add or upgrade one share. Idempotent on (event, target). */

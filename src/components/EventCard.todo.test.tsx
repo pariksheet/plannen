@@ -17,6 +17,13 @@ vi.mock('../services/rsvpService', () => ({
 vi.mock('../services/eventService', () => ({
   getEvent: vi.fn(async () => ({ data: null, error: null })),
 }))
+vi.mock('../services/shareService', () => ({
+  isShared: (e: { shared_summary?: { groups: number; users: number; all: boolean } | null; shared_with_friends?: string }) => {
+    const s = e.shared_summary
+    if (s) return s.groups > 0 || s.users > 0 || s.all
+    return (e.shared_with_friends ?? 'none') !== 'none'
+  },
+}))
 
 vi.mock('../services/agentTaskService', () => ({
   getEventWatchTask: vi.fn(async () => null),

@@ -13,6 +13,9 @@ vi.mock('../services/eventService', () => ({
   getEventSharedWithUserIds: vi.fn(async () => ({ data: [], error: null })),
   getEventSharedWithGroupIds: vi.fn(async () => ({ data: [], error: null })),
 }))
+vi.mock('../services/shareService', () => ({
+  getSharesFor: vi.fn(async () => ({ data: [], error: null })),
+}))
 vi.mock('../services/agentTaskService', () => ({
   createRecurringTask: vi.fn(async () => {}),
 }))

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Event } from '../types/event'
 import { SharedWithFriends } from '../types/event'
-import { updateEvent, getEvent, getEventSharedWithUserIds, getEventSharedWithGroupIds, getChildSessionIds } from '../services/eventService'
+import { updateEvent, getEvent, getChildSessionIds } from '../services/eventService'
+import { getSharesFor } from '../services/shareService'
 import { getMyConnections, type FriendUser } from '../services/relationshipService'
 import { getMyGroups, type FriendGroup } from '../services/groupService'
 import { Modal } from './Modal'
@@ -84,15 +85,21 @@ export function EventShareModal({ event: initialEvent, onClose, onSuccess }: Eve
 
   useEffect(() => {
     if (tierZero) return
-    setSharedWithFriends((event.shared_with_friends as SharedWithFriends) ?? 'none')
-    getEventSharedWithUserIds(event.id).then(({ data }) => setSharedWithUserIds(data ?? []))
-    getEventSharedWithGroupIds(event.id).then(({ data }) => setSharedWithGroupIds(data ?? []))
+    // Source of truth is event_shares — derive the radio + targets from it.
+    getSharesFor(event.id).then(({ data: shares }) => {
+      const groupIds = shares.filter((s) => s.target_type === 'group').map((s) => s.target_id).filter((x): x is string => !!x)
+      const userIds = shares.filter((s) => s.target_type === 'user').map((s) => s.target_id).filter((x): x is string => !!x)
+      const hasAll = shares.some((s) => s.target_type === 'all')
+      setSharedWithFriends(hasAll ? 'all' : userIds.length ? 'selected' : 'none')
+      setSharedWithUserIds(userIds)
+      setSharedWithGroupIds(groupIds)
+    })
     if (!event.parent_event_id) {
       getChildSessionIds(event.id).then(({ data }) => setChildSessionIds(data ?? []))
     } else {
       setChildSessionIds([])
     }
-  }, [event.id, event.parent_event_id, event.shared_with_friends, tierZero])
+  }, [event.id, event.parent_event_id, tierZero])
 
   const handleSwapToParent = async () => {
     if (!event.parent_event_id) return

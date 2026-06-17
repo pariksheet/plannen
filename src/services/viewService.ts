@@ -2,7 +2,7 @@ import { dbClient } from '../lib/dbClient'
 import { supabase } from '../lib/supabase'
 import { isTierZero } from '../lib/tier'
 import { Event, resolveEventStatus } from '../types/event'
-import { getAdoptedEventIds } from './shareService'
+import { getAdoptedEventIds, attachShareSummaries } from './shareService'
 
 // The v0 REST contract scopes /api/events to the current user (created_by =
 // auth uid). Cross-user feeds (people / groups) are not surfaced via REST yet
@@ -22,7 +22,8 @@ export async function getMyFeedEvents(
     params.limit = (!params.from_date && !params.to_date) ? 500 : 200
     const created = await dbClient.events.list(params) as unknown as Event[]
     const merged = created.map((e) => resolveEventStatus(e))
-    return { data: enrichWithRecurrenceContext(merged), error: null }
+    const withShares = await attachShareSummaries(enrichWithRecurrenceContext(merged))
+    return { data: withShares, error: null }
   } catch (e) {
     return { data: null, error: e instanceof Error ? e : new Error('Get feed failed') }
   }
@@ -118,7 +119,8 @@ export async function getGroupsEvents(): Promise<{ data: Event[] | null; error: 
     // Sharing a trip container surfaces its children too.
     const eventIds = await withTripChildren(sharedIds)
     const events = await fetchEventsByIds(eventIds)
-    return { data: enrichWithRecurrenceContext(events), error: null }
+    const withShares = await attachShareSummaries(enrichWithRecurrenceContext(events))
+    return { data: withShares, error: null }
   } catch (e) {
     return { data: null, error: e instanceof Error ? e : new Error('Get groups events failed') }
   }
@@ -151,7 +153,8 @@ async function getEventsSharedWithMeDirectly(): Promise<{ data: Event[] | null; 
     const eventIds = await withTripChildren(sharedIds)
     const events = await fetchEventsByIds(eventIds)
     // Hide events I created — they live in My Plans.
-    return { data: enrichWithRecurrenceContext(events.filter((e) => e.created_by !== userId)), error: null }
+    const withShares = await attachShareSummaries(enrichWithRecurrenceContext(events.filter((e) => e.created_by !== userId)))
+    return { data: withShares, error: null }
   } catch (e) {
     return { data: null, error: e instanceof Error ? e : new Error('Get people events failed') }
   }

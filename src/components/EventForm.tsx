@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Event, EventFormData, EventStatus, SharedWithFriends } from '../types/event'
-import { createEvent, updateEvent, getEventSharedWithUserIds, getEventSharedWithGroupIds } from '../services/eventService'
+import { createEvent, updateEvent } from '../services/eventService'
+import { getSharesFor } from '../services/shareService'
 import { createRecurringTask } from '../services/agentTaskService'
 import { getMyConnections, type FriendUser } from '../services/relationshipService'
 import { getMyGroups } from '../services/groupService'
@@ -201,11 +202,18 @@ export function EventForm({ event, onClose, onSuccess, initialData }: EventFormP
         shared_with_friends: (event.shared_with_friends as SharedWithFriends) ?? 'none',
       }))
       setHashtagsInput(event.hashtags && event.hashtags.length ? event.hashtags.map((tag) => `#${tag}`).join(' ') : '')
-      getEventSharedWithUserIds(event.id).then(({ data: ids }) => {
-        setFormData((prev) => ({ ...prev, shared_with_user_ids: ids ?? [] }))
-      })
-      getEventSharedWithGroupIds(event.id).then(({ data: groupIds }) => {
-        setFormData((prev) => ({ ...prev, shared_with_group_ids: groupIds ?? [] }))
+      // Derive the sharing radio + targets from event_shares (the source of
+      // truth), not the dormant shared_with_friends column.
+      getSharesFor(event.id).then(({ data: shares }) => {
+        const groupIds = shares.filter((s) => s.target_type === 'group').map((s) => s.target_id).filter((x): x is string => !!x)
+        const userIds = shares.filter((s) => s.target_type === 'user').map((s) => s.target_id).filter((x): x is string => !!x)
+        const hasAll = shares.some((s) => s.target_type === 'all')
+        setFormData((prev) => ({
+          ...prev,
+          shared_with_friends: hasAll ? 'all' : userIds.length ? 'selected' : 'none',
+          shared_with_group_ids: groupIds,
+          shared_with_user_ids: userIds,
+        }))
       })
       getMyRsvp(event.id).then(({ data }) => {
         setVisitDateTime(data?.preferred_visit_date ? toDateTimeLocal(data.preferred_visit_date) : '')

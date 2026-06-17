@@ -36,6 +36,8 @@ export interface Event {
   // Enriched at query time — not DB columns
   parent_title?: string | null
   sessions_summary?: { total: number; past: number; missed: number; next_date: string | null } | null
+  // Derived from event_shares at load time (the source of truth for sharing).
+  shared_summary?: { groups: number; users: number; all: boolean; assigned: number } | null
 }
 
 export interface EventFormData {
