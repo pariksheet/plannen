@@ -29,7 +29,9 @@ export function ChecklistCreateForm({ events, onCreate, onClose, defaultEventId 
   const selected = events.find((e) => e.id === eventId) ?? null
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const matches = q ? events.filter((e) => e.title.toLowerCase().includes(q)) : events
+    // Cancelled events aren't valid attach targets — hide them from the picker.
+    const attachable = events.filter((e) => e.event_status !== 'cancelled')
+    const matches = q ? attachable.filter((e) => e.title.toLowerCase().includes(q)) : attachable
     return matches.slice(0, 30)
   }, [events, query])
 

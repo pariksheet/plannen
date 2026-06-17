@@ -764,7 +764,20 @@ export const tier1: DbClient = {
         : []
       return cl
     },
-    update: async (id, patch) => unwrap(await supabase.from('checklists').update({ title: patch.title }).eq('id', id).select().single()) as ChecklistRow,
+    update: async (id, patch) => {
+      const fields: Record<string, unknown> = {}
+      if (patch.title !== undefined) fields.title = patch.title
+      if (patch.event_id !== undefined) {
+        // Reattaching must point at an event the caller owns — mirror create's guard.
+        if (patch.event_id) {
+          const userId = await currentUserId()
+          const { data: ev } = await supabase.from('events').select('id').eq('id', patch.event_id).eq('created_by', userId).maybeSingle()
+          if (!ev) throw new Error('event_id must be an event you own')
+        }
+        fields.event_id = patch.event_id
+      }
+      return unwrap(await supabase.from('checklists').update(fields).eq('id', id).select().single()) as ChecklistRow
+    },
     delete: async (id) => { const { error } = await supabase.from('checklists').delete().eq('id', id); if (error) throw new Error(error.message) },
     addItems: async (id, items) => {
       const userId = await currentUserId()
