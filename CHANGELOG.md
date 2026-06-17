@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-17
+
+### Sharing
+
+- **One unified way to share.** Every event, to-do, reminder, and trip is now shared through a single mechanism with a clear permission level, replacing the old scattered friends/groups/visibility settings. Sharing is read-only by default ("awareness"), so what you share shows up on others' feeds as informational and never blocks their calendar.
+- **Default sharing.** Set a standing rule so new items are shared automatically the moment you create them — with a group, a specific friend, or everyone you're connected to. Configure it under Settings → Default sharing, or just ask in chat ("share my new events with my family group"). You can always override the target, or keep any individual item private.
+- **A "shared with me" inbox.** Items others share with you arrive read-only; you opt the ones you care about onto your own agenda, so your calendar stays yours.
+- **Assignable to-dos.** Hand a to-do to a person or group so they can complete it — it appears in both lists, and whoever finishes marks it done for both.
+- **Share a trip once, its contents follow.** Sharing a trip surfaces all of its events and to-dos to the group automatically, with no per-item busywork.
+- **Sharing badges now tell the truth.** Event cards and details reflect the real audience (a group, selected people, or everyone) instead of only the legacy friends flag.
+
 ## [0.8.6] - 2026-06-17
 
 ### Events
