@@ -37,6 +37,7 @@ const definitions: ToolDefinition[] = [
         flex_period: { type: 'string', enum: ['week', 'month'], description: "Required when recurrence_mode='flex_count'." },
         flex_target: { type: 'number', description: "Required when recurrence_mode='flex_count'. Completions per period, 1–31 (e.g. gym 3×/week = period 'week', target 3)." },
         preferred_time_of_day: { type: 'string', enum: ['morning', 'afternoon', 'evening', 'anytime'] },
+        precise_time: { type: 'string', description: 'Optional precise start clock time "HH:MM" (24h, e.g. "20:00"). Only meaningful for pinned routines; overrides preferred_time_of_day for the schedule slot.' },
         family_member_id: { type: ['string', 'null'], description: 'Optional — owner is a circle member rather than the user themselves.' },
       },
       required: ['name', 'category', 'recurrence_mode'],
@@ -66,6 +67,7 @@ const definitions: ToolDefinition[] = [
         flex_period: { type: 'string', enum: ['week', 'month'], description: "Required when recurrence_mode='flex_count'." },
         flex_target: { type: 'number', description: "Required when recurrence_mode='flex_count'. Completions per period, 1–31 (e.g. gym 3×/week = period 'week', target 3)." },
         preferred_time_of_day: { type: 'string', enum: ['morning', 'afternoon', 'evening', 'anytime'] },
+        precise_time: { type: 'string', description: 'Optional precise start clock time "HH:MM" (24h, e.g. "20:00"). Only meaningful for pinned routines; overrides preferred_time_of_day for the schedule slot.' },
         family_member_id: { type: ['string', 'null'] },
         active: { type: 'boolean' },
       },
@@ -124,7 +126,7 @@ const listPractices: ToolHandler = async (args, ctx) => {
   const { rows } = await ctx.client.query(
     `SELECT id, family_member_id, name, category, recurrence_mode, recurrence_rule,
             dtstart::text, recurrence_until::text, flex_period, flex_target,
-            preferred_time_of_day, active, created_at, updated_at
+            preferred_time_of_day, precise_time, active, created_at, updated_at
      FROM plannen.practices
      WHERE ${where.join(' AND ')}
      ORDER BY created_at ASC`,
@@ -138,14 +140,14 @@ const createPractice: ToolHandler = async (args, ctx) => {
     name: string; category: string; recurrence_mode: string
     recurrence_rule?: unknown; dtstart?: string | null; recurrence_until?: string | null
     flex_period?: string | null; flex_target?: number | null
-    preferred_time_of_day?: string | null; family_member_id?: string | null
+    preferred_time_of_day?: string | null; precise_time?: string | null; family_member_id?: string | null
   }
   const { rows } = await ctx.client.query(
     `INSERT INTO plannen.practices
        (user_id, family_member_id, name, category, recurrence_mode,
         recurrence_rule, dtstart, recurrence_until, flex_period, flex_target,
-        preferred_time_of_day)
-     VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::date, current_date), $8, $9, $10, COALESCE($11, 'anytime'))
+        preferred_time_of_day, precise_time)
+     VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::date, current_date), $8, $9, $10, COALESCE($11, 'anytime'), $12)
      RETURNING *`,
     [
       ctx.userId,
@@ -159,6 +161,7 @@ const createPractice: ToolHandler = async (args, ctx) => {
       a.flex_period ?? null,
       a.flex_target ?? null,
       a.preferred_time_of_day ?? null,
+      a.precise_time ?? null,
     ],
   )
   return rows[0]
