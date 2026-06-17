@@ -367,7 +367,7 @@ export function MyFeed() {
     <div className="space-y-8 w-full min-w-0">
       <div className="space-y-2">
         <h2 className="text-2xl sm:text-3xl font-bold text-gray-900">My Plans</h2>
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="inline-flex rounded-md border border-gray-300 bg-white p-0.5">
             <button
               type="button"

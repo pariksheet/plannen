@@ -248,9 +248,9 @@ function HeaderStrip({ heading }: { heading: string }) {
     return () => { cancelled = true }
   }, [])
   return (
-    <header className="flex items-baseline justify-between">
-      <h2 className={`${sketchHand} text-4xl sm:text-5xl text-gray-900`}>{heading}</h2>
-      <div className={`${sketchBody} text-right`}>
+    <header className="flex items-baseline justify-between gap-3">
+      <h2 className={`${sketchHand} text-3xl sm:text-5xl text-gray-900 min-w-0 truncate`}>{heading}</h2>
+      <div className={`${sketchBody} text-right shrink-0`}>
         <div className="text-base text-gray-700">{dateLabel}</div>
         {weather && (
           <div className="text-sm text-gray-600 capitalize">
