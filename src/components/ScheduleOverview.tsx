@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bell, Calendar, Briefcase } from 'lucide-react'
+import { Bell, Calendar, Briefcase, Car } from 'lucide-react'
 import { Event } from '../types/event'
 import { getTodayWeather, TodayWeather } from '../services/weatherService'
 import { getLocations } from '../services/profileService'
@@ -545,6 +545,7 @@ function WeekCard({ events, obligations, subjectNames, hideRoutines, ...actions 
             return (
               <li key={row.key} data-testid="obligation-row" className="break-inside-avoid">
                 <div className="flex items-center gap-1.5 w-full text-base leading-6 px-1.5 py-0.5 bg-yellow-100/60">
+                  <Car className="h-4 w-4 text-sky-600 shrink-0" aria-hidden />
                   <span className="text-gray-500 text-sm whitespace-nowrap mr-2">{o.time}</span>
                   <span className="text-gray-800">
                     {obligationLabel(o)}
