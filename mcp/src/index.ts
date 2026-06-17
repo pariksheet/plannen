@@ -241,6 +241,7 @@ async function createEvent(args: {
   owner_attends?: boolean
   group_id?: string | null
   list_label?: string
+  share?: Array<{ type: 'user' | 'group' | 'all'; id?: string | null }>
 }) {
   const id = await uid()
   const tz = await getUserTimezone()
@@ -340,6 +341,15 @@ async function createEvent(args: {
     const source = args.enrollment_url
       ? await upsertSource(c, id, data.id, args.enrollment_url)
       : null
+
+    // Sharing: explicit `share` wins; [] / null means private; omitted means
+    // apply the default-share rule. Container children inherit visibility
+    // through the trip RLS branch, so they need no own share rows.
+    if (args.share === undefined) {
+      if (args.group_id == null) await applyDefaultShare(c, id, data.id)
+    } else if (Array.isArray(args.share) && args.share.length > 0) {
+      await writeShareTargets(c, id, data.id, args.share)
+    }
 
     return { ...slimEvent(data), source }
   })
@@ -2788,6 +2798,144 @@ async function deleteChecklist(checklistId: string) {
   })
 }
 
+// ── Unified event sharing ─────────────────────────────────────────────────────
+// Mirrors supabase/functions/mcp/tools/shares.ts. One event_shares row per
+// (event, target). Access enforced in SQL by created_by checks.
+
+type ShareTargetArg = { type: 'user' | 'group' | 'all'; id?: string | null }
+
+function normaliseShareTargets(raw: unknown): ShareTargetArg[] {
+  if (!Array.isArray(raw)) return []
+  const out: ShareTargetArg[] = []
+  for (const t of raw) {
+    const tt = (t as ShareTargetArg)?.type
+    if (tt !== 'user' && tt !== 'group' && tt !== 'all') continue
+    const tid = tt === 'all' ? null : ((t as ShareTargetArg).id ?? null)
+    if (tt !== 'all' && !tid) continue
+    out.push({ type: tt, id: tid })
+  }
+  return out
+}
+
+async function writeEventShares(
+  c: PoolClient, userId: string, eventId: string,
+  targets: ShareTargetArg[], level: 'awareness' | 'assigned', requireKind?: string,
+): Promise<number> {
+  const { rows: own } = await c.query(
+    `SELECT event_kind FROM plannen.events WHERE id = $1 AND created_by = $2`,
+    [eventId, userId],
+  )
+  if (own.length === 0) throw new Error('event not found or you are not the owner')
+  if (requireKind && own[0].event_kind !== requireKind) {
+    throw new Error(`this action requires an event_kind='${requireKind}'`)
+  }
+  let n = 0
+  for (const t of targets) {
+    await c.query(
+      `INSERT INTO plannen.event_shares (event_id, target_type, target_id, level, created_by)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (event_id, target_type, target_id)
+       DO UPDATE SET level = EXCLUDED.level`,
+      [eventId, t.type, t.id, level, userId],
+    )
+    n++
+  }
+  return n
+}
+
+async function writeShareTargets(c: PoolClient, userId: string, eventId: string, share: unknown): Promise<void> {
+  const targets = normaliseShareTargets(share)
+  if (targets.length === 0) return
+  await writeEventShares(c, userId, eventId, targets, 'awareness')
+}
+
+async function applyDefaultShare(c: PoolClient, userId: string, eventId: string): Promise<void> {
+  const { rows } = await c.query(
+    `SELECT default_share_enabled, default_share_target_type, default_share_target_id, default_share_level
+       FROM plannen.user_settings WHERE user_id = $1`,
+    [userId],
+  )
+  const s = rows[0]
+  if (!s || !s.default_share_enabled || !s.default_share_target_type) return
+  await c.query(
+    `INSERT INTO plannen.event_shares (event_id, target_type, target_id, level, created_by)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (event_id, target_type, target_id) DO NOTHING`,
+    [eventId, s.default_share_target_type, s.default_share_target_id ?? null, s.default_share_level ?? 'awareness', userId],
+  )
+}
+
+async function shareEvent(args: { event_id: string; targets: unknown; level?: 'awareness' | 'assigned' }) {
+  const id = await uid()
+  return await withUserContext(id, async (c) => {
+    const targets = normaliseShareTargets(args.targets)
+    if (targets.length === 0) return { shared: 0 }
+    const n = await writeEventShares(c, id, args.event_id, targets, args.level === 'assigned' ? 'assigned' : 'awareness')
+    return { shared: n }
+  })
+}
+
+async function assignTodo(args: { todo_id: string; targets: unknown }) {
+  const id = await uid()
+  return await withUserContext(id, async (c) => {
+    const targets = normaliseShareTargets(args.targets).filter((t) => t.type !== 'all')
+    if (targets.length === 0) throw new Error('assign_todo needs at least one user or group target')
+    const n = await writeEventShares(c, id, args.todo_id, targets, 'assigned', 'todo')
+    return { assigned: n }
+  })
+}
+
+async function unshareEvent(args: { event_id: string; target_type: 'user' | 'group' | 'all'; target_id?: string | null }) {
+  const id = await uid()
+  return await withUserContext(id, async (c) => {
+    const { rows: own } = await c.query(
+      `SELECT 1 FROM plannen.events WHERE id = $1 AND created_by = $2`, [args.event_id, id])
+    if (own.length === 0) throw new Error('event not found or you are not the owner')
+    const idClause = args.target_type === 'all' ? 'target_id IS NULL' : 'target_id = $3'
+    const params: unknown[] = args.target_type === 'all'
+      ? [args.event_id, args.target_type]
+      : [args.event_id, args.target_type, args.target_id]
+    const { rows } = await c.query(
+      `DELETE FROM plannen.event_shares WHERE event_id = $1 AND target_type = $2 AND ${idClause} RETURNING id`, params)
+    return { removed: rows.length }
+  })
+}
+
+async function adoptSharedEvent(args: { event_id: string }) {
+  const id = await uid()
+  return await withUserContext(id, async (c) => {
+    const { rows: ok } = await c.query(
+      `SELECT 1 FROM plannen.events e
+        WHERE e.id = $1 AND (e.created_by = $2 OR plannen.user_can_see_event(e.id))`,
+      [args.event_id, id])
+    if (ok.length === 0) throw new Error('event not found or not shared with you')
+    await c.query(
+      `INSERT INTO plannen.event_share_adoption (event_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [args.event_id, id])
+    return { adopted: true }
+  })
+}
+
+async function unadoptSharedEvent(args: { event_id: string }) {
+  const id = await uid()
+  return await withUserContext(id, async (c) => {
+    const { rows } = await c.query(
+      `DELETE FROM plannen.event_share_adoption WHERE event_id = $1 AND user_id = $2 RETURNING event_id`,
+      [args.event_id, id])
+    return { adopted: false, removed: rows.length }
+  })
+}
+
+async function completeEvent(args: { event_id: string; done?: boolean }) {
+  const id = await uid()
+  return await withUserContext(id, async (c) => {
+    const { rows } = await c.query(
+      `SELECT * FROM plannen.complete_event($1, $2)`, [args.event_id, args.done !== false])
+    if (rows.length === 0) throw new Error('event not found')
+    return rows[0]
+  })
+}
+
 // ── Tool registry ─────────────────────────────────────────────────────────────
 
 const TOOLS: Tool[] = [
@@ -2842,6 +2990,15 @@ const TOOLS: Tool[] = [
         hashtags: { type: 'array', items: { type: 'string' }, description: 'Tags without # (max 5)' },
         group_id: { type: 'string', description: 'Container/trip this event or todo belongs to (a container event id). Child inherits the container event_type + sharing unless this event is itself a container. A container cannot have a group_id.' },
         list_label: { type: 'string', description: 'For event_kind=todo inside a container: which named list it belongs to (e.g. Packing, To-do, Shopping). Ignored for non-todos.' },
+        share: {
+          type: 'array',
+          description: 'Override default sharing. Each: {type:"user"|"group"|"all", id?}. Omit this arg to apply the user\'s default-share rule; pass [] to keep it private. Shares read-only (awareness) — use assign_todo for assignment.',
+          items: {
+            type: 'object',
+            properties: { type: { type: 'string', enum: ['user', 'group', 'all'] }, id: { type: ['string', 'null'] } },
+            required: ['type'],
+          },
+        },
         event_status: { type: 'string', enum: ['watching', 'planned', 'interested', 'going', 'cancelled', 'past', 'missed'], description: 'Initial status (default: going for future, past for past dates)' },
         recurrence_rule: {
           type: 'object',
@@ -2881,6 +3038,86 @@ const TOOLS: Tool[] = [
         list_label: { type: 'string', description: 'For a todo inside a container: its named list bucket (e.g. Packing). null clears it.' },
       },
       required: ['id'],
+    },
+  },
+  {
+    name: 'share_event',
+    description: 'Share an event/reminder/trip with people and/or groups at read-only "awareness" level (the default). Recipients see it in their "Shared with me" inbox and opt in to put it on their own agenda; it never blocks their calendar. Owner only. Sharing a container/trip surfaces its child events too. Empty targets is a no-op.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        event_id: { type: 'string' },
+        targets: {
+          type: 'array',
+          description: 'Who to share with. Each: {type:"user"|"group"|"all", id?} — id is a user UUID or friend_group UUID; omit id for type "all" (all accepted connections).',
+          items: {
+            type: 'object',
+            properties: { type: { type: 'string', enum: ['user', 'group', 'all'] }, id: { type: ['string', 'null'] } },
+            required: ['type'],
+          },
+        },
+        level: { type: 'string', enum: ['awareness', 'assigned'], description: 'Defaults to awareness. Use assign_todo for assignment instead.' },
+      },
+      required: ['event_id', 'targets'],
+    },
+  },
+  {
+    name: 'assign_todo',
+    description: 'Assign a todo to people/groups so they can complete it (co-ownership: it appears in their list AND yours, and whoever finishes marks it done for both). Owner only; the event must be a todo. Shares at "assigned" level — recipients get write access to completion via complete_event.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        todo_id: { type: 'string' },
+        targets: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { type: { type: 'string', enum: ['user', 'group'] }, id: { type: 'string' } },
+            required: ['type', 'id'],
+          },
+        },
+      },
+      required: ['todo_id', 'targets'],
+    },
+  },
+  {
+    name: 'unshare_event',
+    description: 'Remove one share from an event (owner only). Pass target_type and target_id (omit target_id for type "all").',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        event_id: { type: 'string' },
+        target_type: { type: 'string', enum: ['user', 'group', 'all'] },
+        target_id: { type: ['string', 'null'] },
+      },
+      required: ['event_id', 'target_type'],
+    },
+  },
+  {
+    name: 'adopt_shared_event',
+    description: 'Pull an awareness-shared event onto your own agenda (the opt-in step). Until adopted it sits in your "Shared with me" inbox. You must be able to see the event.',
+    inputSchema: {
+      type: 'object',
+      properties: { event_id: { type: 'string' } },
+      required: ['event_id'],
+    },
+  },
+  {
+    name: 'unadopt_shared_event',
+    description: 'Remove a previously-adopted shared event from your agenda (back to the inbox). Does not unshare it.',
+    inputSchema: {
+      type: 'object',
+      properties: { event_id: { type: 'string' } },
+      required: ['event_id'],
+    },
+  },
+  {
+    name: 'complete_event',
+    description: 'Mark an event/todo complete (or pass done:false to reopen). Allowed for the creator OR anyone it was assigned to via assign_todo. Use this instead of complete_todo for assigned todos.',
+    inputSchema: {
+      type: 'object',
+      properties: { event_id: { type: 'string' }, done: { type: 'boolean', description: 'Defaults true; false reopens.' } },
+      required: ['event_id'],
     },
   },
   {
@@ -4185,6 +4422,12 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case 'delete_checklist_item':   result = await deleteChecklistItem((args as { item_id: string }).item_id); break
       case 'share_checklist':         result = await shareChecklist(args as Parameters<typeof shareChecklist>[0]); break
       case 'delete_checklist':        result = await deleteChecklist((args as { checklist_id: string }).checklist_id); break
+      case 'share_event':             result = await shareEvent(args as Parameters<typeof shareEvent>[0]); break
+      case 'assign_todo':             result = await assignTodo(args as Parameters<typeof assignTodo>[0]); break
+      case 'unshare_event':           result = await unshareEvent(args as Parameters<typeof unshareEvent>[0]); break
+      case 'adopt_shared_event':      result = await adoptSharedEvent(args as Parameters<typeof adoptSharedEvent>[0]); break
+      case 'unadopt_shared_event':    result = await unadoptSharedEvent(args as Parameters<typeof unadoptSharedEvent>[0]); break
+      case 'complete_event':          result = await completeEvent(args as Parameters<typeof completeEvent>[0]); break
       default: throw new Error(`Unknown tool: ${name}`)
     }
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
