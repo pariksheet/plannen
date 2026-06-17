@@ -7,11 +7,21 @@ export type TodayRoutine = {
   label: string
   done: boolean
   sortMins: number
+  timeLabel: string
 }
 
+const HHMM = /^([01][0-9]|2[0-3]):[0-5][0-9]$/
+
 /** Part-of-day → a synthetic minutes-of-day sort key so routines interleave
- *  among the day's timed items. `anytime` sorts last. */
-export function partOfDayMins(tod: PracticeRow['preferred_time_of_day']): number {
+ *  among the day's timed items. A valid precise_time wins; `anytime` sorts last. */
+export function partOfDayMins(
+  tod: PracticeRow['preferred_time_of_day'],
+  preciseTime?: string | null,
+): number {
+  if (preciseTime && HHMM.test(preciseTime)) {
+    const [h, m] = preciseTime.split(':').map(Number)
+    return h * 60 + m
+  }
   switch (tod) {
     case 'morning': return 480    // 08:00
     case 'afternoon': return 780  // 13:00
@@ -54,7 +64,8 @@ export function applicableTodayRoutines(
       id: p.id,
       label: practiceLabel(p, doneThisPeriod(p, completions, weekStart, date)),
       done: completions.some((c) => c.practice_id === p.id && c.completed_on === date),
-      sortMins: partOfDayMins(p.preferred_time_of_day),
+      sortMins: partOfDayMins(p.preferred_time_of_day, p.precise_time),
+      timeLabel: p.precise_time && HHMM.test(p.precise_time) ? p.precise_time : '',
     }))
     .sort((a, b) => a.sortMins - b.sortMins)
 }

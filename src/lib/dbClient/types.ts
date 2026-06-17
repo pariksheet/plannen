@@ -108,6 +108,7 @@ export type PracticeRow = Record<string, unknown> & {
   flex_period: 'week' | 'month' | null
   flex_target: number | null
   preferred_time_of_day: 'morning' | 'afternoon' | 'evening' | 'anytime'
+  precise_time: string | null
   active: boolean
   created_at: string
   updated_at: string
