@@ -4,6 +4,7 @@ import { Event, EventFormData, EventViewMode } from '../types/event'
 import { supabase } from '../lib/supabase'
 import { getGroupsEvents } from '../services/viewService'
 import { TIER } from '../lib/tier'
+import { useAppRefresh } from '../lib/appRefresh'
 import { getPreferredVisitDates } from '../services/rsvpService'
 import { buildFutureTimeline, TimelineItem } from '../utils/timeline'
 import { Timeline } from './Timeline'
@@ -89,6 +90,9 @@ export function MyGroups() {
   const refresh = useCallback(async () => {
     await loadEvents()
   }, [loadEvents])
+
+  // Header refresh button + regain-focus refetch (PWA has no browser reload).
+  useAppRefresh(() => { void refresh() })
 
   const loadEventGroupsContext = useCallback(async (eventIds: string[]) => {
     if (eventIds.length === 0) {
