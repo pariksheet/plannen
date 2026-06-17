@@ -17,6 +17,7 @@ import { locations } from './routes/api/locations.js'
 import { sources } from './routes/api/sources.js'
 import { watch } from './routes/api/watch.js'
 import { rsvp } from './routes/api/rsvp.js'
+import { visitPreference } from './routes/api/visit-preference.js'
 import { groups } from './routes/api/groups.js'
 import { wishlist } from './routes/api/wishlist.js'
 import { settings } from './routes/api/settings.js'
@@ -91,6 +92,7 @@ app.route('/api/locations', locations)
 app.route('/api/sources', sources)
 app.route('/api/watch', watch)
 app.route('/api/rsvp', rsvp)
+app.route('/api/visit-preference', visitPreference)
 app.route('/api/groups', groups)
 app.route('/api/wishlist', wishlist)
 app.route('/api/settings', settings)

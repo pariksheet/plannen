@@ -10,7 +10,8 @@ export interface MyRsvp {
   preferred_visit_date: string | null
 }
 
-type RsvpRow = { event_id: string; user_id: string; status: string; preferred_visit_date: string | null }
+type RsvpRow = { event_id: string; user_id: string; status: string }
+type VisitPrefRow = { event_id: string; user_id: string; visit_date: string | null }
 
 async function fetchRsvpRows(eventIds: string[]): Promise<RsvpRow[]> {
   if (eventIds.length === 0) return []
@@ -32,7 +33,7 @@ async function fetchRsvpRows(eventIds: string[]): Promise<RsvpRow[]> {
         // RSVPs on events the current user can see.
         const { data, error } = await supabase
           .from('event_rsvps')
-          .select('event_id,user_id,status,preferred_visit_date')
+          .select('event_id,user_id,status')
           .in('event_id', slice)
         if (error) continue
         if (data) out.push(...(data as RsvpRow[]))
@@ -44,16 +45,40 @@ async function fetchRsvpRows(eventIds: string[]): Promise<RsvpRow[]> {
   }
 }
 
+// Visit dates live in plannen.event_visit_preferences (issue #5), decoupled
+// from RSVP status. dbClient.visitPreference.list is tier-aware, so both tiers
+// share this fetch. RLS limits results to events the caller can see.
+async function fetchVisitPrefRows(eventIds: string[]): Promise<VisitPrefRow[]> {
+  if (eventIds.length === 0) return []
+  const CHUNK = 500
+  const out: VisitPrefRow[] = []
+  try {
+    for (let i = 0; i < eventIds.length; i += CHUNK) {
+      const slice = eventIds.slice(i, i + CHUNK)
+      const rows = await dbClient.visitPreference.list(slice)
+      for (const r of rows) {
+        out.push({ event_id: r.event_id, user_id: r.user_id, visit_date: r.visit_date ?? null })
+      }
+    }
+    return out
+  } catch {
+    return out
+  }
+}
+
 export async function getMyRsvp(eventId: string): Promise<{ data: MyRsvp | null; error: Error | null }> {
   try {
     const me = await dbClient.me.get()
-    const rows = await fetchRsvpRows([eventId])
-    const mine = rows.find((r) => r.user_id === me.userId)
-    if (!mine) return { data: { status: null, preferred_visit_date: null }, error: null }
+    const [rsvps, prefs] = await Promise.all([
+      fetchRsvpRows([eventId]),
+      fetchVisitPrefRows([eventId]),
+    ])
+    const mineRsvp = rsvps.find((r) => r.user_id === me.userId)
+    const minePref = prefs.find((r) => r.user_id === me.userId)
     return {
       data: {
-        status: (mine.status as RsvpStatus) ?? null,
-        preferred_visit_date: mine.preferred_visit_date ?? null,
+        status: (mineRsvp?.status as RsvpStatus) ?? null,
+        preferred_visit_date: minePref?.visit_date ?? null,
       },
       error: null,
     }
@@ -64,11 +89,12 @@ export async function getMyRsvp(eventId: string): Promise<{ data: MyRsvp | null;
 
 export async function setRsvp(eventId: string, status: RsvpStatus, preferred_visit_date?: string | null): Promise<{ error: Error | null }> {
   try {
-    await dbClient.rsvp.upsert({
-      event_id: eventId,
-      status,
-      ...(preferred_visit_date !== undefined ? { preferred_visit_date: preferred_visit_date || null } : {}),
-    })
+    await dbClient.rsvp.upsert({ event_id: eventId, status })
+    // A visit date passed alongside an RSVP is still just a planning hint — it
+    // is stored separately and never gates the RSVP itself.
+    if (preferred_visit_date !== undefined) {
+      await dbClient.visitPreference.upsert({ event_id: eventId, visit_date: preferred_visit_date || null })
+    }
     notifyRsvp(eventId, status)
     return { error: null }
   } catch (e) {
@@ -77,23 +103,25 @@ export async function setRsvp(eventId: string, status: RsvpStatus, preferred_vis
 }
 
 export async function setPreferredVisitDate(eventId: string, date: string | null): Promise<{ error: Error | null }> {
-  const { data, error: fetchErr } = await getMyRsvp(eventId)
-  if (fetchErr) return { error: fetchErr }
-  // Don't auto-create an RSVP just because the user picked a visit date.
-  // Visit date is a planning hint on an existing RSVP — caller must RSVP first.
-  if (!data?.status) return { error: null }
-  return setRsvp(eventId, data.status, date)
+  // Visit date is decoupled from RSVP status (issue #5): setting it never
+  // creates or mutates an RSVP, and it can be set with no RSVP at all.
+  try {
+    await dbClient.visitPreference.upsert({ event_id: eventId, visit_date: date || null })
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e : new Error('Set preferred visit date failed') }
+  }
 }
 
-/** Fetch preferred_visit_date for a specific user's RSVP — best-effort across the v0 REST. */
+/** Fetch preferred_visit_date for a specific user — best-effort across the v0 REST. */
 export async function getPreferredVisitDateForUser(
   eventId: string,
   userId: string,
 ): Promise<{ data: string | null; error: Error | null }> {
   try {
-    const rows = await fetchRsvpRows([eventId])
+    const rows = await fetchVisitPrefRows([eventId])
     const row = rows.find((r) => r.user_id === userId)
-    return { data: row?.preferred_visit_date ?? null, error: null }
+    return { data: row?.visit_date ?? null, error: null }
   } catch (e) {
     return { data: null, error: e instanceof Error ? e : new Error('Get preferred visit date failed') }
   }
@@ -106,10 +134,10 @@ export async function getPreferredVisitDates(
   if (eventIds.length === 0) return { data: {}, error: null }
   try {
     const me = await dbClient.me.get()
-    const rows = await fetchRsvpRows(eventIds)
+    const rows = await fetchVisitPrefRows(eventIds)
     const map: Record<string, string | null> = {}
     rows.filter((r) => r.user_id === me.userId).forEach((r) => {
-      map[r.event_id] = r.preferred_visit_date ?? null
+      map[r.event_id] = r.visit_date ?? null
     })
     return { data: map, error: null }
   } catch (e) {
@@ -126,12 +154,12 @@ export async function getCreatorPreferredVisitDates(
     const me = await dbClient.me.get()
     const eventIds = events.filter((e) => e.created_by !== me.userId).map((e) => e.id)
     if (eventIds.length === 0) return { data: {}, error: null }
-    const rows = await fetchRsvpRows(eventIds)
+    const rows = await fetchVisitPrefRows(eventIds)
     const createdBy = new Map(events.map((e) => [e.id, e.created_by]))
     const map: Record<string, string | null> = {}
     rows.forEach((r) => {
-      if (createdBy.get(r.event_id) === r.user_id && r.preferred_visit_date) {
-        map[r.event_id] = r.preferred_visit_date
+      if (createdBy.get(r.event_id) === r.user_id && r.visit_date) {
+        map[r.event_id] = r.visit_date
       }
     })
     return { data: map, error: null }

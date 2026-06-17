@@ -33,6 +33,7 @@ import type {
   SettingsRow,
   SourceRow,
   StoryRow,
+  VisitPreferenceRow,
   WatchTaskRow,
 } from './types'
 
@@ -536,6 +537,30 @@ export const tier1: DbClient = {
         .single()
       if (error) throw new Error(error.message)
       return data as RsvpRow
+    },
+  },
+
+  // ── visit preference ──────────────────────────────────────────────────────
+  // Decoupled from rsvp (issue #5): a planning hint that does not imply an RSVP.
+  visitPreference: {
+    list: async (eventIds) => {
+      if (eventIds.length === 0) return []
+      const { data, error } = await supabase
+        .from('event_visit_preferences')
+        .select('event_id,user_id,visit_date')
+        .in('event_id', eventIds)
+      if (error) throw new Error(error.message)
+      return (data ?? []) as VisitPreferenceRow[]
+    },
+    upsert: async (input) => {
+      const uid = await currentUserId()
+      const { data, error } = await supabase
+        .from('event_visit_preferences')
+        .upsert({ user_id: uid, ...input, updated_at: new Date().toISOString() }, { onConflict: 'event_id,user_id' })
+        .select()
+        .single()
+      if (error) throw new Error(error.message)
+      return data as VisitPreferenceRow
     },
   },
 
