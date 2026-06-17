@@ -104,28 +104,66 @@ export async function setShares(eventId: string, targets: ShareTarget[]): Promis
 export async function applyDefaultShare(eventId: string): Promise<{ error: Error | null }> {
   if (isTierZero()) return { error: null }
   try {
+    const { data, error } = await getDefaultShare()
+    if (error) throw error
+    if (!data || !data.enabled || !data.target_type) return { error: null }
+    return await addShare(eventId, { type: data.target_type, id: data.target_id ?? null }, data.level)
+  } catch (e) {
+    return { error: e instanceof Error ? e : new Error('applyDefaultShare failed') }
+  }
+}
+
+export interface DefaultShareRule {
+  enabled: boolean
+  target_type: ShareTargetType | null
+  target_id: string | null
+  level: ShareLevel
+}
+
+const EMPTY_DEFAULT: DefaultShareRule = { enabled: false, target_type: null, target_id: null, level: 'awareness' }
+
+/** Read the user's default-share rule. */
+export async function getDefaultShare(): Promise<{ data: DefaultShareRule; error: Error | null }> {
+  if (isTierZero()) return { data: EMPTY_DEFAULT, error: null }
+  try {
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return { error: null }
+    if (!user) return { data: EMPTY_DEFAULT, error: null }
     const { data, error } = await supabase
-      .from('user_settings')
-      .select('default_share_enabled, default_share_target_type, default_share_target_id, default_share_level')
+      .from('user_share_defaults')
+      .select('enabled, target_type, target_id, level')
       .eq('user_id', user.id)
       .maybeSingle()
     if (error) throw new Error(error.message)
-    const s = data as {
-      default_share_enabled?: boolean
-      default_share_target_type?: ShareTargetType | null
-      default_share_target_id?: string | null
-      default_share_level?: ShareLevel
-    } | null
-    if (!s || !s.default_share_enabled || !s.default_share_target_type) return { error: null }
-    return await addShare(
-      eventId,
-      { type: s.default_share_target_type, id: s.default_share_target_id ?? null },
-      s.default_share_level ?? 'awareness',
-    )
+    return { data: (data as DefaultShareRule | null) ?? EMPTY_DEFAULT, error: null }
   } catch (e) {
-    return { error: e instanceof Error ? e : new Error('applyDefaultShare failed') }
+    return { data: EMPTY_DEFAULT, error: e instanceof Error ? e : new Error('getDefaultShare failed') }
+  }
+}
+
+/** Set (upsert) the user's default-share rule. Disabling clears the target. */
+export async function setDefaultShare(rule: { enabled: boolean; target?: ShareTarget | null }): Promise<{ error: Error | null }> {
+  if (isTierZero()) return { error: new Error('Default sharing is not available in single-user mode.') }
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { error: new Error('Not authenticated') }
+    const targetType = rule.enabled ? (rule.target?.type ?? null) : null
+    if (rule.enabled && !targetType) return { error: new Error('A target is required when enabling default sharing.') }
+    const targetId = rule.enabled && targetType !== 'all' ? (rule.target?.id ?? null) : null
+    if (rule.enabled && targetType !== 'all' && !targetId) return { error: new Error('A specific user or group is required.') }
+    const { error } = await supabase
+      .from('user_share_defaults')
+      .upsert({
+        user_id: user.id,
+        enabled: rule.enabled,
+        target_type: targetType,
+        target_id: targetId,
+        level: 'awareness',
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' })
+    if (error) throw new Error(error.message)
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e : new Error('setDefaultShare failed') }
   }
 }
 

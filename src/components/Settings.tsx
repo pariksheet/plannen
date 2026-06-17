@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { SettingsTokens } from './SettingsTokens'
 import { IgnoreRulesManager } from './IgnoreRulesManager'
+import { DefaultShareSettings } from './DefaultShareSettings'
 
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL ?? '') as string
 
@@ -340,6 +341,8 @@ export function Settings() {
           .
         </p>
       </div>
+
+      <DefaultShareSettings />
 
       {pushAvailable && (
         <div className="mt-6 bg-white rounded-lg border border-gray-200 p-5">

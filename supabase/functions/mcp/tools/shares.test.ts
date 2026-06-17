@@ -16,15 +16,15 @@ function recordingCtx(rowsFor: (sql: string) => unknown[] = () => []) {
 }
 
 describe('shares module', () => {
-  it('registers exactly 6 tool definitions', () => {
-    expect(sharesModule.definitions).toHaveLength(6)
+  it('registers exactly 8 tool definitions', () => {
+    expect(sharesModule.definitions).toHaveLength(8)
   })
 
   it('definitions cover the expected tool names', () => {
     const names = sharesModule.definitions.map((d) => d.name).sort()
     expect(names).toEqual([
-      'adopt_shared_event', 'assign_todo', 'complete_event',
-      'share_event', 'unadopt_shared_event', 'unshare_event',
+      'adopt_shared_event', 'assign_todo', 'complete_event', 'get_default_share',
+      'set_default_share', 'share_event', 'unadopt_shared_event', 'unshare_event',
     ])
   })
 
@@ -99,5 +99,22 @@ describe('shares module', () => {
     await sharesModule.dispatch.unshare_event({ event_id: 'e1', target_type: 'all' }, ctx)
     const del = queries.find((q) => /DELETE FROM plannen\.event_shares/i.test(q.sql))
     expect(del!.sql).toMatch(/target_id IS NULL/i)
+  })
+
+  it('set_default_share upserts the rule and requires a target when enabling', async () => {
+    const { ctx, queries } = recordingCtx(() => [{ enabled: true, target_type: 'group', target_id: 'g1', level: 'awareness' }])
+    const res = await sharesModule.dispatch.set_default_share(
+      { enabled: true, target_type: 'group', target_id: 'g1' }, ctx) as { enabled: boolean }
+    expect(res.enabled).toBe(true)
+    expect(queries[0].sql).toMatch(/INSERT INTO plannen\.user_share_defaults/i)
+    await expect(
+      sharesModule.dispatch.set_default_share({ enabled: true }, ctx),
+    ).rejects.toThrow(/target_type is required/i)
+  })
+
+  it('get_default_share returns a disabled default when no row exists', async () => {
+    const { ctx } = recordingCtx(() => [])
+    const res = await sharesModule.dispatch.get_default_share({}, ctx) as { enabled: boolean }
+    expect(res.enabled).toBe(false)
   })
 })

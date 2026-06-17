@@ -2851,18 +2851,49 @@ async function writeShareTargets(c: PoolClient, userId: string, eventId: string,
 
 async function applyDefaultShare(c: PoolClient, userId: string, eventId: string): Promise<void> {
   const { rows } = await c.query(
-    `SELECT default_share_enabled, default_share_target_type, default_share_target_id, default_share_level
-       FROM plannen.user_settings WHERE user_id = $1`,
+    `SELECT enabled, target_type, target_id, level
+       FROM plannen.user_share_defaults WHERE user_id = $1`,
     [userId],
   )
   const s = rows[0]
-  if (!s || !s.default_share_enabled || !s.default_share_target_type) return
+  if (!s || !s.enabled || !s.target_type) return
   await c.query(
     `INSERT INTO plannen.event_shares (event_id, target_type, target_id, level, created_by)
      VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (event_id, target_type, target_id) DO NOTHING`,
-    [eventId, s.default_share_target_type, s.default_share_target_id ?? null, s.default_share_level ?? 'awareness', userId],
+    [eventId, s.target_type, s.target_id ?? null, s.level ?? 'awareness', userId],
   )
+}
+
+async function setDefaultShare(args: { enabled: boolean; target_type?: 'user' | 'group' | 'all'; target_id?: string | null }) {
+  const id = await uid()
+  return await withUserContext(id, async (c) => {
+    if (args.enabled && !args.target_type) throw new Error('target_type is required when enabling default sharing')
+    const targetType = args.enabled ? args.target_type! : null
+    const targetId = args.enabled && targetType !== 'all' ? (args.target_id ?? null) : null
+    if (args.enabled && targetType !== 'all' && !targetId) throw new Error('target_id is required for target_type user/group')
+    const { rows } = await c.query(
+      `INSERT INTO plannen.user_share_defaults (user_id, enabled, target_type, target_id, level, updated_at)
+       VALUES ($1, $2, $3, $4, 'awareness', now())
+       ON CONFLICT (user_id) DO UPDATE
+         SET enabled = EXCLUDED.enabled, target_type = EXCLUDED.target_type,
+             target_id = EXCLUDED.target_id, updated_at = now()
+       RETURNING enabled, target_type, target_id, level`,
+      [id, args.enabled, targetType, targetId],
+    )
+    return rows[0]
+  })
+}
+
+async function getDefaultShare() {
+  const id = await uid()
+  return await withUserContext(id, async (c) => {
+    const { rows } = await c.query(
+      `SELECT enabled, target_type, target_id, level FROM plannen.user_share_defaults WHERE user_id = $1`,
+      [id],
+    )
+    return rows[0] ?? { enabled: false, target_type: null, target_id: null, level: 'awareness' }
+  })
 }
 
 async function shareEvent(args: { event_id: string; targets: unknown; level?: 'awareness' | 'assigned' }) {
@@ -3119,6 +3150,24 @@ const TOOLS: Tool[] = [
       properties: { event_id: { type: 'string' }, done: { type: 'boolean', description: 'Defaults true; false reopens.' } },
       required: ['event_id'],
     },
+  },
+  {
+    name: 'set_default_share',
+    description: 'Set the user\'s default-share rule: new events/todos/trips get shared automatically at creation unless overridden. Pass enabled:true with a target {type:"user"|"group"|"all", id?} to turn it on (read-only awareness level), or enabled:false to turn it off. Use when the user says e.g. "share my new events with My Family by default".',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        enabled: { type: 'boolean' },
+        target_type: { type: 'string', enum: ['user', 'group', 'all'], description: 'Required when enabled.' },
+        target_id: { type: ['string', 'null'], description: 'User or friend_group UUID; omit/null for type "all".' },
+      },
+      required: ['enabled'],
+    },
+  },
+  {
+    name: 'get_default_share',
+    description: 'Get the user\'s current default-share rule (enabled, target_type, target_id).',
+    inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'complete_todo',
@@ -4428,6 +4477,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
       case 'adopt_shared_event':      result = await adoptSharedEvent(args as Parameters<typeof adoptSharedEvent>[0]); break
       case 'unadopt_shared_event':    result = await unadoptSharedEvent(args as Parameters<typeof unadoptSharedEvent>[0]); break
       case 'complete_event':          result = await completeEvent(args as Parameters<typeof completeEvent>[0]); break
+      case 'set_default_share':       result = await setDefaultShare(args as Parameters<typeof setDefaultShare>[0]); break
+      case 'get_default_share':       result = await getDefaultShare(); break
       default: throw new Error(`Unknown tool: ${name}`)
     }
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
