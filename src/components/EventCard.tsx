@@ -18,6 +18,7 @@ import { EventDetailsModal } from './EventDetailsModal'
 import { downloadIcs, getGoogleCalendarAddUrl, getOutlookCalendarAddUrl } from '../services/calendarExport'
 import { getWhatsAppShareUrl } from '../utils/whatsappShare'
 import { isTierZero } from '../lib/tier'
+import { isShared } from '../services/shareService'
 import type { EventStatus } from '../types/event'
 
 const STATUS_BADGE: Record<EventStatus, { label: string; className: string }> = {
@@ -160,7 +161,7 @@ export function EventCard({
     group: 'from-indigo-500 to-blue-600',
   }
   const gradient = placeholderGradients[event.event_type] || 'from-slate-500 to-slate-700'
-  const sharedFriends = (event.shared_with_friends ?? 'none') !== 'none'
+  const sharedFriends = isShared(event)
   const [showViewModal, setShowViewModal] = useState(false)
   const [showShareModal, setShowShareModal] = useState(false)
   const [rsvpVersion, setRsvpVersion] = useState(0)

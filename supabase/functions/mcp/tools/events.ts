@@ -10,6 +10,7 @@ import {
   type EventStatus,
 } from './_shared.ts'
 import { generateSessionDates, parseInUserTz, type RecurrenceRule } from '../../_shared/recurrence.ts'
+import { applyDefaultShare, writeShareTargets } from './shares.ts'
 
 // ── Tool definitions (verbatim from mcp/src/index.ts:1585-1675) ───────────────
 
@@ -83,6 +84,15 @@ const definitions: ToolDefinition[] = [
         hashtags: { type: 'array', items: { type: 'string' }, description: 'Tags without # (max 5)' },
         group_id: { type: 'string', description: 'Container/trip this event or todo belongs to (a container event id). Child inherits the container event_type + sharing unless this event is itself a container. A container cannot have a group_id.' },
         list_label: { type: 'string', description: 'For event_kind=todo inside a container: which named list it belongs to (e.g. Packing, To-do, Shopping). Ignored for non-todos.' },
+        share: {
+          type: 'array',
+          description: 'Override default sharing. Each: {type:"user"|"group"|"all", id?}. Omit this arg to apply the user\'s default-share rule; pass [] to keep it private. Shares read-only (awareness) — use assign_todo for assignment.',
+          items: {
+            type: 'object',
+            properties: { type: { type: 'string', enum: ['user', 'group', 'all'] }, id: { type: ['string', 'null'] } },
+            required: ['type'],
+          },
+        },
         event_status: {
           type: 'string',
           enum: ['watching', 'planned', 'interested', 'going', 'cancelled', 'past', 'missed'],
@@ -296,6 +306,7 @@ const createEvent: ToolHandler = async (args, ctx) => {
     recurrence_rule?: RecurrenceRule
     group_id?: string | null
     list_label?: string
+    share?: Array<{ type: 'user' | 'group' | 'all'; id?: string | null }>
   }
   if (!a.title) throw new Error('title is required')
   if (!a.start_date) throw new Error('start_date is required')
@@ -316,32 +327,29 @@ const createEvent: ToolHandler = async (args, ctx) => {
 
   const hashtags = (a.hashtags ?? []).slice(0, 5)
 
-  // Default sharing; overridden by inheritance when joining a container.
-  // (shared_with_family was dropped in 20260520130000 — sharing is event_type
-  // + shared_with_friends; group-based sharing lives in junction tables.)
+  // event_type inheritance: a child joining a container takes the container's
+  // event_type. Sharing is handled by event_shares — the trip RLS branch
+  // surfaces children of a shared container — so nothing is copied here.
   let eventType = 'personal'
-  let sharedWithFriends = 'none'
   if (a.group_id != null) {
     if (resolvedKind === 'container') throw new Error('a container cannot belong to another container')
     const { rows: cont } = await ctx.client.query(
-      `SELECT event_kind, event_type, shared_with_friends
-       FROM plannen.events WHERE id = $1 AND created_by = $2`,
+      `SELECT event_kind, event_type FROM plannen.events WHERE id = $1 AND created_by = $2`,
       [a.group_id, ctx.userId],
     )
     if (cont.length === 0 || cont[0].event_kind !== 'container') {
       throw new Error('group_id must reference a container you own')
     }
     eventType = cont[0].event_type
-    sharedWithFriends = cont[0].shared_with_friends
   }
 
   const { rows } = await ctx.client.query(
     `INSERT INTO plannen.events
        (title, description, start_date, end_date, location, event_kind,
         enrollment_url, hashtags, event_type, event_status, created_by,
-        assigned_to, shared_with_friends, recurrence_rule,
+        assigned_to, recurrence_rule,
         subject_kind, subject_id, owner_attends, group_id, list_label)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
      RETURNING *`,
     [
       a.title,
@@ -356,7 +364,6 @@ const createEvent: ToolHandler = async (args, ctx) => {
       event_status,
       ctx.userId,
       resolvedKind === 'todo' ? (a.assigned_to ?? ctx.userId) : null,
-      sharedWithFriends,
       a.recurrence_rule ?? null,
       a.subject_kind ?? null,
       a.subject_id ?? null,
@@ -375,9 +382,8 @@ const createEvent: ToolHandler = async (args, ctx) => {
       await ctx.client.query(
         `INSERT INTO plannen.events
            (title, description, start_date, end_date, location, event_kind,
-            event_type, event_status, created_by, parent_event_id,
-            shared_with_friends, hashtags)
-         VALUES ($1, $2, $3, $4, $5, 'session', 'personal', $6, $7, $8, 'none', $9)`,
+            event_type, event_status, created_by, parent_event_id, hashtags)
+         VALUES ($1, $2, $3, $4, $5, 'session', 'personal', $6, $7, $8, $9)`,
         [
           `${a.title} – Session ${i + 1}`,
           a.description ?? null,
@@ -396,6 +402,16 @@ const createEvent: ToolHandler = async (args, ctx) => {
   const source = a.enrollment_url
     ? await upsertSource(ctx.client, ctx.userId, data.id, a.enrollment_url)
     : null
+
+  // Sharing: explicit `share` wins; an empty array / null means "private";
+  // omitted means "apply the user's default-share rule". Children inside a
+  // container inherit visibility through the trip RLS branch, so they need no
+  // own share rows.
+  if (a.share === undefined) {
+    if (a.group_id == null) await applyDefaultShare(ctx.client, ctx.userId, data.id)
+  } else if (Array.isArray(a.share) && a.share.length > 0) {
+    await writeShareTargets(ctx.client, ctx.userId, data.id, a.share)
+  }
 
   return { ...slimEvent(data), source }
 }
@@ -572,8 +588,8 @@ const logCompletion: ToolHandler = async (args, ctx) => {
   const { rows } = await ctx.client.query(
     `INSERT INTO plannen.events
        (title, start_date, event_kind, event_type, event_status, created_by,
-        assigned_to, shared_with_friends, completed_at)
-     VALUES ($1, $2, 'todo', 'personal', 'past', $3, $3, 'none', $4)
+        assigned_to, completed_at)
+     VALUES ($1, $2, 'todo', 'personal', 'past', $3, $3, $4)
      RETURNING id, title`,
     [title, completedAtIso, ctx.userId, completedAtIso],
   )

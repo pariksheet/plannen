@@ -94,7 +94,8 @@ export function MyGroups() {
   // Header refresh button + regain-focus refetch (PWA has no browser reload).
   useAppRefresh(() => { void refresh() })
 
-  const loadEventGroupsContext = useCallback(async (eventIds: string[]) => {
+  const loadEventGroupsContext = useCallback(async (evts: Event[]) => {
+    const eventIds = evts.map((e) => e.id)
     if (eventIds.length === 0) {
       setGroupNamesById({})
       setEventGroupIdsByEventId({})
@@ -127,18 +128,27 @@ export function MyGroups() {
     const [{ data: groups }, { data: eventGroupRows }] = await Promise.all([
       supabase.from('friend_groups').select('id,name').in('id', accessibleGroupIds),
       supabase
-        .from('event_shared_with_groups')
-        .select('event_id, group_id')
+        .from('event_shares')
+        .select('event_id, target_id')
+        .eq('target_type', 'group')
         .in('event_id', eventIds)
-        .in('group_id', accessibleGroupIds),
+        .in('target_id', accessibleGroupIds),
     ])
     const names: Record<string, string> = {}
     for (const g of groups ?? []) names[g.id] = g.name
     const mapping: Record<string, string[]> = {}
     for (const row of eventGroupRows ?? []) {
+      const gid = row.target_id as string
       const current = mapping[row.event_id] ?? []
-      if (!current.includes(row.group_id)) current.push(row.group_id)
+      if (!current.includes(gid)) current.push(gid)
       mapping[row.event_id] = current
+    }
+    // Trip children carry no own share rows — they inherit the container's
+    // audience via RLS. Map each child to its container's groups so the
+    // per-group pill filter keeps them visible too.
+    const childRows = evts.filter((e) => e.group_id && mapping[e.group_id])
+    for (const child of childRows) {
+      mapping[child.id] = Array.from(new Set([...(mapping[child.id] ?? []), ...mapping[child.group_id as string]]))
     }
     setGroupNamesById(names)
     setEventGroupIdsByEventId(mapping)
@@ -151,7 +161,7 @@ export function MyGroups() {
   }, [showManageModal, loadEvents])
 
   useEffect(() => {
-    void loadEventGroupsContext(events.map((e) => e.id))
+    void loadEventGroupsContext(events)
   }, [events, loadEventGroupsContext])
 
   // Never persist 'schedule' — the localStorage key is shared with Timeline /

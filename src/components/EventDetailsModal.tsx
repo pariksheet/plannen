@@ -11,6 +11,7 @@ import { EventStorySection } from './EventStorySection'
 import { EventChecklists } from './EventChecklists'
 import { getEventWatchTask, acknowledgeWatchUpdate } from '../services/agentTaskService'
 import { getEvent } from '../services/eventService'
+import { isShared } from '../services/shareService'
 import { dbClient } from '../lib/dbClient'
 import type { EventProvenanceRow, EventRow } from '../lib/dbClient/types'
 import { MuteSyncDialog, type MuteSyncConfirmSpec } from './MuteSyncDialog'
@@ -44,9 +45,19 @@ export function EventDetailsModal({
 }: EventDetailsModalProps) {
   const isReminder = event.event_kind === 'reminder'
   const isWatching = event.event_status === 'watching' || event.event_status === 'missed'
-  const sharedFriends = (event.shared_with_friends ?? 'none') !== 'none'
-  const sharingLabel =
-    event.shared_with_friends === 'all'
+  const sharedFriends = isShared(event)
+  const shareSummary = event.shared_summary
+  const sharingLabel = shareSummary
+    ? shareSummary.all
+      ? 'Shared with everyone'
+      : shareSummary.groups > 0 && shareSummary.users > 0
+        ? 'Shared with groups and people'
+        : shareSummary.groups > 0
+          ? `Shared with ${shareSummary.groups === 1 ? 'a group' : `${shareSummary.groups} groups`}`
+          : shareSummary.users > 0
+            ? 'Shared with selected people'
+            : 'Private'
+    : event.shared_with_friends === 'all'
       ? 'Shared with all friends'
       : event.shared_with_friends === 'selected'
         ? 'Shared with selected friends'
