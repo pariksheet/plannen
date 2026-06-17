@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-06-17
+
+### Checklist editing
+
+- **Rename a checklist and its items inline.** You can now rename a checklist from its detail view (tap the title) and edit any item's text after adding it (pencil → edit). Previously the only place to rename a list was the Trips section, and an item's text couldn't be changed at all once it was created.
+- **Move a checklist to a different event, or detach it.** A checklist's attached event could only be set at creation. From the checklist detail view you can now search for and switch to a different event, or detach the checklist so it stands on its own.
+- **Cancelled events no longer clutter the attach picker.** When attaching a checklist, cancelled events were listed alongside active ones — so a cancelled event and its live replacement appeared as two identical-looking rows. Cancelled events are now hidden as attach targets.
+
 ## [0.8.1] - 2026-06-16
 
 ### Shared checklists, fixed
