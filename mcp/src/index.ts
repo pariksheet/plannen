@@ -1948,7 +1948,7 @@ async function listPractices(args: { active_only?: boolean; family_member_id?: s
     const { rows } = await c.query(
       `SELECT id, family_member_id, name, category, recurrence_mode, recurrence_rule,
               dtstart::text, recurrence_until::text, flex_period, flex_target,
-              preferred_time_of_day, active, created_at, updated_at
+              preferred_time_of_day, precise_time, active, created_at, updated_at
        FROM plannen.practices
        WHERE ${where.join(' AND ')}
        ORDER BY created_at ASC`,
@@ -1968,6 +1968,7 @@ type PracticeInput = {
   flex_period?: 'week' | 'month' | null
   flex_target?: number | null
   preferred_time_of_day?: 'morning' | 'afternoon' | 'evening' | 'anytime'
+  precise_time?: string | null
   family_member_id?: string | null
 }
 
@@ -1978,8 +1979,8 @@ async function createPractice(args: PracticeInput) {
       `INSERT INTO plannen.practices
          (user_id, family_member_id, name, category, recurrence_mode,
           recurrence_rule, dtstart, recurrence_until, flex_period, flex_target,
-          preferred_time_of_day)
-       VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::date, current_date), $8, $9, $10, COALESCE($11, 'anytime'))
+          preferred_time_of_day, precise_time)
+       VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::date, current_date), $8, $9, $10, COALESCE($11, 'anytime'), $12)
        RETURNING *`,
       [
         id,
@@ -1993,6 +1994,7 @@ async function createPractice(args: PracticeInput) {
         args.flex_period ?? null,
         args.flex_target ?? null,
         args.preferred_time_of_day ?? null,
+        args.precise_time ?? null,
       ],
     )
     return rows[0]
@@ -3397,6 +3399,7 @@ const TOOLS: Tool[] = [
         flex_period: { type: 'string', enum: ['week', 'month'], description: "Required when recurrence_mode='flex_count'." },
         flex_target: { type: 'number', description: "Required when recurrence_mode='flex_count'. Completions per period, 1–31 (e.g. gym 3×/week = period 'week', target 3)." },
         preferred_time_of_day: { type: 'string', enum: ['morning', 'afternoon', 'evening', 'anytime'] },
+        precise_time: { type: 'string', description: 'Optional precise start clock time "HH:MM" (24h, e.g. "20:00"). Only meaningful for pinned routines; overrides preferred_time_of_day for the schedule slot.' },
         family_member_id: { type: ['string', 'null'], description: 'Optional — owner is a circle member rather than the user themselves.' },
       },
       required: ['name', 'category', 'recurrence_mode'],
@@ -3426,6 +3429,7 @@ const TOOLS: Tool[] = [
         flex_period: { type: 'string', enum: ['week', 'month'], description: "Required when recurrence_mode='flex_count'." },
         flex_target: { type: 'number', description: "Required when recurrence_mode='flex_count'. Completions per period, 1–31 (e.g. gym 3×/week = period 'week', target 3)." },
         preferred_time_of_day: { type: 'string', enum: ['morning', 'afternoon', 'evening', 'anytime'] },
+        precise_time: { type: 'string', description: 'Optional precise start clock time "HH:MM" (24h, e.g. "20:00"). Only meaningful for pinned routines; overrides preferred_time_of_day for the schedule slot.' },
         family_member_id: { type: ['string', 'null'] },
         active: { type: 'boolean' },
       },

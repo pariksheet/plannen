@@ -17,6 +17,7 @@ import type { AttendanceInstanceRow, ResolvedObligationRow } from '../lib/dbClie
 import { Modal, ConfirmModal, PromptModal } from './Modal'
 import { ChecklistDetail } from './ChecklistDetail'
 import { useChecklists } from '../hooks/useChecklists'
+import { useAppRefresh } from '../lib/appRefresh'
 import { Plus, ChevronUp, ChevronDown, Calendar, X, Eye } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -149,6 +150,10 @@ export function MyFeed() {
   useEffect(() => {
     void loadEvents()
   }, [loadEvents])
+
+  // Refresh on the header button and when the PWA regains focus, so events
+  // added elsewhere (e.g. via Claude) appear without a close/reopen.
+  useAppRefresh(() => { void loadEvents(); void reloadChecklists() })
 
   // Today's read-only scheduling projection (attendances + derived obligations).
   // Fetched once on mount via the dbClient and projected client-side; the card

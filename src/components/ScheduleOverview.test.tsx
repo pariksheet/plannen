@@ -552,17 +552,48 @@ describe('ScheduleOverview — today schedule card', () => {
       }],
     })
     const card = screen.getByTestId('today-schedule-card')
-    // Attendance is indicative (muted), labelled with its time range.
+    // Attendance is indicative (muted), labelled with its time range — its own section.
     const attendance = within(card).getByTestId('attendance-row')
     expect(attendance).toHaveTextContent('example school (08:30–15:30)')
     expect(attendance).toHaveTextContent('indicative')
     expect(attendance.className).toContain('text-gray-400')
-    // Obligation is actionable, labelled "drop · …" with its anchor time.
-    const obligation = within(card).getByTestId('obligation-row')
-    expect(obligation).toHaveTextContent('drop · example school')
+    // Obligations no longer render in the attendances section…
+    expect(within(card).queryByTestId('obligation-row')).not.toBeInTheDocument()
+    // …they fold into the Today list (week card): source name (no "drop ·" prefix) + drop badge + time.
+    const weekCard = screen.getByTestId('week-card')
+    const obligation = within(weekCard).getByTestId('obligation-row')
+    expect(obligation).toHaveTextContent('example school')
+    expect(obligation).not.toHaveTextContent('drop · example school')
+    expect(obligation).toHaveTextContent('drop') // role still shown as a badge
     expect(obligation).toHaveTextContent('08:15')
     // No conflict/overlap marker on indicative attendances.
     expect(within(card).queryByText(/overlaps/i)).not.toBeInTheDocument()
+  })
+
+  it('folds obligations into the Today list, ordered by clock time', () => {
+    render(
+      <MemoryRouter>
+        <ScheduleOverview
+          events={[]}
+          onEdit={vi.fn()}
+          onDelete={vi.fn()}
+          onShareSuccess={vi.fn()}
+          onHashtagClick={vi.fn()}
+          preferredVisitDates={{}}
+          obligationsToday={[
+            { obligation_id: 'o2', role: 'pick', date: todayIso(), time: '16:00', location_id: null, source_attendance_id: 'a1', source_name: 'afternoon club' },
+            { obligation_id: 'o1', role: 'drop', date: todayIso(), time: '08:15', location_id: null, source_attendance_id: 'a1', source_name: 'morning school' },
+          ]}
+        />
+      </MemoryRouter>
+    )
+    const weekCard = screen.getByTestId('week-card')
+    const text = weekCard.textContent ?? ''
+    // Both obligations are folded into the Today list…
+    expect(text).toContain('morning school')
+    expect(text).toContain('afternoon club')
+    // …and the 08:15 drop sorts before the 16:00 pick despite input order.
+    expect(text.indexOf('morning school')).toBeLessThan(text.indexOf('afternoon club'))
   })
 })
 

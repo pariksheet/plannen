@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Menu, X, LogOut, LayoutDashboard, UsersRound, Users, Shield, Settings, UserCircle, BookOpen, Download, Star, ClipboardList } from 'lucide-react'
+import { Menu, X, LogOut, LayoutDashboard, UsersRound, Users, Shield, Settings, UserCircle, BookOpen, Download, Star, ClipboardList, RefreshCw } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useSettings } from '../context/SettingsContext'
 import { useInstallPrompt } from '../hooks/useInstallPrompt'
 import { usePrimaryGroup } from '../hooks/usePrimaryGroup'
 import { isTierZero } from '../lib/tier'
+import { requestRefresh } from '../lib/appRefresh'
 import { Logo } from './Logo'
 
 type View = 'today' | 'feed' | 'people' | 'groups' | 'stories' | 'checklists' | 'settings'
@@ -19,6 +20,7 @@ interface NavigationProps {
 
 export function Navigation({ currentView, onViewChange, onSignOut, onInviteClick }: NavigationProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const { profile } = useAuth()
   const { hasAiKey } = useSettings()
   const { canInstall, promptInstall } = useInstallPrompt()
@@ -166,6 +168,15 @@ export function Navigation({ currentView, onViewChange, onSignOut, onInviteClick
               Invite
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => { requestRefresh(); setRefreshing(true); window.setTimeout(() => setRefreshing(false), 600) }}
+            className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-md text-gray-600 hover:bg-gray-100"
+            aria-label="Refresh"
+            title="Refresh"
+          >
+            <RefreshCw className={`h-5 w-5 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
           <button
             type="button"
             onClick={() => setMobileMenuOpen(true)}

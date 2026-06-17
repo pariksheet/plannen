@@ -5,8 +5,8 @@ import type { PracticeRow } from '../lib/dbClient/types'
 const base = {
   id: 'p', user_id: 'u', family_member_id: null, name: 'Meal prep',
   category: 'household' as const, dtstart: '2026-06-01', recurrence_until: null,
-  preferred_time_of_day: 'anytime' as const, active: true,
-  created_at: '', updated_at: '',
+  preferred_time_of_day: 'anytime' as const, precise_time: null as string | null,
+  active: true, created_at: '', updated_at: '',
 }
 
 describe('practiceLabel', () => {

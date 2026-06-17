@@ -54,6 +54,7 @@ interface FormState {
   flex_period: 'week' | 'month'
   flex_target: number
   dtstart: string
+  precise_time: string | null
 }
 
 const EMPTY_FORM: FormState = {
@@ -66,6 +67,7 @@ const EMPTY_FORM: FormState = {
   flex_period: 'week',
   flex_target: 3,
   dtstart: todayYmd(),
+  precise_time: null,
 }
 
 /** Short human description of a routine's schedule for the list row. */
@@ -75,18 +77,19 @@ function describe(p: PracticeRow): string {
   }
   const rule = p.recurrence_rule
   if (!rule) return 'Scheduled'
-  if (rule.frequency === 'daily') return 'Every day'
+  const at = p.precise_time ? ` · ${p.precise_time}` : ''
+  if (rule.frequency === 'daily') return 'Every day' + at
   if (rule.frequency === 'weekly' && rule.days?.length) {
     const labels = rule.days
       .map((c) => WEEKDAYS.find((w) => w.code === c)?.label ?? c)
       .join(', ')
-    return `Weekly · ${labels}`
+    return `Weekly · ${labels}` + at
   }
   return rule.frequency
 }
 
 export function ProfileRoutines() {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
   const [practices, setPractices] = useState<PracticeRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -129,6 +132,7 @@ export function ProfileRoutines() {
       flex_period: p.flex_period ?? 'week',
       flex_target: p.flex_target ?? 3,
       dtstart: (p.dtstart || todayYmd()).slice(0, 10),
+      precise_time: p.precise_time ?? null,
     })
     setShowForm(true)
   }
@@ -161,10 +165,12 @@ export function ProfileRoutines() {
           : { frequency: 'weekly', days: form.days }
       patch.flex_period = null
       patch.flex_target = null
+      patch.precise_time = form.precise_time || null
     } else {
       patch.recurrence_rule = null
       patch.flex_period = form.flex_period
       patch.flex_target = form.flex_target
+      patch.precise_time = null
     }
     return patch
   }
@@ -360,6 +366,16 @@ export function ProfileRoutines() {
                           ))}
                         </div>
                       )}
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Time (optional)</label>
+                        <input
+                          type="time"
+                          aria-label="Precise time"
+                          value={form.precise_time ?? ''}
+                          onChange={(e) => setForm((f) => ({ ...f, precise_time: e.target.value || null }))}
+                          className="w-full px-3 py-2 min-h-[44px] text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                      </div>
                     </div>
                   ) : (
                     <div className="flex items-end gap-2">

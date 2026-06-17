@@ -12,7 +12,7 @@ import {
 const EMPTY_FORM = { label: '', address: '', city: '', country: '', is_default: false }
 
 export function ProfileLocations() {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
   const [locations, setLocations] = useState<UserLocation[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

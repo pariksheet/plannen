@@ -4,6 +4,22 @@ import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { getProfile, upsertProfile } from '../services/profileService'
 
+// Full IANA timezone list from the platform when available, with a small
+// curated fallback for older runtimes. Saved values not in the list are still
+// offered (see the leading <option> in the select) so nothing is ever dropped.
+const TIMEZONES: string[] = (() => {
+  try {
+    const supported = (Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf
+    const list = supported?.('timeZone')
+    if (list && list.length) return list
+  } catch { /* fall through to the curated list */ }
+  return [
+    'UTC', 'Europe/Brussels', 'Europe/London', 'Europe/Amsterdam', 'Europe/Paris',
+    'America/New_York', 'America/Chicago', 'America/Los_Angeles',
+    'Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney',
+  ]
+})()
+
 export function ProfilePersonalInfo() {
   const { profile: authProfile, refreshProfile } = useAuth()
   const fullName = authProfile?.full_name ?? ''
@@ -105,13 +121,15 @@ export function ProfilePersonalInfo() {
             {loading ? (
               <div className="h-[44px] bg-gray-100 rounded-lg animate-pulse" aria-busy="true" />
             ) : (
-              <input
-                type="text"
+              <select
                 value={editTz}
                 onChange={(e) => setEditTz(e.target.value)}
-                placeholder="e.g. Europe/Brussels, Australia/Sydney"
-                className="w-full px-3 py-2 min-h-[44px] text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
+                aria-label="Timezone"
+                className="w-full px-3 py-2 min-h-[44px] text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                {!TIMEZONES.includes(editTz) && <option value={editTz}>{editTz}</option>}
+                {TIMEZONES.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+              </select>
             )}
             <p className="mt-1 text-xs text-gray-400">
               IANA timezone — used for Google Calendar sync and time display.

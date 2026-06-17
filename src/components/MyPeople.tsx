@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Event, EventFormData, EventViewMode } from '../types/event'
 import { getFamilyEvents, getFriendsEvents } from '../services/viewService'
+import { useAppRefresh } from '../lib/appRefresh'
 import { getPreferredVisitDates } from '../services/rsvpService'
 import { getMyConnections, getRelationshipRequests, type FriendUser } from '../services/relationshipService'
 import { buildFutureTimeline, TimelineItem } from '../utils/timeline'
@@ -84,6 +85,9 @@ export function MyPeople() {
     loadPeople()
     loadPendingCount()
   }, [loadEvents, loadPeople, loadPendingCount])
+
+  // Header refresh button + regain-focus refetch (PWA has no browser reload).
+  useAppRefresh(() => { void refresh() })
 
   useEffect(() => {
     setLoading(true)

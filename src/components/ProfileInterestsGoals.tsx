@@ -4,7 +4,7 @@ import { ChevronDown, ChevronUp, X } from 'lucide-react'
 import { getProfile, upsertProfile } from '../services/profileService'
 
 export function ProfileInterestsGoals() {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
   const [interests, setInterests] = useState<string[]>([])
   const [goals, setGoals] = useState<string[]>([])
   const [interestInput, setInterestInput] = useState('')

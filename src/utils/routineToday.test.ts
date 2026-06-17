@@ -5,7 +5,8 @@ import type { PracticeRow, PracticeCompletionRow } from '../lib/dbClient/types'
 const base = {
   id: 'p', user_id: 'u', family_member_id: null, name: 'X',
   category: 'household' as const, dtstart: '2026-06-01', recurrence_until: null,
-  preferred_time_of_day: 'anytime' as const, active: true, created_at: '', updated_at: '',
+  preferred_time_of_day: 'anytime' as const, precise_time: null as string | null,
+  active: true, created_at: '', updated_at: '',
 }
 // 2026-06-10 is a Wednesday; ISO week starts Mon 2026-06-08.
 const WED = '2026-06-10'
@@ -58,6 +59,25 @@ describe('isRoutineApplicableToday', () => {
       { practice_id: 'p', completed_on: '2026-06-09' } as PracticeCompletionRow,
     ]
     expect(isRoutineApplicableToday(p, WED, done, WEEK_START)).toBe(false)
+  })
+})
+
+describe('partOfDayMins with precise_time', () => {
+  it('returns minutes-of-day for a valid HH:MM, ignoring part-of-day', () => {
+    expect(partOfDayMins('anytime', '20:00')).toBe(1200)
+    expect(partOfDayMins('morning', '06:30')).toBe(390)
+  })
+  it('falls back to part-of-day when precise_time is null or invalid', () => {
+    expect(partOfDayMins('morning', null)).toBe(480)
+    expect(partOfDayMins('evening', '99:99')).toBe(1080)
+    expect(partOfDayMins('anytime')).toBe(Number.POSITIVE_INFINITY)
+  })
+  it('a timed routine sorts between two events by minutes', () => {
+    const eventA = 18 * 60 + 15 // 1095
+    const eventB = 21 * 60      // 1260
+    const routine = partOfDayMins('anytime', '20:00') // 1200
+    expect(eventA).toBeLessThan(routine)
+    expect(routine).toBeLessThan(eventB)
   })
 })
 

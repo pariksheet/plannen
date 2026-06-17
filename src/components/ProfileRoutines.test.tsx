@@ -30,6 +30,8 @@ describe('ProfileRoutines', () => {
     })
     render(<ProfileRoutines />)
     await waitFor(() => expect(mockList).toHaveBeenCalled())
+    // The section is collapsed by default — expand it before interacting.
+    await user.click(screen.getByRole('button', { name: /my routines/i }))
 
     await user.click(screen.getByRole('button', { name: /add routine/i }))
     await user.type(screen.getByLabelText(/^name/i), 'Morning run')
@@ -57,6 +59,8 @@ describe('ProfileRoutines', () => {
     })
     render(<ProfileRoutines />)
     await waitFor(() => expect(mockList).toHaveBeenCalled())
+    // The section is collapsed by default — expand it before interacting.
+    await user.click(screen.getByRole('button', { name: /my routines/i }))
 
     await user.click(screen.getByRole('button', { name: /add routine/i }))
     await user.type(screen.getByLabelText(/^name/i), 'Gym')
@@ -74,6 +78,8 @@ describe('ProfileRoutines', () => {
     const user = userEvent.setup()
     render(<ProfileRoutines />)
     await waitFor(() => expect(mockList).toHaveBeenCalled())
+    // The section is collapsed by default — expand it before interacting.
+    await user.click(screen.getByRole('button', { name: /my routines/i }))
     await user.click(screen.getByRole('button', { name: /add routine/i }))
     await user.type(screen.getByLabelText(/^name/i), 'No days')
     expect(screen.getByRole('button', { name: /^add$/i })).toBeDisabled()
