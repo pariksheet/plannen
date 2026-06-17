@@ -31,17 +31,32 @@ CREATE INDEX IF NOT EXISTS "idx_event_visit_preferences_user_id" ON "plannen"."e
 
 ALTER TABLE "plannen"."event_visit_preferences" ENABLE ROW LEVEL SECURITY;
 
--- SELECT: readable for any event the caller can see. Mirrors the event_rsvps
--- SELECT policy verbatim (creator + shared-with-users + shared-with-family +
--- shared-with-friends), so getCreatorPreferredVisitDates can still read a
--- shared event creator's visit date.
-CREATE POLICY "Users can view visit prefs for events they can see" ON "plannen"."event_visit_preferences" FOR SELECT USING ((EXISTS ( SELECT 1
-   FROM "plannen"."events" "e"
-  WHERE (("e"."id" = "event_visit_preferences"."event_id") AND (("e"."created_by" = "auth"."uid"()) OR "plannen"."user_in_event_shared_with_users"("e"."id") OR ("e"."shared_with_family" AND (EXISTS ( SELECT 1
-           FROM "plannen"."relationships" "r"
-          WHERE (("r"."status" = 'accepted'::"text") AND ("r"."relationship_type" = ANY (ARRAY['family'::"text", 'both'::"text"])) AND ((("r"."user_id" = "auth"."uid"()) AND ("r"."related_user_id" = "e"."created_by")) OR (("r"."user_id" = "e"."created_by") AND ("r"."related_user_id" = "auth"."uid"()))))))) OR (("e"."shared_with_friends" = 'all'::"text") AND (EXISTS ( SELECT 1
-           FROM "plannen"."relationships" "r"
-          WHERE (("r"."status" = 'accepted'::"text") AND ("r"."relationship_type" = ANY (ARRAY['friend'::"text", 'both'::"text"])) AND ((("r"."user_id" = "auth"."uid"()) AND ("r"."related_user_id" = "e"."created_by")) OR (("r"."user_id" = "e"."created_by") AND ("r"."related_user_id" = "auth"."uid"()))))))))))));
+-- SELECT: readable for any event the caller can see. Mirrors the *current*
+-- event_rsvps SELECT policy (see 20260520150000_drop_relationship_type.sql):
+-- creator + shared-with-users + shared-with-group + shared_with_friends='all'.
+-- This keeps getCreatorPreferredVisitDates able to read a shared event
+-- creator's visit date.
+CREATE POLICY "Users can view visit prefs for events they can see" ON "plannen"."event_visit_preferences"
+  FOR SELECT USING (EXISTS (
+    SELECT 1 FROM plannen.events e
+    WHERE e.id = event_visit_preferences.event_id
+      AND (
+        e.created_by = auth.uid()
+        OR plannen.user_in_event_shared_with_users(e.id)
+        OR plannen.user_in_event_group(e.id)
+        OR (
+          e.shared_with_friends = 'all'
+          AND EXISTS (
+            SELECT 1 FROM plannen.relationships r
+            WHERE r.status = 'accepted'
+              AND (
+                (r.user_id = auth.uid() AND r.related_user_id = e.created_by)
+                OR (r.user_id = e.created_by AND r.related_user_id = auth.uid())
+              )
+          )
+        )
+      )
+  ));
 
 -- Write policies: a user may only mutate their own row.
 CREATE POLICY "Users can insert own visit pref" ON "plannen"."event_visit_preferences" FOR INSERT WITH CHECK (("auth"."uid"() = "user_id"));
