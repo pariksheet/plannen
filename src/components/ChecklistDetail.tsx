@@ -1,16 +1,25 @@
-import { useState } from 'react'
-import { RotateCcw, Pencil, Check, X } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { RotateCcw, Pencil, Check, X, Link2 } from 'lucide-react'
 import { useChecklist } from '../hooks/useChecklist'
 import { useAuth } from '../context/AuthContext'
 import { ChecklistItemRow } from './ChecklistItemRow'
 import { displayUserLabel } from '../utils/displayName'
+import type { Event } from '../types/event'
 
-export function ChecklistDetail({ id, onBack }: { id: string; onBack: () => void }) {
-  const { checklist, names, toggle, addItems, removeItem, renameItem, rename, resetAll } = useChecklist(id)
+export function ChecklistDetail({ id, onBack, events }: { id: string; onBack: () => void; events?: Event[] }) {
+  const { checklist, names, toggle, addItems, removeItem, renameItem, rename, reattach, resetAll } = useChecklist(id)
   const { user } = useAuth()
   const [draft, setDraft] = useState('')
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
+  const [editingEvent, setEditingEvent] = useState(false)
+  const [eventQuery, setEventQuery] = useState('')
+  // Cancelled events aren't valid attach targets — hide them from the picker.
+  const attachable = useMemo(() => (events ?? []).filter((e) => e.event_status !== 'cancelled'), [events])
+  const eventMatches = useMemo(() => {
+    const q = eventQuery.trim().toLowerCase()
+    return (q ? attachable.filter((e) => e.title.toLowerCase().includes(q)) : attachable).slice(0, 30)
+  }, [attachable, eventQuery])
   if (!checklist) return <div className="py-12 text-center text-gray-400">Loading…</div>
   const meId = user?.id ?? null
   const creator = checklist.created_by === meId ? 'you' : displayUserLabel(names[checklist.created_by] ?? { id: checklist.created_by })
@@ -30,6 +39,11 @@ export function ChecklistDetail({ id, onBack }: { id: string; onBack: () => void
     const t = titleDraft.trim()
     setEditingTitle(false)
     if (t && t !== checklist.title) await rename(t)
+  }
+  const attachedEvent = (events ?? []).find((e) => e.id === checklist.event_id) ?? null
+  const chooseEvent = async (eventId: string | null) => {
+    setEditingEvent(false); setEventQuery('')
+    if (eventId !== checklist.event_id) await reattach(eventId)
   }
   return (
     <div className="w-full max-w-2xl mx-auto">
@@ -56,6 +70,48 @@ export function ChecklistDetail({ id, onBack }: { id: string; onBack: () => void
             </button>
           )}
           <p className="text-xs text-gray-500">Created by {creator}</p>
+          {events && (
+            editingEvent ? (
+              <div className="mt-1.5">
+                <div className="flex items-center gap-1">
+                  <input
+                    autoFocus
+                    value={eventQuery}
+                    onChange={(e) => setEventQuery(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Escape') { setEditingEvent(false); setEventQuery('') } }}
+                    placeholder="Search your events…"
+                    aria-label="Search events to attach"
+                    className="flex-1 min-w-0 border border-gray-200 rounded-lg px-3 py-1.5 text-sm"
+                  />
+                  <button type="button" onClick={() => { setEditingEvent(false); setEventQuery('') }} aria-label="Cancel attach" className="p-1.5 text-gray-400 hover:text-gray-700"><X className="h-4 w-4" /></button>
+                </div>
+                <ul className="mt-1 max-h-44 overflow-y-auto border border-gray-100 rounded-lg divide-y divide-gray-50">
+                  {checklist.event_id && (
+                    <li><button type="button" onClick={() => void chooseEvent(null)} className="w-full text-left px-3 py-2 text-sm text-gray-500 hover:bg-gray-50">Detach from event</button></li>
+                  )}
+                  {eventMatches.length === 0 ? (
+                    <li className="px-3 py-2 text-xs text-gray-400">No matching events</li>
+                  ) : eventMatches.map((e) => (
+                    <li key={e.id}>
+                      <button type="button" onClick={() => void chooseEvent(e.id)} className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 truncate">{e.title}</button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <button type="button" onClick={() => { setEditingEvent(true); setEventQuery('') }} className="mt-1 inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-indigo-600 group" aria-label="Change attached event">
+                <Link2 className="h-3.5 w-3.5 shrink-0" />
+                {attachedEvent ? (
+                  <span className="truncate max-w-[16rem]">{attachedEvent.title}</span>
+                ) : checklist.event_id ? (
+                  <span className="text-gray-400">Attached event</span>
+                ) : (
+                  <span className="text-gray-400">Not attached — add event</span>
+                )}
+                <Pencil className="h-3 w-3 text-gray-300 group-hover:text-indigo-600 shrink-0" />
+              </button>
+            )
+          )}
         </div>
         {hasChecked && (
           <button

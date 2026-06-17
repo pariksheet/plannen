@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ChecklistRow } from '../lib/dbClient/types'
-import { getChecklist, setChecklistItemChecked, addChecklistItems, deleteChecklistItem, resetChecklistItems, updateChecklistItem, renameChecklist } from '../services/checklistService'
+import { getChecklist, setChecklistItemChecked, addChecklistItems, deleteChecklistItem, resetChecklistItems, updateChecklistItem, renameChecklist, setChecklistEvent } from '../services/checklistService'
 import { getUsersByIds, type FriendUser } from '../services/relationshipService'
 
 export function useChecklist(id: string) {
@@ -40,9 +40,13 @@ export function useChecklist(id: string) {
     setChecklist((c) => c && { ...c, title })
     await renameChecklist(id, title); await load()
   }, [id, load])
+  const reattach = useCallback(async (eventId: string | null) => {
+    setChecklist((c) => c && { ...c, event_id: eventId })
+    await setChecklistEvent(id, eventId); await load()
+  }, [id, load])
   const resetAll = useCallback(async () => {
     if (!checklist?.items?.length) return
     await resetChecklistItems(checklist.items); await load()
   }, [checklist, load])
-  return { checklist, names, reload: load, toggle, addItems, removeItem, renameItem, rename, resetAll }
+  return { checklist, names, reload: load, toggle, addItems, removeItem, renameItem, rename, reattach, resetAll }
 }

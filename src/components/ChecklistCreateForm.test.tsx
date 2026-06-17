@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { ChecklistCreateForm } from './ChecklistCreateForm'
 import type { Event } from '../types/event'
 
-function ev(id: string, title: string): Event {
-  return { id, title, start_date: '2026-07-01T00:00:00', end_date: null, event_kind: 'event' } as Event
+function ev(id: string, title: string, extra: Partial<Event> = {}): Event {
+  return { id, title, start_date: '2026-07-01T00:00:00', end_date: null, event_kind: 'event', ...extra } as Event
 }
 
 describe('ChecklistCreateForm', () => {
@@ -52,6 +52,19 @@ describe('ChecklistCreateForm', () => {
     await userEvent.type(screen.getByPlaceholderText('e.g. Packing'), 'Shopping')
     await userEvent.click(screen.getByRole('button', { name: 'Create' }))
     expect(onCreate).toHaveBeenCalledWith({ title: 'Shopping', event_id: null, items: [] })
+  })
+
+  it('hides cancelled events from the attach picker', async () => {
+    render(
+      <ChecklistCreateForm
+        events={[ev('e1', 'Tax return', { event_status: 'going' }), ev('e2', 'Tax return', { event_status: 'cancelled' })]}
+        onCreate={vi.fn(async () => {})}
+        onClose={vi.fn()}
+      />,
+    )
+    await userEvent.type(screen.getByPlaceholderText('Search your events…'), 'tax')
+    // Both share a title, but only the non-cancelled one is offered.
+    expect(screen.getAllByText('Tax return')).toHaveLength(1)
   })
 
   it('disables Create until a title is entered', () => {

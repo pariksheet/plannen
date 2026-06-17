@@ -35,7 +35,7 @@ function ChecklistsView() {
     () => Object.fromEntries(events.map((e) => [e.id, e.title])),
     [events],
   )
-  if (openId) return <ChecklistDetail id={openId} onBack={() => setOpenId(null)} />
+  if (openId) return <ChecklistDetail id={openId} onBack={() => setOpenId(null)} events={events} />
   return (
     <div className="space-y-4">
       <div className="max-w-2xl mx-auto flex justify-end">

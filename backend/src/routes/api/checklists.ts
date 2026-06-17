@@ -15,7 +15,8 @@ function accessibleSql(idCol: string, userParam: string): string {
 }
 
 const CreateInput = z.object({ title: z.string().min(1), event_id: z.string().uuid().nullish(), items: z.array(z.string()).optional() })
-const UpdateInput = z.object({ title: z.string().min(1) })
+const UpdateInput = z.object({ title: z.string().min(1).optional(), event_id: z.string().uuid().nullish() })
+  .refine((v) => v.title !== undefined || 'event_id' in v, 'nothing to update')
 const ItemsInput = z.object({ items: z.array(z.string()) })
 const CheckedInput = z.object({ checked: z.boolean() })
 const TextInput = z.object({ text: z.string().min(1) })
@@ -144,12 +145,25 @@ checklists.post('/', async (c) => {
 checklists.patch('/:id', async (c) => {
   const userId = c.var.userId
   const id = c.req.param('id')
-  const parsed = UpdateInput.safeParse(await c.req.json())
-  if (!parsed.success) throw new HttpError(400, 'VALIDATION', 'title required')
+  const raw = await c.req.json() as Record<string, unknown>
+  const parsed = UpdateInput.safeParse(raw)
+  if (!parsed.success) throw new HttpError(400, 'VALIDATION', 'title or event_id required')
+  const setEvent = 'event_id' in raw
   return await withUserContext(userId, async (db) => {
+    if (setEvent && parsed.data.event_id) {
+      const { rows: ev } = await db.query(
+        `SELECT 1 FROM plannen.events WHERE id = $1 AND created_by = $2`,
+        [parsed.data.event_id, userId],
+      )
+      if (ev.length === 0) throw new HttpError(400, 'VALIDATION', 'event_id must be an event you own')
+    }
+    const sets: string[] = []
+    const vals: unknown[] = [id, userId]
+    if (parsed.data.title !== undefined) { vals.push(parsed.data.title); sets.push(`title = $${vals.length}`) }
+    if (setEvent) { vals.push(parsed.data.event_id ?? null); sets.push(`event_id = $${vals.length}`) }
     const { rows } = await db.query(
-      `UPDATE plannen.checklists SET title = $3, updated_at = now() WHERE id = $1 AND created_by = $2 RETURNING *`,
-      [id, userId, parsed.data.title],
+      `UPDATE plannen.checklists SET ${sets.join(', ')}, updated_at = now() WHERE id = $1 AND created_by = $2 RETURNING *`,
+      vals,
     )
     if (rows.length === 0) throw new HttpError(404, 'NOT_FOUND', 'checklist not found')
     return c.json({ data: rows[0] })
