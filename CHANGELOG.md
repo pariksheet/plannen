@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-06-17
+
+### Routines
+
+- **Routines can carry a precise clock time.** When editing a routine on a set-days schedule you can now give it an exact time (e.g. 20:00). Timed routines slot into the Today schedule at that time, alongside events — instead of only showing as a "morning/evening" habit.
+
+### Schedule
+
+- **Drop-off / pick-up duties now sit in the Today list at their time.** They interleave with events and routines by clock time (with a backpack icon and a drop/pick tag) instead of living in a separate "Today on a schedule" box. That box is slimmed to just the indicative attendance rows.
+- **Cleaner obligation labels.** Removed the redundant "drop ·" / "pick ·" text in front of each duty — the role already shows as a small tag.
+
+### Profile
+
+- **The Profile page opens compact.** Every section now starts collapsed except Personal Info, so you can scan and expand only what you need.
+- **Timezone is a dropdown.** Personal Info → Timezone is now a list of standard timezones instead of a free-text field, so it's harder to mistype.
+
+### Installed app (PWA)
+
+- **A way to refresh.** Added a refresh button in the header and automatic refreshing when you return to the app, so events added elsewhere (e.g. via Claude) show up without closing and reopening.
+
 ## [0.8.3] - 2026-06-17
 
 ### Checklists
