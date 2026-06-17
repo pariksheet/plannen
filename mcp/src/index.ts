@@ -261,32 +261,29 @@ async function createEvent(args: {
   return await withUserContext(id, async (c) => {
     const hashtags = (args.hashtags ?? []).slice(0, 5)
 
-    // Default sharing; overridden by inheritance when joining a container.
-    // (shared_with_family was dropped in 20260520130000 — sharing is event_type
-    // + shared_with_friends; group-based sharing lives in junction tables.)
+    // event_type inheritance: a child joining a container takes the container's
+    // event_type. Sharing is handled by event_shares — the trip RLS branch
+    // surfaces children of a shared container — so nothing is copied here.
     let eventType = 'personal'
-    let sharedWithFriends = 'none'
     if (args.group_id != null) {
       if (resolvedKind === 'container') throw new Error('a container cannot belong to another container')
       const { rows: cont } = await c.query(
-        `SELECT event_kind, event_type, shared_with_friends
-         FROM plannen.events WHERE id = $1 AND created_by = $2`,
+        `SELECT event_kind, event_type FROM plannen.events WHERE id = $1 AND created_by = $2`,
         [args.group_id, id],
       )
       if (cont.length === 0 || cont[0].event_kind !== 'container') {
         throw new Error('group_id must reference a container you own')
       }
       eventType = cont[0].event_type
-      sharedWithFriends = cont[0].shared_with_friends
     }
 
     const { rows } = await c.query(
       `INSERT INTO plannen.events
          (title, description, start_date, end_date, location, event_kind,
           enrollment_url, hashtags, event_type, event_status, created_by,
-          assigned_to, shared_with_friends, recurrence_rule,
+          assigned_to, recurrence_rule,
           subject_kind, subject_id, owner_attends, group_id, list_label)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
        RETURNING *`,
       [
         args.title,
@@ -301,7 +298,6 @@ async function createEvent(args: {
         event_status,
         id,
         resolvedKind === 'todo' ? (args.assigned_to ?? id) : null,
-        sharedWithFriends,
         args.recurrence_rule ?? null,
         args.subject_kind ?? null,
         args.subject_id ?? null,
@@ -320,9 +316,8 @@ async function createEvent(args: {
         await c.query(
           `INSERT INTO plannen.events
              (title, description, start_date, end_date, location, event_kind,
-              event_type, event_status, created_by, parent_event_id,
-              shared_with_friends, hashtags)
-           VALUES ($1, $2, $3, $4, $5, 'session', 'personal', $6, $7, $8, 'none', $9)`,
+              event_type, event_status, created_by, parent_event_id, hashtags)
+           VALUES ($1, $2, $3, $4, $5, 'session', 'personal', $6, $7, $8, $9)`,
           [
             `${args.title} – Session ${i + 1}`,
             args.description ?? null,
@@ -522,8 +517,8 @@ async function logCompletion(args: { title?: string; when?: string; family_membe
     const { rows } = await c.query(
       `INSERT INTO plannen.events
          (title, start_date, event_kind, event_type, event_status, created_by,
-          assigned_to, shared_with_friends, completed_at)
-       VALUES ($1, $2, 'todo', 'personal', 'past', $3, $3, 'none', $4)
+          assigned_to, completed_at)
+       VALUES ($1, $2, 'todo', 'personal', 'past', $3, $3, $4)
        RETURNING id, title`,
       [title, completedAtIso, userId, completedAtIso],
     )

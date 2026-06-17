@@ -24,7 +24,6 @@ export type EventRow = Record<string, unknown> & {
   event_kind: string | null
   event_type: string | null
   event_status: string | null
-  shared_with_friends: string | null
   hashtags: string[] | null
   parent_event_id: string | null
 }

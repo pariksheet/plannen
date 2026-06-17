@@ -24,7 +24,6 @@ const CreateEvent = z.object({
   event_kind: z.string().optional(),
   event_type: z.string().optional(),
   event_status: z.string().optional(),
-  shared_with_friends: z.string().optional(),
   hashtags: z.array(z.string()).optional(),
   parent_event_id: z.string().uuid().nullable().optional(),
   assigned_to: z.string().uuid().nullable().optional(),
@@ -44,7 +43,6 @@ const ALLOWED_UPDATE_COLUMNS = [
   'event_kind',
   'event_type',
   'event_status',
-  'shared_with_friends',
   'hashtags',
   'gcal_event_id',
   'completed_at',
@@ -87,11 +85,11 @@ events.post('/', async (c) => {
       `INSERT INTO plannen.events
          (title, description, start_date, end_date, enrollment_url, enrollment_deadline,
           enrollment_start_date, image_url, location, event_kind, event_type, event_status,
-          shared_with_friends, hashtags, parent_event_id, completed_at, assigned_to, created_by)
+          hashtags, parent_event_id, completed_at, assigned_to, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,
                COALESCE($10,'event'), COALESCE($11,'personal'), COALESCE($12,'going'),
-               COALESCE($13,'none'), COALESCE($14,'{}'::text[]),
-               $15, $16, $17, $18)
+               COALESCE($13,'{}'::text[]),
+               $14, $15, $16, $17)
        RETURNING *`,
       [
         e.title,
@@ -106,7 +104,6 @@ events.post('/', async (c) => {
         e.event_kind ?? null,
         e.event_type ?? null,
         e.event_status ?? null,
-        e.shared_with_friends ?? null,
         e.hashtags ?? null,
         e.parent_event_id ?? null,
         e.completed_at ?? null,

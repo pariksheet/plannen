@@ -49,7 +49,6 @@ async function insertSessions(parent: Event, rule: RecurrenceRule): Promise<void
       event_status: parent.event_status,
       created_by: parent.created_by,
       parent_event_id: parent.id,
-      shared_with_friends: parent.shared_with_friends,
       hashtags: parent.hashtags ?? [],
     })
   }
@@ -105,7 +104,6 @@ export async function createEvent(
       created_by: userId,
       assigned_to: data.event_kind === 'todo' ? userId : null,
       event_status: eventStatus,
-      shared_with_friends: data.shared_with_friends ?? 'none',
     }) as unknown as Event
   } catch (e) {
     return { data: null, error: e instanceof Error ? e : new Error('Create failed') }

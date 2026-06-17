@@ -22,7 +22,9 @@ export interface Event {
   created_by: string
   created_at: string
   updated_at: string
-  shared_with_friends: SharedWithFriends
+  // Legacy/UI-only sharing selector. No longer a DB column (retired in
+  // 20260617180000) — real sharing lives in event_shares / shared_summary.
+  shared_with_friends?: SharedWithFriends
   my_rsvp_status?: 'going' | 'maybe' | 'not_going' | null
   recurrence_rule?: Record<string, unknown> | null
   parent_event_id?: string | null

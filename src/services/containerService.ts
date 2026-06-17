@@ -42,7 +42,6 @@ export async function createContainer(
       event_kind: 'container',
       event_type: 'personal',
       event_status: new Date(start).getTime() < Date.now() ? 'past' : 'going',
-      shared_with_friends: 'none',
       created_by: me.userId,
       group_id: null, // a container must not belong to another container
     })) as unknown as Event
