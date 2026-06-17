@@ -22,7 +22,7 @@ function computeAge(dob: string | null): number | null {
 }
 
 export function ProfileFamilyMembers() {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
   const [members, setMembers] = useState<FamilyMember[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

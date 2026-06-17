@@ -4,7 +4,7 @@ import { STORY_LANGUAGES, labelFor } from '../utils/storyLanguages'
 import { getStoryLanguages, setStoryLanguages } from '../services/profileService'
 
 export function ProfileStoryLanguages() {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
   const [storyLangs, setStoryLangsState] = useState<string[]>(['en'])
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)

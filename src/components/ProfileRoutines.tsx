@@ -89,7 +89,7 @@ function describe(p: PracticeRow): string {
 }
 
 export function ProfileRoutines() {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
   const [practices, setPractices] = useState<PracticeRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
