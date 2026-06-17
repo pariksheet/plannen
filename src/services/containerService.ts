@@ -1,8 +1,5 @@
 import { dbClient } from '../lib/dbClient'
-import type { Event, SharedWithFriends } from '../types/event'
-import { setEventSharedWithGroups, setEventSharedWithUsers, getEventSharedWithGroupIds } from './groupService'
-import { getEventSharedWithUserIds } from './eventService'
-import { notifyEventShared } from '../lib/notify'
+import type { Event } from '../types/event'
 
 // Trip "containers" are ordinary events with event_kind='container'; member
 // events/todos point at one via group_id. This wraps the tier-aware
@@ -55,48 +52,28 @@ export async function createContainer(
   }
 }
 
-// Copy a trip's sharing onto a member event as its DEFAULT (a one-time
-// snapshot, not a live lock — the user can change the event's sharing
-// afterwards, and later trip changes won't re-apply unless re-synced).
-async function applyTripSharingToEvent(eventId: string, containerId: string): Promise<void> {
-  const container = (await dbClient.events.get(containerId)) as unknown as Event | null
-  const friends = (container?.shared_with_friends as SharedWithFriends) ?? 'none'
-  const { data: groupIds } = await getEventSharedWithGroupIds(containerId)
-  const { data: userIds } = await getEventSharedWithUserIds(containerId)
-  await dbClient.events.update(eventId, { shared_with_friends: friends } as Partial<Event>)
-  await setEventSharedWithGroups(eventId, groupIds ?? [])
-  await setEventSharedWithUsers(eventId, friends === 'selected' ? (userIds ?? []) : [])
-  if ((groupIds?.length ?? 0) > 0 || (friends === 'selected' && (userIds?.length ?? 0) > 0)) {
-    notifyEventShared(eventId, { group_ids: groupIds, user_ids: friends === 'selected' ? userIds : undefined })
-  }
-}
-
-/** Attach an event/todo to a trip (or detach with null). On attach the event
- *  inherits the trip's sharing as its default — unless skipInherit is set
- *  (the user gave the event its own sharing, which must win). */
+/** Attach an event/todo to a trip (or detach with null). Children inherit the
+ *  trip's audience automatically: the unified RLS surfaces an event whose
+ *  group_id points to a container shared with the viewer, so no per-child
+ *  share rows are written ("share once → children follow"). */
 export async function assignToContainer(
   eventId: string,
   containerId: string | null,
-  opts?: { skipInherit?: boolean },
+  _opts?: { skipInherit?: boolean },
 ): Promise<{ error: Error | null }> {
   try {
     await dbClient.events.update(eventId, { group_id: containerId } as Partial<Event>)
-    if (containerId && !opts?.skipInherit) await applyTripSharingToEvent(eventId, containerId)
     return { error: null }
   } catch (e) {
     return { error: e instanceof Error ? e : new Error('Assign trip failed') }
   }
 }
 
-/** Push a trip's current sharing onto all of its member events (the "share
- *  everything in this trip" action). */
-export async function syncTripSharing(containerId: string, memberIds: string[]): Promise<{ count: number; error: Error | null }> {
-  try {
-    for (const id of memberIds) await applyTripSharingToEvent(id, containerId)
-    return { count: memberIds.length, error: null }
-  } catch (e) {
-    return { count: 0, error: e instanceof Error ? e : new Error('Sync trip sharing failed') }
-  }
+/** No-op retained for call-site compatibility. Sharing a trip is now a single
+ *  share on the container; its children follow via RLS, so there is nothing to
+ *  cascade. */
+export async function syncTripSharing(_containerId: string, _memberIds: string[]): Promise<{ count: number; error: Error | null }> {
+  return { count: 0, error: null }
 }
 
 /** Delete a trip. Children detach automatically (group_id FK is ON DELETE SET NULL). */

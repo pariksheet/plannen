@@ -154,16 +154,17 @@ export async function removeGroupMember(groupId: string, userId: string): Promis
   }
 }
 
-/** Group IDs an event is shared with. Tier-1 reads event_shared_with_groups via supabase-js. */
+/** Group IDs an event is shared with. Reads the unified event_shares table. */
 export async function getEventSharedWithGroupIds(eventId: string): Promise<{ data: string[]; error: Error | null }> {
   if (isTierZero()) return { data: [], error: null }
   try {
     const { data, error } = await supabase
-      .from('event_shared_with_groups')
-      .select('group_id')
+      .from('event_shares')
+      .select('target_id')
       .eq('event_id', eventId)
+      .eq('target_type', 'group')
     if (error) throw new Error(error.message)
-    return { data: (data ?? []).map((r) => r.group_id as string), error: null }
+    return { data: (data ?? []).map((r) => r.target_id as string), error: null }
   } catch (e) {
     return { data: [], error: e instanceof Error ? e : new Error('getEventSharedWithGroupIds failed') }
   }

@@ -3,10 +3,21 @@ import { supabase } from '../lib/supabase'
 import { isTierZero } from '../lib/tier'
 import { Event, EventFormData, EventStatus, resolveEventStatus } from '../types/event'
 import { createRecurringTask, createEnrollmentMonitorTask } from './agentTaskService'
-import { setEventSharedWithGroups, setEventSharedWithUsers } from './groupService'
 import { generateSessionDates, RecurrenceRule } from '../utils/recurrence'
 import { extractDomain } from '../utils/eventSource'
 import { notifyEventShared } from '../lib/notify'
+import { applyDefaultShare, setShares, type ShareTarget } from './shareService'
+
+/** Translate an event form's sharing fields into unified event_shares targets. */
+function formShareTargets(data: Partial<EventFormData>): ShareTarget[] {
+  const targets: ShareTarget[] = []
+  if (data.shared_with_friends === 'all') targets.push({ type: 'all' })
+  if (data.shared_with_friends === 'selected') {
+    for (const id of data.shared_with_user_ids ?? []) targets.push({ type: 'user', id })
+  }
+  for (const id of data.shared_with_group_ids ?? []) targets.push({ type: 'group', id })
+  return targets
+}
 
 async function upsertEventSource(_userId: string, enrollmentUrl: string, _eventId: string): Promise<void> {
   const domain = extractDomain(enrollmentUrl)
@@ -109,19 +120,21 @@ export async function createEvent(
   if (data.event_kind === 'event' && data.enrollment_deadline) {
     await createEnrollmentMonitorTask(event.id)
   }
-  if (data.shared_with_friends === 'selected' && data.shared_with_user_ids?.length) {
-    await setEventSharedWithUsers(event.id, data.shared_with_user_ids)
-  }
-  if (data.shared_with_group_ids?.length) {
-    await setEventSharedWithGroups(event.id, data.shared_with_group_ids)
+  // Sharing: explicit form selection wins; if the caller specified nothing
+  // (shared_with_friends omitted), apply the user's default-share rule.
+  const targets = formShareTargets(data)
+  if (data.shared_with_friends === undefined && targets.length === 0) {
+    await applyDefaultShare(event.id)
+  } else if (targets.length > 0) {
+    await setShares(event.id, targets)
+    notifyEventShared(event.id, {
+      group_ids: data.shared_with_group_ids,
+      user_ids: data.shared_with_friends === 'selected' ? data.shared_with_user_ids : undefined,
+    })
   }
   if (data.enrollment_url) {
     await upsertEventSource(userId, data.enrollment_url, event.id)
   }
-  notifyEventShared(event.id, {
-    group_ids: data.shared_with_group_ids,
-    user_ids: data.shared_with_friends === 'selected' ? data.shared_with_user_ids : undefined,
-  })
   return { data: event, error: null }
 }
 
@@ -158,19 +171,21 @@ export async function updateEvent(
     return { data: null, error: e instanceof Error ? e : new Error('Update failed') }
   }
 
-  if (sharedWithGroupIds !== undefined) {
-    await setEventSharedWithGroups(id, sharedWithGroupIds)
-    if (sharedWithGroupIds.length > 0) {
-      notifyEventShared(id, { group_ids: sharedWithGroupIds })
-    }
-  }
-  if (sharedWithUserIds !== undefined) {
-    // Only persist direct user-shares when sharing mode is "selected";
-    // switching to none/all clears the per-user rows.
-    const ids = data.shared_with_friends === 'selected' ? sharedWithUserIds : []
-    await setEventSharedWithUsers(id, ids)
-    if (ids.length > 0) {
-      notifyEventShared(id, { user_ids: ids })
+  // Re-derive the awareness share set from the form when any sharing field was
+  // part of this update. setShares replaces awareness rows but leaves assigned
+  // (todo-assignment) rows intact.
+  if (sharedWithGroupIds !== undefined || sharedWithUserIds !== undefined || data.shared_with_friends !== undefined) {
+    const targets = formShareTargets({
+      shared_with_friends: data.shared_with_friends,
+      shared_with_user_ids: sharedWithUserIds,
+      shared_with_group_ids: sharedWithGroupIds,
+    })
+    await setShares(id, targets)
+    if (targets.length > 0) {
+      notifyEventShared(id, {
+        group_ids: sharedWithGroupIds,
+        user_ids: data.shared_with_friends === 'selected' ? sharedWithUserIds : undefined,
+      })
     }
   }
   if (data.enrollment_url) {
@@ -207,11 +222,12 @@ export async function getEventSharedWithUserIds(eventId: string): Promise<{ data
   if (isTierZero()) return { data: [], error: null }
   try {
     const { data, error } = await supabase
-      .from('event_shared_with_users')
-      .select('user_id')
+      .from('event_shares')
+      .select('target_id')
       .eq('event_id', eventId)
+      .eq('target_type', 'user')
     if (error) throw new Error(error.message)
-    return { data: (data ?? []).map((r) => r.user_id as string), error: null }
+    return { data: (data ?? []).map((r) => r.target_id as string), error: null }
   } catch (e) {
     return { data: [], error: e instanceof Error ? e : new Error('getEventSharedWithUserIds failed') }
   }

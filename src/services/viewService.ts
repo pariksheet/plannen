@@ -2,6 +2,7 @@ import { dbClient } from '../lib/dbClient'
 import { supabase } from '../lib/supabase'
 import { isTierZero } from '../lib/tier'
 import { Event, resolveEventStatus } from '../types/event'
+import { getAdoptedEventIds } from './shareService'
 
 // The v0 REST contract scopes /api/events to the current user (created_by =
 // auth uid). Cross-user feeds (people / groups) are not surfaced via REST yet
@@ -69,6 +70,20 @@ async function fetchEventsByIds(ids: string[]): Promise<Event[]> {
 }
 
 /**
+ * Given event ids that may include trip containers, return those ids plus the
+ * ids of any child events/todos (group_id ∈ ids). The unified RLS already
+ * permits SELECT of children whose container is shared with the caller — this
+ * just discovers their ids so fetchEventsByIds surfaces them ("share once →
+ * children follow").
+ */
+async function withTripChildren(ids: string[]): Promise<string[]> {
+  if (ids.length === 0) return ids
+  const { data } = await supabase.from('events').select('id').in('group_id', ids)
+  const childIds = (data ?? []).map((r) => r.id as string)
+  return Array.from(new Set([...ids, ...childIds]))
+}
+
+/**
  * Events shared with any group I'm a member of OR a group I own. Tier 1+
  * only — Tier 0 has no cross-user sharing surface yet.
  */
@@ -93,12 +108,15 @@ export async function getGroupsEvents(): Promise<{ data: Event[] | null; error: 
     if (accessibleGroupIds.length === 0) return { data: [], error: null }
 
     const { data: shareRows, error: shareErr } = await supabase
-      .from('event_shared_with_groups')
+      .from('event_shares')
       .select('event_id')
-      .in('group_id', accessibleGroupIds)
+      .eq('target_type', 'group')
+      .in('target_id', accessibleGroupIds)
     if (shareErr) return { data: null, error: new Error(shareErr.message) }
 
-    const eventIds = Array.from(new Set((shareRows ?? []).map((r) => r.event_id as string)))
+    const sharedIds = Array.from(new Set((shareRows ?? []).map((r) => r.event_id as string)))
+    // Sharing a trip container surfaces its children too.
+    const eventIds = await withTripChildren(sharedIds)
     const events = await fetchEventsByIds(eventIds)
     return { data: enrichWithRecurrenceContext(events), error: null }
   } catch (e) {
@@ -121,25 +139,16 @@ async function getEventsSharedWithMeDirectly(): Promise<{ data: Event[] | null; 
     const userId = userRes?.user?.id
     if (!userId) return { data: [], error: null }
 
-    // Per-user shares.
-    const { data: directRows, error: directErr } = await supabase
-      .from('event_shared_with_users')
-      .select('event_id')
-      .eq('user_id', userId)
-    if (directErr) return { data: null, error: new Error(directErr.message) }
-    const directIds = (directRows ?? []).map((r) => r.event_id as string)
+    // Per-user + all-connections shares from event_shares. RLS on event_shares
+    // already gates 'all' rows to accepted connections, so reading them is safe.
+    const { data: shareRows, error: shareErr } = await supabase
+      .from('event_shares')
+      .select('event_id, target_type, target_id')
+      .or(`and(target_type.eq.user,target_id.eq.${userId}),target_type.eq.all`)
+    if (shareErr) return { data: null, error: new Error(shareErr.message) }
+    const sharedIds = Array.from(new Set((shareRows ?? []).map((r) => r.event_id as string)))
 
-    // shared_with_friends='all' events from people I'm connected to. RLS will
-    // gate visibility; we just need to find them.
-    const { data: allFriendsRows, error: allErr } = await supabase
-      .from('events')
-      .select('id')
-      .eq('shared_with_friends', 'all')
-      .neq('created_by', userId)
-    if (allErr) return { data: null, error: new Error(allErr.message) }
-    const allFriendsIds = (allFriendsRows ?? []).map((r) => r.id as string)
-
-    const eventIds = Array.from(new Set([...directIds, ...allFriendsIds]))
+    const eventIds = await withTripChildren(sharedIds)
     const events = await fetchEventsByIds(eventIds)
     // Hide events I created — they live in My Plans.
     return { data: enrichWithRecurrenceContext(events.filter((e) => e.created_by !== userId)), error: null }
@@ -158,4 +167,28 @@ export async function getFamilyEvents(): Promise<{ data: Event[] | null; error: 
 
 export async function getFriendsEvents(): Promise<{ data: Event[] | null; error: Error | null }> {
   return getEventsSharedWithMeDirectly()
+}
+
+/**
+ * The "Shared with me" inbox: events shared with me (directly, via a group, or
+ * via 'all') that I have NOT yet adopted onto my own agenda. Awareness shares
+ * sit here until the user opts in via shareService.adoptShare. Tier 1+ only.
+ */
+export async function getSharedWithMeInbox(): Promise<{ data: Event[] | null; error: Error | null }> {
+  if (isTierZero()) return { data: [], error: null }
+  try {
+    const [{ data: direct }, { data: groups }, { data: adoptedIds }] = await Promise.all([
+      getEventsSharedWithMeDirectly(),
+      getGroupsEvents(),
+      getAdoptedEventIds(),
+    ])
+    const adopted = new Set(adoptedIds ?? [])
+    const byId = new Map<string, Event>()
+    for (const e of [...(direct ?? []), ...(groups ?? [])]) {
+      if (!adopted.has(e.id)) byId.set(e.id, e)
+    }
+    return { data: enrichWithRecurrenceContext([...byId.values()]), error: null }
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e : new Error('Get shared-with-me inbox failed') }
+  }
 }
