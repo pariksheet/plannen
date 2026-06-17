@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-06-17
+
+### Schedule
+
+- **The calendar stays on the month you're viewing.** Editing or deleting an event while browsing a future month no longer snaps the calendar back to the current month — you can keep working in the month you were in. Locked in with a regression test.
+
+### Reliability
+
+- **Tier-0 identity switches that can't be saved now warn instead of failing silently.** If the environment that persists your active identity is missing, the app surfaces a warning rather than quietly losing the switch on the next restart.
+
 ## [0.8.4] - 2026-06-17
 
 ### Routines

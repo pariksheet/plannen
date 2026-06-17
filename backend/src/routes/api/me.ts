@@ -79,6 +79,11 @@ me.post('/', async (c) => {
     } catch (e) {
       console.warn(`POST /api/me: failed to update ${envPath}: ${(e as Error).message}`)
     }
+  } else if (process.env.NODE_ENV !== 'test') {
+    // Outside tests, an unset PLANNEN_ENV_PATH means the identity switch
+    // succeeds in-memory but is silently lost on the next backend restart —
+    // surface it rather than no-op quietly (audit finding LN-06).
+    console.warn('POST /api/me: PLANNEN_ENV_PATH unset — identity switch will not persist across backend restarts')
   }
 
   return await withUserContext(resolved.userId, async (db) => {

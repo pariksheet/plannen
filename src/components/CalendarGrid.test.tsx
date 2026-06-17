@@ -98,6 +98,28 @@ describe('CalendarGrid – trip bands', () => {
   })
 })
 
+describe('CalendarGrid – viewed month persists across a data refetch (issue #11)', () => {
+  it('keeps the navigated month after the events prop changes (post edit/delete refetch)', async () => {
+    const user = userEvent.setup()
+    const initial = [makeEvent('e1', new Date().toISOString())]
+    const { rerender } = render(<CalendarGrid events={initial} preferredVisitDates={{}} />)
+
+    const startMonth = Number((screen.getByLabelText('Select month') as HTMLSelectElement).value)
+
+    // Navigate forward one month, as a user browsing a future month would.
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    const advancedMonth = Number((screen.getByLabelText('Select month') as HTMLSelectElement).value)
+    expect(advancedMonth).toBe((startMonth + 1) % 12)
+
+    // An edit/delete triggers a parent refetch that hands down a fresh events
+    // array. The viewed month must survive that re-render — issue #11 was the
+    // calendar snapping back to the current month after a mutation.
+    rerender(<CalendarGrid events={[makeEvent('e2', new Date().toISOString())]} preferredVisitDates={{}} />)
+
+    expect(Number((screen.getByLabelText('Select month') as HTMLSelectElement).value)).toBe(advancedMonth)
+  })
+})
+
 describe('CalendarGrid – create from day', () => {
   it('opens the event form when the sidebar Add button is clicked', async () => {
     const user = userEvent.setup()
