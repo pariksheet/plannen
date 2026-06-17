@@ -32,6 +32,7 @@ import type {
   SettingsRow,
   SourceRow,
   StoryRow,
+  VisitPreferenceRow,
   WatchTaskRow,
 } from './types'
 
@@ -195,6 +196,17 @@ export const tier0: DbClient = {
   // ── rsvp ──────────────────────────────────────────────────────────────────
   rsvp: {
     upsert: (input) => api<RsvpRow>('/api/rsvp', { method: 'POST', body: JSON.stringify(input) }),
+  },
+
+  // ── visit preference ──────────────────────────────────────────────────────
+  // Decoupled from rsvp (issue #5): a planning hint that does not imply an RSVP.
+  visitPreference: {
+    list: (eventIds) =>
+      eventIds.length === 0
+        ? Promise.resolve([])
+        : api<VisitPreferenceRow[]>(`/api/visit-preference?${qs({ event_ids: eventIds.join(',') })}`),
+    upsert: (input) =>
+      api<VisitPreferenceRow>('/api/visit-preference', { method: 'POST', body: JSON.stringify(input) }),
   },
 
   // ── groups ────────────────────────────────────────────────────────────────

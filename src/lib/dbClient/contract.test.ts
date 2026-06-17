@@ -67,7 +67,7 @@ beforeEach(() => {
 
 const domains = [
   'events', 'stories', 'memories', 'profile', 'relationships',
-  'locations', 'sources', 'watch', 'rsvp', 'groups', 'wishlist',
+  'locations', 'sources', 'watch', 'rsvp', 'visitPreference', 'groups', 'wishlist',
   'settings', 'agentTasks', 'me', 'functions', 'realtime', 'scheduling',
 ] as const
 

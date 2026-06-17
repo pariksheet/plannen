@@ -1216,13 +1216,13 @@ async function getGcalSyncCandidates() {
     if (events.length === 0) return []
     const ids = events.map((e: { id: string }) => e.id)
     const { rows: rsvps } = await c.query(
-      `SELECT event_id, preferred_visit_date FROM plannen.event_rsvps
+      `SELECT event_id, visit_date FROM plannen.event_visit_preferences
        WHERE user_id = $1 AND event_id = ANY($2)`,
       [id, ids],
     )
     const visitMap = new Map<string, string | null>()
-    for (const r of rsvps as Array<{ event_id: string; preferred_visit_date: string | null }>) {
-      visitMap.set(r.event_id, r.preferred_visit_date)
+    for (const r of rsvps as Array<{ event_id: string; visit_date: string | null }>) {
+      visitMap.set(r.event_id, r.visit_date)
     }
     return events.map((e: { id: string; title: string; description: string | null; location: string | null; enrollment_url: string | null; event_kind: string; start_date: string; end_date: string | null }) => {
       const preferredDateRaw = visitMap.get(e.id) ?? null

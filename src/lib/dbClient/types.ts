@@ -272,6 +272,12 @@ export type RsvpRow = Record<string, unknown> & {
   preferred_visit_date: string | null
 }
 
+export type VisitPreferenceRow = Record<string, unknown> & {
+  event_id: string
+  user_id: string
+  visit_date: string | null
+}
+
 export type GroupRow = Record<string, unknown> & {
   id: string
   name: string
@@ -420,7 +426,11 @@ export type DbClient = {
     delete: (id: string) => Promise<void>
   }
   rsvp: {
-    upsert: (input: { event_id: string; status: string; preferred_visit_date?: string | null }) => Promise<RsvpRow>
+    upsert: (input: { event_id: string; status: string }) => Promise<RsvpRow>
+  }
+  visitPreference: {
+    list: (eventIds: string[]) => Promise<VisitPreferenceRow[]>
+    upsert: (input: { event_id: string; visit_date: string | null }) => Promise<VisitPreferenceRow>
   }
   groups: {
     list: () => Promise<GroupRow[]>
