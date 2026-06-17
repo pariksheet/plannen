@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-06-17
+
+### Events
+
+- **Setting a preferred visit date no longer implies an RSVP.** The "when I'd like to visit" hint now lives in its own place, fully separated from "am I going?". Picking or clearing a visit date never creates or changes your RSVP status — and you can set one even before you've RSVP'd. This removes the root cause of the old phantom "Maybe" that used to appear when a visit date was set. Existing visit dates are carried over automatically; no action needed.
+
 ## [0.8.5] - 2026-06-17
 
 ### Schedule
