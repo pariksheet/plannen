@@ -170,44 +170,10 @@ export async function getEventSharedWithGroupIds(eventId: string): Promise<{ dat
   }
 }
 
-/** Set which groups an event is shared with. Tier-1 writes event_shared_with_groups via supabase-js. */
-export async function setEventSharedWithGroups(eventId: string, groupIds: string[]): Promise<{ error: Error | null }> {
-  if (isTierZero()) return { error: null }
-  try {
-    const { error: delErr } = await supabase
-      .from('event_shared_with_groups')
-      .delete()
-      .eq('event_id', eventId)
-    if (delErr) throw new Error(delErr.message)
-    if (groupIds.length === 0) return { error: null }
-    const rows = groupIds.map((group_id) => ({ event_id: eventId, group_id }))
-    const { error: insErr } = await supabase.from('event_shared_with_groups').insert(rows)
-    if (insErr) throw new Error(insErr.message)
-    return { error: null }
-  } catch (e) {
-    return { error: e instanceof Error ? e : new Error('setEventSharedWithGroups failed') }
-  }
-}
-
-/** Set which users an event is shared with directly. Tier-1 writes
- *  event_shared_with_users via supabase-js (mirror of the group writer). */
-export async function setEventSharedWithUsers(eventId: string, userIds: string[]): Promise<{ error: Error | null }> {
-  if (isTierZero()) return { error: null }
-  try {
-    const { error: delErr } = await supabase
-      .from('event_shared_with_users')
-      .delete()
-      .eq('event_id', eventId)
-    if (delErr) throw new Error(delErr.message)
-    if (userIds.length === 0) return { error: null }
-    const rows = userIds.map((user_id) => ({ event_id: eventId, user_id }))
-    const { error: insErr } = await supabase.from('event_shared_with_users').insert(rows)
-    if (insErr) throw new Error(insErr.message)
-    return { error: null }
-  } catch (e) {
-    return { error: e instanceof Error ? e : new Error('setEventSharedWithUsers failed') }
-  }
-}
+// Event group/user sharing now lives in the unified event_shares table — see
+// shareService (setShares/addShare/removeShare). The legacy
+// setEventSharedWith{Groups,Users} writers were removed with migration
+// 20260617170000, which dropped the junction tables.
 
 /** Group IDs a story is shared with. Tier-1 reads story_shared_with_groups via supabase-js. */
 export async function getStorySharedWithGroupIds(storyId: string): Promise<{ data: string[]; error: Error | null }> {
