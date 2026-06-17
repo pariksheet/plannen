@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-06-17
+
+### Checklists
+
+- **Share a checklist straight from its detail view.** The share control previously lived only on Trips-section rows, so a checklist attached to a plain to-do had no reachable Share button. The detail view now carries an owner-only Share button — any checklist can be shared with people or groups from the list you're looking at.
+- **"Reset all" now confirms in an in-app dialog.** Unchecking every item used to pop a raw browser confirmation; it now uses the app's own modal, consistent with the rest of the UI.
+
+### Mobile rendering
+
+- **Fixed the page sliding left–right on iPhone.** On narrower iOS screens the layout could overflow horizontally and pan as one block, cutting off buttons and headings at the edges (Android was unaffected). The root overflow guard now uses a clip that iOS Safari actually honors, and the schedule header and feed toolbar shrink or wrap to fit instead of forcing the page wider than the screen.
+
 ## [0.8.2] - 2026-06-17
 
 ### Checklist editing

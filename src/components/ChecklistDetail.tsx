@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react'
-import { RotateCcw, Pencil, Check, X, Link2 } from 'lucide-react'
+import { RotateCcw, Pencil, Check, X, Link2, Share2 } from 'lucide-react'
 import { useChecklist } from '../hooks/useChecklist'
 import { useAuth } from '../context/AuthContext'
 import { ChecklistItemRow } from './ChecklistItemRow'
+import { ChecklistShareModal } from './ChecklistShareModal'
+import { Modal } from './Modal'
 import { displayUserLabel } from '../utils/displayName'
+import { isTierZero } from '../lib/tier'
 import type { Event } from '../types/event'
 
 export function ChecklistDetail({ id, onBack, events }: { id: string; onBack: () => void; events?: Event[] }) {
@@ -14,6 +17,8 @@ export function ChecklistDetail({ id, onBack, events }: { id: string; onBack: ()
   const [titleDraft, setTitleDraft] = useState('')
   const [editingEvent, setEditingEvent] = useState(false)
   const [eventQuery, setEventQuery] = useState('')
+  const [sharing, setSharing] = useState(false)
+  const [confirmingReset, setConfirmingReset] = useState(false)
   // Cancelled events aren't valid attach targets — hide them from the picker.
   const attachable = useMemo(() => (events ?? []).filter((e) => e.event_status !== 'cancelled'), [events])
   const eventMatches = useMemo(() => {
@@ -22,7 +27,8 @@ export function ChecklistDetail({ id, onBack, events }: { id: string; onBack: ()
   }, [attachable, eventQuery])
   if (!checklist) return <div className="py-12 text-center text-gray-400">Loading…</div>
   const meId = user?.id ?? null
-  const creator = checklist.created_by === meId ? 'you' : displayUserLabel(names[checklist.created_by] ?? { id: checklist.created_by })
+  const isOwner = checklist.created_by === meId
+  const creator = isOwner ? 'you' : displayUserLabel(names[checklist.created_by] ?? { id: checklist.created_by })
   const items = checklist.items ?? []
   const hasChecked = items.some((i) => i.checked_at != null)
   const submit = async () => {
@@ -30,8 +36,8 @@ export function ChecklistDetail({ id, onBack, events }: { id: string; onBack: ()
     if (texts.length) { await addItems(texts); setDraft('') }
   }
   const onReset = async () => {
+    setConfirmingReset(false)
     if (!hasChecked) return
-    if (!window.confirm('Uncheck every item in this checklist? The items stay; only their checked state is cleared.')) return
     await resetAll()
   }
   const startEditTitle = () => { setTitleDraft(checklist.title); setEditingTitle(true) }
@@ -113,15 +119,26 @@ export function ChecklistDetail({ id, onBack, events }: { id: string; onBack: ()
             )
           )}
         </div>
-        {hasChecked && (
-          <button
-            type="button"
-            onClick={() => void onReset()}
-            className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 hover:text-gray-900 border border-gray-200 rounded-md px-2 py-1.5 shrink-0"
-          >
-            <RotateCcw className="h-3.5 w-3.5" /> Reset all
-          </button>
-        )}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {isOwner && !isTierZero() && (
+            <button
+              type="button"
+              onClick={() => setSharing(true)}
+              className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 hover:text-indigo-700 border border-gray-200 rounded-md px-2 py-1.5"
+            >
+              <Share2 className="h-3.5 w-3.5" /> Share
+            </button>
+          )}
+          {hasChecked && (
+            <button
+              type="button"
+              onClick={() => setConfirmingReset(true)}
+              className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 hover:text-gray-900 border border-gray-200 rounded-md px-2 py-1.5"
+            >
+              <RotateCcw className="h-3.5 w-3.5" /> Reset all
+            </button>
+          )}
+        </div>
       </div>
       <ul className="space-y-1">
         {items.map((it) => (
@@ -134,6 +151,18 @@ export function ChecklistDetail({ id, onBack, events }: { id: string; onBack: ()
           placeholder="Add an item…" className="flex-1 min-w-0 border border-gray-200 rounded-lg px-3 py-2.5 text-sm min-h-[44px]" />
         <button type="button" onClick={() => void submit()} className="shrink-0 min-h-[44px] bg-indigo-600 text-white rounded-lg px-4 py-2.5 text-sm font-medium">Add</button>
       </div>
+      {sharing && (
+        <ChecklistShareModal checklistId={checklist.id} title={checklist.title} onClose={() => setSharing(false)} />
+      )}
+      <Modal isOpen={confirmingReset} onClose={() => setConfirmingReset(false)} title="Reset checklist?">
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">Uncheck every item in this checklist? The items stay; only their checked state is cleared.</p>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setConfirmingReset(false)} className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 text-sm">Cancel</button>
+            <button type="button" onClick={() => void onReset()} className="px-4 py-2 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 inline-flex items-center gap-2"><RotateCcw className="h-4 w-4" /> Reset all</button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }
