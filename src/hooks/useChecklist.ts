@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ChecklistRow } from '../lib/dbClient/types'
-import { getChecklist, setChecklistItemChecked, addChecklistItems, deleteChecklistItem, resetChecklistItems } from '../services/checklistService'
+import { getChecklist, setChecklistItemChecked, addChecklistItems, deleteChecklistItem, resetChecklistItems, updateChecklistItem, renameChecklist } from '../services/checklistService'
 import { getUsersByIds, type FriendUser } from '../services/relationshipService'
 
 export function useChecklist(id: string) {
@@ -32,9 +32,17 @@ export function useChecklist(id: string) {
   }, [load])
   const addItems = useCallback(async (texts: string[]) => { await addChecklistItems(id, texts); await load() }, [id, load])
   const removeItem = useCallback(async (itemId: string) => { await deleteChecklistItem(itemId); await load() }, [load])
+  const renameItem = useCallback(async (itemId: string, text: string) => {
+    setChecklist((c) => c && { ...c, items: c.items?.map((i) => i.id === itemId ? { ...i, text } : i) })
+    await updateChecklistItem(itemId, text); await load()
+  }, [load])
+  const rename = useCallback(async (title: string) => {
+    setChecklist((c) => c && { ...c, title })
+    await renameChecklist(id, title); await load()
+  }, [id, load])
   const resetAll = useCallback(async () => {
     if (!checklist?.items?.length) return
     await resetChecklistItems(checklist.items); await load()
   }, [checklist, load])
-  return { checklist, names, reload: load, toggle, addItems, removeItem, resetAll }
+  return { checklist, names, reload: load, toggle, addItems, removeItem, renameItem, rename, resetAll }
 }
