@@ -7,7 +7,7 @@
 
 Practices (routines) only carry a coarse `preferred_time_of_day`
 (`morning` / `afternoon` / `evening` / `anytime`). A user who wants a routine
-at a specific clock time — e.g. "Brush Niheet Before Sleep" at 20:00 — has no
+at a specific clock time — e.g. "Brush Milo Before Sleep" at 20:00 — has no
 way to express it, and the routine cannot sit at its real time in the day's
 schedule.
 

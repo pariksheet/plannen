@@ -57,6 +57,9 @@ export function Today() {
                   onChange={() => void toggle(r.id)}
                   aria-label={r.done ? 'Mark not done' : 'Mark done'}
                 />
+                {r.timeLabel && (
+                  <span className="text-gray-500 text-sm whitespace-nowrap">{r.timeLabel}</span>
+                )}
                 <span className={r.done ? 'line-through text-gray-400' : ''}>{r.label}</span>
               </label>
             </li>
