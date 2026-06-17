@@ -21,6 +21,7 @@ import { mailboxModule } from './tools/mailbox.ts'
 import { provenanceModule } from './tools/provenance.ts'
 import { activityModule } from './tools/activity.ts'
 import { checklistsModule } from './tools/checklists.ts'
+import { sharesModule } from './tools/shares.ts'
 
 declare const Deno:
   | {
@@ -110,7 +111,7 @@ export async function handleRequest(
 // activityModule sits right after events so the /log tools (log_activity et al.)
 // cluster near the front — insurance against any client that caps/truncates the
 // MCP tool list (they'd drop the tail, not the head).
-const TOOLS: ToolModule[] = [eventsModule, activityModule, checklistsModule, memoriesModule, storiesModule, photosModule, gcalModule, relationshipsModule, profileModule, familyModule, locationsModule, watchesModule, sourcesModule, profileFactsModule, practicesModule, schedulingModule, briefingsModule, mailboxModule, provenanceModule]
+const TOOLS: ToolModule[] = [eventsModule, activityModule, checklistsModule, sharesModule, memoriesModule, storiesModule, photosModule, gcalModule, relationshipsModule, profileModule, familyModule, locationsModule, watchesModule, sourcesModule, profileFactsModule, practicesModule, schedulingModule, briefingsModule, mailboxModule, provenanceModule]
 
 if (typeof Deno !== 'undefined') {
   Deno.serve((req) => handleRequest(req, { tools: TOOLS }))

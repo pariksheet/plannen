@@ -10,6 +10,7 @@ import {
   type EventStatus,
 } from './_shared.ts'
 import { generateSessionDates, parseInUserTz, type RecurrenceRule } from '../../_shared/recurrence.ts'
+import { applyDefaultShare, writeShareTargets } from './shares.ts'
 
 // ── Tool definitions (verbatim from mcp/src/index.ts:1585-1675) ───────────────
 
@@ -83,6 +84,15 @@ const definitions: ToolDefinition[] = [
         hashtags: { type: 'array', items: { type: 'string' }, description: 'Tags without # (max 5)' },
         group_id: { type: 'string', description: 'Container/trip this event or todo belongs to (a container event id). Child inherits the container event_type + sharing unless this event is itself a container. A container cannot have a group_id.' },
         list_label: { type: 'string', description: 'For event_kind=todo inside a container: which named list it belongs to (e.g. Packing, To-do, Shopping). Ignored for non-todos.' },
+        share: {
+          type: 'array',
+          description: 'Override default sharing. Each: {type:"user"|"group"|"all", id?}. Omit this arg to apply the user\'s default-share rule; pass [] to keep it private. Shares read-only (awareness) — use assign_todo for assignment.',
+          items: {
+            type: 'object',
+            properties: { type: { type: 'string', enum: ['user', 'group', 'all'] }, id: { type: ['string', 'null'] } },
+            required: ['type'],
+          },
+        },
         event_status: {
           type: 'string',
           enum: ['watching', 'planned', 'interested', 'going', 'cancelled', 'past', 'missed'],
@@ -296,6 +306,7 @@ const createEvent: ToolHandler = async (args, ctx) => {
     recurrence_rule?: RecurrenceRule
     group_id?: string | null
     list_label?: string
+    share?: Array<{ type: 'user' | 'group' | 'all'; id?: string | null }>
   }
   if (!a.title) throw new Error('title is required')
   if (!a.start_date) throw new Error('start_date is required')
@@ -396,6 +407,16 @@ const createEvent: ToolHandler = async (args, ctx) => {
   const source = a.enrollment_url
     ? await upsertSource(ctx.client, ctx.userId, data.id, a.enrollment_url)
     : null
+
+  // Sharing: explicit `share` wins; an empty array / null means "private";
+  // omitted means "apply the user's default-share rule". Children inside a
+  // container inherit visibility through the trip RLS branch, so they need no
+  // own share rows.
+  if (a.share === undefined) {
+    if (a.group_id == null) await applyDefaultShare(ctx.client, ctx.userId, data.id)
+  } else if (Array.isArray(a.share) && a.share.length > 0) {
+    await writeShareTargets(ctx.client, ctx.userId, data.id, a.share)
+  }
 
   return { ...slimEvent(data), source }
 }
