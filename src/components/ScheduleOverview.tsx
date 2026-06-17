@@ -187,10 +187,7 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
           onChecklistsChange={reloadChecklists}
         />
       )}
-      <TodayScheduleCard
-        attendances={props.attendancesToday ?? []}
-        obligations={props.obligationsToday ?? []}
-      />
+      <TodayScheduleCard attendances={props.attendancesToday ?? []} />
       <OverdueCard
         events={events}
         onEdit={props.onEdit}
@@ -202,6 +199,7 @@ export function ScheduleOverview(props: ScheduleOverviewProps) {
       />
       <WeekCard
         events={weekEvents}
+        obligations={props.obligationsToday ?? []}
         onEdit={props.onEdit}
         onDelete={props.onDelete}
         onShareSuccess={props.onShareSuccess}
@@ -262,65 +260,29 @@ function HeaderStrip({ heading }: { heading: string }) {
   )
 }
 
-// Read-only "Today on a schedule" card. Two distinct kinds of row:
-//  • Obligations — ACTIONABLE timed drop/pick tasks (source name + a drop/pick badge).
-//    Rendered like timed items (time + label), but NOT editable here (creation
-//    is agent-driven).
-//  • Attendances — INDICATIVE context (a member is somewhere on a schedule).
-//    Rendered greyed/muted, with NO conflict marker — they are deliberately
-//    kept out of overlappingIds() in utils/weekAgenda.ts.
-// Absent entirely when there is nothing to show.
-function TodayScheduleCard(
-  { attendances, obligations }: {
-    attendances: AttendanceInstanceRow[]
-    obligations: ResolvedObligationRow[]
-  },
-) {
-  if (attendances.length === 0 && obligations.length === 0) return null
-  const sortedObligations = obligations.slice().sort((a, b) => a.time.localeCompare(b.time))
+// Read-only section for today's INDICATIVE attendances (a member is somewhere
+// on a schedule). Rendered greyed/muted, with NO conflict marker — they are
+// deliberately kept out of overlappingIds() in utils/weekAgenda.ts. Absent
+// entirely when there are no attendances. (Actionable drop/pick obligations now
+// interleave into the Today list in WeekCard, not here.)
+function TodayScheduleCard({ attendances }: { attendances: AttendanceInstanceRow[] }) {
+  if (attendances.length === 0) return null
   return (
-    <section
-      data-testid="today-schedule-card"
-      className={`rounded-xl border-2 border-sky-200/70 bg-sky-50/50 p-4 ${sketchBody}`}
-    >
-      <h3 className={`${sketchHand} text-3xl text-gray-900 mb-2`}>Today on a schedule</h3>
-
-      {sortedObligations.length > 0 && (
-        <ul className="md:columns-2 gap-x-6 mb-2">
-          {sortedObligations.map((o) => (
-            <li
-              key={o.obligation_id}
-              data-testid="obligation-row"
-              className="break-inside-avoid mb-1 flex items-center gap-1.5 w-full text-base leading-6 px-1.5"
-            >
-              <span className="text-gray-500 text-sm whitespace-nowrap mr-2">{o.time}</span>
-              <span className="text-gray-800">
-                {obligationLabel(o)}
-                <span className="ml-1.5 text-[11px] not-italic bg-sky-100 text-sky-800 border border-sky-200 rounded-full px-1.5 py-0.5">
-                  {o.role}
-                </span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {attendances.length > 0 && (
-        <ul data-testid="attendance-list" className="md:columns-2 gap-x-6">
-          {attendances.map((a) => (
-            <li
-              key={a.attendance_id}
-              data-testid="attendance-row"
-              className="break-inside-avoid mb-1 text-base leading-6 px-1.5 text-gray-400"
-            >
-              {attendanceLabel(a)}
-              <span className="ml-1.5 text-[11px] not-italic bg-gray-100 text-gray-500 border border-gray-200 rounded-full px-1.5 py-0.5">
-                indicative
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+    <section data-testid="today-schedule-card" className={sketchBody}>
+      <ul data-testid="attendance-list" className="md:columns-2 gap-x-6">
+        {attendances.map((a) => (
+          <li
+            key={a.attendance_id}
+            data-testid="attendance-row"
+            className="break-inside-avoid mb-1 text-base leading-6 px-1.5 text-gray-400"
+          >
+            {attendanceLabel(a)}
+            <span className="ml-1.5 text-[11px] not-italic bg-gray-100 text-gray-500 border border-gray-200 rounded-full px-1.5 py-0.5">
+              indicative
+            </span>
+          </li>
+        ))}
+      </ul>
     </section>
   )
 }
@@ -373,6 +335,7 @@ type WeekRow =
   | { kind: 'empty'; key: string }
   | { kind: 'event'; key: string; event: Event; isToday: boolean; isPast: boolean; clash: boolean }
   | { kind: 'routine'; key: string; routine: TodayRoutine }
+  | { kind: 'obligation'; key: string; obligation: ResolvedObligationRow }
 
 // Incomplete to-dos whose date has passed. Rendered above the week card and
 // only when there's at least one — otherwise the section is absent entirely.
@@ -450,7 +413,7 @@ function OverdueCard({ events, ...actions }: { events: Event[] } & ActionProps) 
   )
 }
 
-function WeekCard({ events, subjectNames, hideRoutines, ...actions }: { events: Event[]; subjectNames?: Record<string, string>; hideRoutines?: boolean } & ActionProps) {
+function WeekCard({ events, obligations, subjectNames, hideRoutines, ...actions }: { events: Event[]; obligations?: ResolvedObligationRow[]; subjectNames?: Record<string, string>; hideRoutines?: boolean } & ActionProps) {
   const now = useNow()
   const [range, setRange] = useState<'today' | 'this-week' | 'next-week'>('today')
   const addDays = (d: Date, n: number): Date => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
@@ -504,7 +467,16 @@ function WeekCard({ events, subjectNames, hideRoutines, ...actions }: { events: 
         sortMins: r.sortMins,
         row: { kind: 'routine', key: `routine-${r.id}`, routine: r } as WeekRow,
       }))
-      const merged = [...eventRows, ...routineRows].sort((x, y) => x.sortMins - y.sortMins)
+      // Drop/pick obligations are timed today-only commitments; interleave them
+      // among events and routines by their clock time.
+      const obligationRows = (obligations ?? []).map((o) => {
+        const [h, m] = o.time.split(':').map(Number)
+        return {
+          sortMins: h * 60 + m,
+          row: { kind: 'obligation', key: `ob-${o.obligation_id}`, obligation: o } as WeekRow,
+        }
+      })
+      const merged = [...eventRows, ...routineRows, ...obligationRows].sort((x, y) => x.sortMins - y.sortMins)
       if (merged.length === 0) return [{ kind: 'empty', key: b.dateKey }]
       return merged.map((m) => m.row)
     }
@@ -565,6 +537,22 @@ function WeekCard({ events, subjectNames, hideRoutines, ...actions }: { events: 
                   )}
                   <span className={r.done ? 'line-through text-gray-400' : ''}>{r.label}</span>
                 </label>
+              </li>
+            )
+          }
+          if (row.kind === 'obligation') {
+            const o = row.obligation
+            return (
+              <li key={row.key} data-testid="obligation-row" className="break-inside-avoid">
+                <div className="flex items-center gap-1.5 w-full text-base leading-6 px-1.5 py-0.5 bg-yellow-100/60">
+                  <span className="text-gray-500 text-sm whitespace-nowrap mr-2">{o.time}</span>
+                  <span className="text-gray-800">
+                    {obligationLabel(o)}
+                    <span className="ml-1.5 text-[11px] not-italic bg-sky-100 text-sky-800 border border-sky-200 rounded-full px-1.5 py-0.5">
+                      {o.role}
+                    </span>
+                  </span>
+                </div>
               </li>
             )
           }
