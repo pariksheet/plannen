@@ -23,8 +23,12 @@ vi.mock('./groupService', () => ({
   setEventSharedWithGroups: vi.fn(),
   getEventSharedWithGroupIds: vi.fn(),
 }))
+vi.mock('./shareService', () => ({
+  applyDefaultShare: vi.fn(),
+  setShares: vi.fn(),
+}))
 
-import { completeTodo, uncompleteTodo, convertEventKind } from './eventService'
+import { completeTodo, uncompleteTodo, convertEventKind, updateEvent } from './eventService'
 
 beforeEach(() => update.mockClear())
 
@@ -47,5 +51,23 @@ describe('todo service ops', () => {
   it('convertEventKind to todo leaves completion untouched', async () => {
     await convertEventKind('e1', 'todo')
     expect(update).toHaveBeenCalledWith('e1', { event_kind: 'todo' })
+  })
+})
+
+describe('updateEvent payload hygiene', () => {
+  // shared_with_friends was retired as a column (migration 20260617180000); the
+  // share fields are translated into event_shares, never written to events.
+  it('strips share-only fields before the DB write', async () => {
+    await updateEvent('e1', {
+      title: 'Edited todo',
+      shared_with_friends: 'all',
+      shared_with_user_ids: ['u2'],
+      shared_with_group_ids: ['g1'],
+    })
+    const patch = update.mock.calls[0][1]
+    expect(patch).not.toHaveProperty('shared_with_friends')
+    expect(patch).not.toHaveProperty('shared_with_user_ids')
+    expect(patch).not.toHaveProperty('shared_with_group_ids')
+    expect(patch).toHaveProperty('title', 'Edited todo')
   })
 })

@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-06-18
+
+### Fixed
+
+- **Editing an event or to-do works again.** A schema change in 0.9.0 retired the old "shared with friends" flag (sharing now runs entirely through the unified model), but the editor still tried to save that retired field — so saving any edit failed with a database error. Edits now go through cleanly; the sharing you pick is still applied exactly as before. Covered by a regression test.
+
 ## [0.9.0] - 2026-06-17
 
 ### Sharing
