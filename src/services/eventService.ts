@@ -157,6 +157,11 @@ export async function updateEvent(
   const sharedWithUserIds = payload.shared_with_user_ids as string[] | undefined
   delete payload.shared_with_user_ids
   delete payload.shared_with_group_ids
+  // shared_with_friends was retired (migration 20260617180000) in favour of the
+  // event_shares junction; it's no longer a column, so keep it out of the DB
+  // write. The form value is still read below via data.shared_with_friends to
+  // derive the unified share targets.
+  delete payload.shared_with_friends
 
   if (opts?.newStatus) {
     payload.event_status = opts.newStatus
