@@ -14,7 +14,7 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['_shared/**/*.test.ts', 'mcp/**/*.test.ts', 'mcp-token/**/*.test.ts'],
+    include: ['_shared/**/*.test.ts', 'mcp/**/*.test.ts', 'mcp-token/**/*.test.ts', 'agent-chat/**/*.test.ts'],
     testTimeout: 15000,
   },
   resolve: {

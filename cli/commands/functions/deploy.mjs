@@ -60,6 +60,10 @@ export async function invokeFunctionsDeploy(rawArgs, ctx = {}) {
         ...(composed.VAPID_PUBLIC_KEY ? { VAPID_PUBLIC_KEY: composed.VAPID_PUBLIC_KEY } : {}),
         ...(composed.VAPID_PRIVATE_KEY ? { VAPID_PRIVATE_KEY: composed.VAPID_PRIVATE_KEY } : {}),
         ...(composed.VAPID_SUBJECT ? { VAPID_SUBJECT: composed.VAPID_SUBJECT } : {}),
+        // UI action agent (agent-chat): app-provided OpenAI-compatible provider.
+        ...(composed.LLM_API_KEY ? { LLM_API_KEY: composed.LLM_API_KEY } : {}),
+        ...(composed.LLM_BASE_URL ? { LLM_BASE_URL: composed.LLM_BASE_URL } : {}),
+        ...(composed.LLM_MODEL ? { LLM_MODEL: composed.LLM_MODEL } : {}),
       },
     },
     { cli: ctx.cli },
