@@ -9,6 +9,10 @@ import {
   proposalSummary,
   executionReceipt,
   buildSystemPrompt,
+  isValidTimeZone,
+  localNowIso,
+  toAbsoluteIso,
+  rewriteDateArgs,
   DECLINE_MESSAGE,
 } from './logic.ts'
 import { getUsage, incrementUsage, type Queryable } from './quota.ts'
@@ -93,6 +97,57 @@ describe('executionReceipt', () => {
   })
   it('log activity receipt', () => {
     expect(executionReceipt('log_activity', { activity: 'run' }, { activity: 'run' }, 'UTC')).toBe('✓ Logged “run”')
+  })
+})
+
+describe('device-timezone interpretation (traveling user)', () => {
+  it('validates IANA timezones', () => {
+    expect(isValidTimeZone('America/Toronto')).toBe(true)
+    expect(isValidTimeZone('Europe/Brussels')).toBe(true)
+    expect(isValidTimeZone('Mars/Olympus')).toBe(false)
+    expect(isValidTimeZone('')).toBe(false)
+    expect(isValidTimeZone(null)).toBe(false)
+    expect(isValidTimeZone(undefined)).toBe(false)
+  })
+
+  it('localNowIso renders the wall clock in the given tz', () => {
+    const d = new Date('2026-06-30T16:00:00Z') // 12:00 in Toronto (EDT -4)
+    expect(localNowIso(d, 'America/Toronto')).toBe('2026-06-30T12:00:00')
+    expect(localNowIso(d, 'Europe/Brussels')).toBe('2026-06-30T18:00:00') // +2
+  })
+
+  it('toAbsoluteIso reads a naive wall time as local in tz → absolute UTC', () => {
+    // The crux of the traveling bug: "12:00 today" in Ontario must NOT become
+    // noon Brussels.
+    expect(toAbsoluteIso('2026-06-30T12:00:00', 'America/Toronto')).toBe('2026-06-30T16:00:00.000Z')
+    expect(toAbsoluteIso('2026-06-30T12:00:00', 'Europe/Brussels')).toBe('2026-06-30T10:00:00.000Z')
+    expect(toAbsoluteIso('2026-06-30T12:00', 'America/Toronto')).toBe('2026-06-30T16:00:00.000Z') // no seconds
+  })
+
+  it('toAbsoluteIso passes through already-absolute or date-only values', () => {
+    expect(toAbsoluteIso('2026-06-30T16:00:00.000Z', 'America/Toronto')).toBe('2026-06-30T16:00:00.000Z')
+    expect(toAbsoluteIso('2026-06-30T12:00:00-04:00', 'Europe/Brussels')).toBe('2026-06-30T12:00:00-04:00')
+    expect(toAbsoluteIso('2026-06-30', 'America/Toronto')).toBe('2026-06-30') // all-day → handler's job
+  })
+
+  it('rewriteDateArgs converts only the date fields of date-bearing tools', () => {
+    expect(rewriteDateArgs('create_event', { title: 'Swim', start_date: '2026-07-03T16:00:00' }, 'America/Toronto'))
+      .toEqual({ title: 'Swim', start_date: '2026-07-03T20:00:00.000Z' })
+    expect(rewriteDateArgs('update_event', { id: 'e1', start_date: '2026-07-03T16:00:00', end_date: '2026-07-03T17:00:00' }, 'America/Toronto'))
+      .toEqual({ id: 'e1', start_date: '2026-07-03T20:00:00.000Z', end_date: '2026-07-03T21:00:00.000Z' })
+    expect(rewriteDateArgs('log_activity', { activity: 'run', occurred_at: '2026-06-30T08:00:00' }, 'America/Toronto'))
+      .toEqual({ activity: 'run', occurred_at: '2026-06-30T12:00:00.000Z' })
+  })
+
+  it('rewriteDateArgs leaves tools without date fields untouched', () => {
+    const a = { item_id: 'i1' }
+    expect(rewriteDateArgs('check_checklist_item', a, 'America/Toronto')).toBe(a)
+  })
+
+  it('rewriteDateArgs is idempotent on already-absolute values', () => {
+    const once = rewriteDateArgs('create_event', { title: 'x', start_date: '2026-07-03T16:00:00' }, 'America/Toronto')
+    const twice = rewriteDateArgs('create_event', once, 'America/Toronto')
+    expect(twice).toEqual(once)
   })
 })
 

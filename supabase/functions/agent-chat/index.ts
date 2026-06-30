@@ -11,9 +11,12 @@ import {
   buildSystemPrompt,
   decideConfirm,
   executionReceipt,
+  isValidTimeZone,
   isWriteTool,
+  localNowIso,
   nextMidnightIso,
   proposalSummary,
+  rewriteDateArgs,
   usageDateFor,
   type AgentRequest,
   type AgentResponse,
@@ -72,14 +75,19 @@ async function resolveLabel(
 }
 
 async function handle(ctx: ToolCtx, body: AgentRequest): Promise<AgentResponse> {
-  const tz = await getUserTimezone(ctx.client, ctx.userId)
+  // Interpret times in the user's CURRENT device timezone (where they
+  // physically are), matching the event form + device-local display. Fall back
+  // to the stored home/profile TZ when the client doesn't supply a valid one
+  // (e.g. background/non-device callers).
+  const clientTz = body.context?.client_timezone
+  const tz = isValidTimeZone(clientTz) ? clientTz : await getUserTimezone(ctx.client, ctx.userId)
   const now = new Date()
   const usageDate = usageDateFor(now, tz)
   const resetsAt = nextMidnightIso(now, tz)
 
   // ── Confirm path: execute the echoed proposal directly, no model, no charge.
   if (body.confirm) {
-    const { tool, args } = body.confirm
+    const { tool } = body.confirm
     if (!isWriteTool(tool)) {
       const used = await getUsage(ctx.client, ctx.userId, usageDate)
       return {
@@ -90,12 +98,15 @@ async function handle(ctx: ToolCtx, body: AgentRequest): Promise<AgentResponse> 
         error: 'unsupported_tool',
       }
     }
-    const result = await dispatchTool(tool, args ?? {}, ctx)
+    // Idempotent: proposal args were already resolved when proposed; re-run is a
+    // no-op on already-absolute values but covers any client-constructed confirm.
+    const args = rewriteDateArgs(tool, body.confirm.args ?? {}, tz)
+    const result = await dispatchTool(tool, args, ctx)
     const used = await getUsage(ctx.client, ctx.userId, usageDate)
     return {
-      assistant_text: executionReceipt(tool, args ?? {}, result, tz),
+      assistant_text: executionReceipt(tool, args, result, tz),
       proposed_action: null,
-      executed_action: { tool, summary: executionReceipt(tool, args ?? {}, result, tz) },
+      executed_action: { tool, summary: executionReceipt(tool, args, result, tz) },
       usage: { used, limit: DAILY_LIMIT, resets_at: resetsAt },
       error: null,
     }
@@ -116,7 +127,9 @@ async function handle(ctx: ToolCtx, body: AgentRequest): Promise<AgentResponse> 
   const used = await incrementUsage(ctx.client, ctx.userId, usageDate)
   const usage: Usage = { used, limit: DAILY_LIMIT, resets_at: resetsAt }
 
-  const system = buildSystemPrompt({ nowIso: now.toISOString(), tz, context: body.context })
+  // Inject the wall-clock "now" in the device TZ so relative dates resolve to
+  // the user's current local time, not their home/profile TZ.
+  const system = buildSystemPrompt({ nowIso: localNowIso(now, tz), tz, context: body.context })
   const turn = await runModelTurn({ system, messages: body.messages ?? [], ctx })
 
   // No write call → decline / off-topic dead-end.
@@ -130,7 +143,11 @@ async function handle(ctx: ToolCtx, body: AgentRequest): Promise<AgentResponse> 
     }
   }
 
-  const { tool, args } = turn.writeCall
+  const { tool } = turn.writeCall
+  // Resolve naive datetimes the model emitted (e.g. "12:00 today") against the
+  // device TZ → absolute UTC, before proposing or executing. Same result the
+  // event form produces from a datetime-local input.
+  const args = rewriteDateArgs(tool, turn.writeCall.args, tz)
   const needsConfirm = decideConfirm({ tool, args, usedLookup: turn.usedLookup })
 
   if (needsConfirm) {

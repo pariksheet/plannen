@@ -45,6 +45,8 @@ export type ChatMessage = { role: 'user' | 'assistant'; content: string }
 export type AgentContext = {
   open_event_id?: string | null
   open_checklist_id?: string | null
+  /** The web client's current IANA timezone (where the user physically is). */
+  client_timezone?: string | null
 }
 
 export type ProposedAction = {
@@ -128,6 +130,84 @@ export function tzOffsetMs(date: Date, tz: string): number {
 export function usageDateFor(date: Date, tz: string): string {
   // en-CA renders ISO-shaped YYYY-MM-DD.
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(date)
+}
+
+// ── Device-timezone time interpretation (traveling user) ───────────────────────
+// The agent interprets "today/now" and bare clock times in the user's CURRENT
+// device timezone (where they physically are), matching how the event form and
+// device-local display already behave — not the stored home/profile TZ. The web
+// passes its timezone; we fall back to the profile TZ when it's absent/invalid.
+
+export function isValidTimeZone(tz: unknown): tz is string {
+  if (typeof tz !== 'string' || !tz) return false
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz })
+    return true
+  } catch {
+    return false
+  }
+}
+
+// Wall-clock 'YYYY-MM-DDTHH:MM:SS' in `tz` at `date` — injected into the system
+// prompt so the model resolves relative dates against the user's local clock.
+export function localNowIso(date: Date, tz: string): string {
+  const dtf = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+  const p: Record<string, string> = {}
+  for (const x of dtf.formatToParts(date)) p[x.type] = x.value
+  const hour = p.hour === '24' ? '00' : p.hour
+  return `${p.year}-${p.month}-${p.day}T${hour}:${p.minute}:${p.second}`
+}
+
+const HAS_OFFSET = /([zZ]|[+-]\d{2}:?\d{2})$/
+const NAIVE_DATETIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/
+
+// Convert a timezone-naive wall-clock datetime to an absolute UTC ISO, reading
+// the wall clock as local time in `tz`. Mirrors the form's
+// `new Date(localString).toISOString()`. Values that already carry an offset/Z,
+// or that are date-only (all-day — left to the handler's own bucketing), pass
+// through unchanged.
+export function toAbsoluteIso(value: string, tz: string): string {
+  if (HAS_OFFSET.test(value)) return value
+  const m = value.match(NAIVE_DATETIME)
+  if (!m) return value // date-only or unrecognised → leave as-is
+  const [, y, mo, d, h, mi, s] = m
+  const guess = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s ?? '0'))
+  const offset = tzOffsetMs(new Date(guess), tz)
+  return new Date(guess - offset).toISOString()
+}
+
+// Date-carrying arg fields per write tool. Only these get device-TZ resolution.
+const DATE_FIELDS: Record<string, string[]> = {
+  create_event: ['start_date', 'end_date'],
+  update_event: ['start_date', 'end_date'],
+  log_activity: ['occurred_at'],
+}
+
+// Return a copy of `args` with naive datetime fields resolved to absolute UTC in
+// `tz`. Idempotent (already-absolute values pass through), so it is safe to run
+// on both the propose and execute paths.
+export function rewriteDateArgs(
+  tool: string,
+  args: Record<string, unknown>,
+  tz: string,
+): Record<string, unknown> {
+  const fields = DATE_FIELDS[tool]
+  if (!fields) return args
+  const out = { ...args }
+  for (const f of fields) {
+    const v = out[f]
+    if (typeof v === 'string' && v.trim()) out[f] = toAbsoluteIso(v.trim(), tz)
+  }
+  return out
 }
 
 // ISO instant of the next local midnight in `tz` after `date`.

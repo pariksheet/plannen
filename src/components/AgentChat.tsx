@@ -54,6 +54,14 @@ export function AgentChat({ onExecuted, context }: AgentChatProps) {
   const windowMessages = (items: ThreadItem[]): ChatMessage[] =>
     items.slice(-WINDOW).map(({ role, content }) => ({ role, content }))
 
+  // The user's CURRENT device timezone — the agent interprets "today/now" and
+  // bare clock times against this (where they physically are), matching the
+  // event form's device-local behaviour rather than the stored profile TZ.
+  const requestContext = () => ({
+    ...(context ?? {}),
+    client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  })
+
   const applyResponse = (data: AgentResponse) => {
     if (data.usage) setUsage(data.usage)
     setThread((prev) => [
@@ -78,7 +86,7 @@ export function AgentChat({ onExecuted, context }: AgentChatProps) {
     try {
       const data = await dbClient.functions.invoke<AgentResponse>('agent-chat', {
         messages: windowMessages(next),
-        context: context ?? undefined,
+        context: requestContext(),
       })
       applyResponse(data)
     } catch (err) {
@@ -98,6 +106,7 @@ export function AgentChat({ onExecuted, context }: AgentChatProps) {
     try {
       const data = await dbClient.functions.invoke<AgentResponse>('agent-chat', {
         messages: windowMessages(thread),
+        context: requestContext(),
         confirm: { tool: proposal.tool, args: proposal.args },
       })
       applyResponse(data)
