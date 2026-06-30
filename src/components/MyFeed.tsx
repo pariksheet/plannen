@@ -397,14 +397,7 @@ export function MyFeed() {
             </button>
           </div>
           <div className="flex items-center gap-2">
-            <DiscoverButton
-              onEventCreated={loadEvents}
-              onStartCreateWithData={(data) => {
-                setEditingEvent(undefined)
-                setInitialFormData(data)
-                setShowForm(true)
-              }}
-            />
+            <DiscoverButton onActionExecuted={loadEvents} />
             <button
               type="button"
               onClick={handleCreate}
