@@ -10,6 +10,7 @@ import { CalendarGrid } from './CalendarGrid'
 import { EventForm } from './EventForm'
 import { AddPerson } from './AddPerson'
 import { PendingRequests } from './PendingRequests'
+import { SentInvites } from './SentInvites'
 import { Modal } from './Modal'
 import { ChevronUp, UsersRound } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
@@ -42,6 +43,7 @@ export function MyPeople() {
   const [showPast, setShowPast] = useState(false)
   const [activeHashtag, setActiveHashtag] = useState<string | null>(null)
   const [personSearch, setPersonSearch] = useState('')
+  const [invitesKey, setInvitesKey] = useState(0)
   const [showForm, setShowForm] = useState(false)
   const [editingEvent, setEditingEvent] = useState<Event | undefined>()
   const [initialFormData, setInitialFormData] = useState<Partial<EventFormData> | null>(null)
@@ -318,8 +320,8 @@ export function MyPeople() {
         <div className="space-y-6">
           <section>
             <h3 className="text-base font-semibold text-gray-900 mb-2">Add a person</h3>
-            <p className="text-sm text-gray-600 mb-3">They need to have signed up on Plannen. We&apos;ll send a request; they can accept from their account. Offline people you care about (kids, partner) live on your Profile.</p>
-            <AddPerson onSuccess={refresh} />
+            <p className="text-sm text-gray-600 mb-3">Enter their email. If they’re on Plannen we’ll send a request; if not, we’ll invite them and add them automatically once they join. Offline people you care about (kids, partner) live on your Profile.</p>
+            <AddPerson onSuccess={() => { void refresh(); setInvitesKey((k) => k + 1) }} />
           </section>
           <section>
             <h3 className="text-base font-semibold text-gray-900 mb-2">People</h3>
@@ -337,6 +339,9 @@ export function MyPeople() {
           </section>
           <section>
             <PendingRequests onAcceptOrDecline={refresh} />
+          </section>
+          <section>
+            <SentInvites refreshKey={invitesKey} />
           </section>
         </div>
       </Modal>

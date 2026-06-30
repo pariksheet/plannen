@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-06-30
+
+### People
+
+- **Invite people who aren't on Plannen yet.** "Add a person" now takes any email. If they already have a Plannen account it sends a connection request as before; if they don't, it emails them an invite to join — and the moment they sign up they're added to your people automatically, no second step.
+- **See and cancel pending invites.** A new "Invites sent" list under Manage people shows everyone you've invited who hasn't joined yet, each with a Cancel button. Invites expire on their own after 30 days.
+
 ## [0.10.0] - 2026-06-30
 
 ### Assistant

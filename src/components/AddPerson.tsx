@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { sendRelationshipRequest } from '../services/relationshipService'
+import { inviteOrRequest } from '../services/relationshipService'
+import { sendInviteEmail } from '../services/appAccessService'
 import { UserPlus, Loader } from 'lucide-react'
 
 interface AddPersonProps {
@@ -19,13 +20,22 @@ export function AddPerson({ onSuccess }: AddPersonProps) {
     const trimmed = email.trim()
     if (!trimmed) return
     setLoading(true)
-    const { error: err } = await sendRelationshipRequest(trimmed)
-    setLoading(false)
-    if (err) {
-      setError(err.message)
+    const { data, error: err } = await inviteOrRequest(trimmed)
+    if (err || !data) {
+      setLoading(false)
+      setError(err?.message ?? 'Something went wrong.')
       return
     }
-    setMessage('Request sent. They’ll see it in their pending requests and can accept.')
+    if (data.kind === 'request') {
+      setLoading(false)
+      setMessage('Request sent. They’ll see it in their pending requests and can accept.')
+    } else {
+      // Not on Plannen yet — email them a join link. The friendship is queued
+      // and auto-created when they sign up, so a send failure isn't fatal.
+      await sendInviteEmail(trimmed)
+      setLoading(false)
+      setMessage('Invite sent — they’ll be added to your people automatically when they join.')
+    }
     setEmail('')
     onSuccess()
   }
@@ -36,7 +46,7 @@ export function AddPerson({ onSuccess }: AddPersonProps) {
         type="email"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
-        placeholder="Their email (they must have a Plannen account)"
+        placeholder="Their email"
         className="flex-1 min-w-0 px-3 py-2 min-h-[44px] border border-gray-300 rounded-md text-sm"
         disabled={loading}
       />
