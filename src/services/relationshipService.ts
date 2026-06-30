@@ -76,6 +76,59 @@ export async function sendRelationshipRequest(
   return { data: (data as string | null) ?? null, error: null }
 }
 
+export type InviteOrRequestKind = 'request' | 'invite'
+
+export interface SentInvite {
+  id: string
+  invitee_email: string
+  created_at: string
+  expires_at: string
+}
+
+/**
+ * Smart "add a person" entry point. If the email already belongs to a Plannen
+ * user a pending friend request is created (kind: 'request'); otherwise a
+ * pending invite is recorded (kind: 'invite') so the friendship is auto-created
+ * when they sign up. The caller is responsible for firing the invite email on
+ * the 'invite' branch.
+ */
+export async function inviteOrRequest(
+  email: string,
+): Promise<{ data: { kind: InviteOrRequestKind } | null; error: Error | null }> {
+  if (isTierZero()) return { data: null, error: new Error(TIER0_UNSUPPORTED) }
+  const trimmed = email.trim().toLowerCase()
+  if (!trimmed) return { data: null, error: new Error('Email is required') }
+  const { data, error } = await supabase.rpc('invite_or_request_relationship', {
+    target_email: trimmed,
+  })
+  if (error) return { data: null, error: new Error(error.message) }
+  const kind = (data as { kind?: string } | null)?.kind
+  if (kind !== 'request' && kind !== 'invite') {
+    return { data: null, error: new Error('Unexpected response') }
+  }
+  return { data: { kind }, error: null }
+}
+
+/** Pending invites the current user has sent to not-yet-joined emails. */
+export async function listSentInvites(): Promise<{ data: SentInvite[]; error: Error | null }> {
+  if (isTierZero()) return { data: [], error: null }
+  const { data, error } = await supabase
+    .from('relationship_invites')
+    .select('id, invitee_email, created_at, expires_at')
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false })
+  if (error) return { data: [], error: new Error(error.message) }
+  return { data: (data ?? []) as SentInvite[], error: null }
+}
+
+/** Cancel a pending invite the current user has sent. */
+export async function cancelInvite(inviteId: string): Promise<{ error: Error | null }> {
+  if (isTierZero()) return { error: new Error(TIER0_UNSUPPORTED) }
+  const { error } = await supabase.from('relationship_invites').delete().eq('id', inviteId)
+  if (error) return { error: new Error(error.message) }
+  return { error: null }
+}
+
 export async function getRelationshipRequests(): Promise<{ data: RelationshipRequest[]; error: Error | null }> {
   if (isTierZero()) return { data: [], error: null }
   const { data, error } = await supabase.rpc('get_relationship_requests')
