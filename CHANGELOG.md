@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-06-30
+
+### Assistant
+
+- **A new assistant in the web app.** The "Discover" button in your feed is now an **Assistant** you can talk to in plain language — "add swimming Friday 4pm", "cancel the dentist appointment", "check off sunscreen", "log a 40-minute run". It creates and edits events, to-dos, reminders and trips, adds and ticks checklist items, and logs activities, then shows a one-line receipt. It stays focused on your plans: off-topic or general questions get a short "I can only help with your plans" instead of a generated answer.
+- **Confirms before anything risky.** Cancelling — or any action it had to search to pin down — asks you to confirm first; clear, in-context creates, edits and ticks just happen. A confirm tap is free.
+- **A daily limit you can see.** The assistant runs on a built-in model with a friendly per-day request cap; the panel shows how many you have left and resets at midnight.
+- **Times follow where you are.** "Noon today" or "tomorrow 9am" are read in your current device timezone, so the assistant does the right thing while you're travelling — matching how the rest of the app already displays your times.
+
 ## [0.9.1] - 2026-06-18
 
 ### Fixed
