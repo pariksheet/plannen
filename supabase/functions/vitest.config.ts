@@ -1,5 +1,10 @@
 import { defineConfig } from 'vitest/config'
 
+// Pin tests to UTC so date/timezone assertions are deterministic on any
+// machine (matches CI). Keeps a dev laptop in another timezone from tripping
+// date-formatting tests. Set before defineConfig so workers inherit it.
+process.env.TZ = 'UTC'
+
 // Vitest config for the runtime-agnostic handler tests living under
 // `_shared/handlers/`. Handlers are written in Deno-source style (with
 // `npm:zod@3` / `npm:ai@4` specifiers) so they load unchanged on Tier 1.
