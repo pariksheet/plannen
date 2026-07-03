@@ -7,10 +7,13 @@ import { ChecklistShareModal } from './ChecklistShareModal'
 import { Modal } from './Modal'
 import { displayUserLabel } from '../utils/displayName'
 import { isTierZero } from '../lib/tier'
+import { useAppRefresh } from '../lib/appRefresh'
 import type { Event } from '../types/event'
 
 export function ChecklistDetail({ id, onBack, events }: { id: string; onBack: () => void; events?: Event[] }) {
-  const { checklist, names, toggle, addItems, removeItem, renameItem, rename, reattach, resetAll } = useChecklist(id)
+  const { checklist, names, reload, toggle, addItems, removeItem, renameItem, rename, reattach, resetAll } = useChecklist(id)
+  // Keep an open checklist fresh on the header refresh button / PWA focus.
+  useAppRefresh(reload)
   const { user } = useAuth()
   const [draft, setDraft] = useState('')
   const [editingTitle, setEditingTitle] = useState(false)

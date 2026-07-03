@@ -14,14 +14,15 @@ import { ScheduleOverview } from './ScheduleOverview'
 import { projectScheduleForDay } from '../services/schedulingService'
 import { dbClient } from '../lib/dbClient'
 import type { AttendanceInstanceRow, ResolvedObligationRow } from '../lib/dbClient/types'
-import { Modal, ConfirmModal, PromptModal } from './Modal'
+import { Modal, PromptModal } from './Modal'
 import { ChecklistDetail } from './ChecklistDetail'
 import { useChecklists } from '../hooks/useChecklists'
 import { useAppRefresh } from '../lib/appRefresh'
 import { Plus, ChevronUp, ChevronDown, Calendar, X, Eye } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
-import { deleteEvent, completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
+import { completeTodo, uncompleteTodo, convertEventKind } from '../services/eventService'
+import { DeleteEventModal } from './DeleteEventModal'
 import { TripsSection } from './TripsSection'
 import { supabase } from '../lib/supabase'
 
@@ -255,18 +256,11 @@ export function MyFeed() {
     setFeedError(null)
   }
 
-  const handleDeleteConfirm = async () => {
-    if (!deleteTargetId) return
-    const deletedEvent = events.find((e) => e.id === deleteTargetId) ?? null
-    const { error } = await deleteEvent(deleteTargetId)
-    if (error) {
-      setFeedError(error.message)
-      return
-    }
+  const handleDeleted = (deletedEvent: Event) => {
     setDeleteTargetId(null)
     loadEvents()
     // After a successful delete, offer to mute the sender if this was a routine-created event.
-    if (deletedEvent && isRoutineCreated(deletedEvent)) {
+    if (isRoutineCreated(deletedEvent)) {
       setMuteSenderPrompt({
         eventId: deletedEvent.id,
         senderHint: extractSenderHint(deletedEvent.description),
@@ -701,15 +695,11 @@ export function MyFeed() {
         />
       )}
 
-      <ConfirmModal
-        isOpen={!!deleteTargetId}
+      <DeleteEventModal
+        event={events.find((e) => e.id === deleteTargetId) ?? null}
         onClose={() => setDeleteTargetId(null)}
-        title="Delete event?"
-        message="This event will be permanently deleted."
-        confirmText="Delete"
-        cancelText="Cancel"
-        variant="danger"
-        onConfirm={handleDeleteConfirm}
+        onDeleted={handleDeleted}
+        onError={(msg) => setFeedError(msg)}
       />
 
       <PromptModal

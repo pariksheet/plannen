@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-07-03
+
+### Checklists
+
+- **Refresh now updates your checklists.** The header refresh button (and returning to the installed app) reloads your checklists and any open checklist, so ticks or new items added elsewhere show up without reopening the tab.
+
+### Events
+
+- **Delete a whole repeating series in one go.** Deleting an event that's part of a repeating series now asks whether to remove just that occurrence or the entire series — picking the series clears the repeating event and every session under it. Non-repeating events still delete with a single confirm as before.
+
 ## [0.10.2] - 2026-07-03
 
 ### Checklists
