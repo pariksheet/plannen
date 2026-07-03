@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-07-03
+
+### Checklists
+
+- **Search and filter items in a checklist.** Open a checklist and you can now type to find an item by text and switch between **All**, **To do**, and **Done** — each with a live count — so long packing lists and shopping lists stay manageable. The controls appear once a list has a handful of items, and a friendly note shows when nothing matches your search or filter.
+
 ## [0.10.1] - 2026-06-30
 
 ### People
