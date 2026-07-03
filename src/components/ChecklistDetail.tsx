@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { RotateCcw, Pencil, Check, X, Link2, Share2 } from 'lucide-react'
+import { RotateCcw, Pencil, Check, X, Link2, Share2, Search } from 'lucide-react'
 import { useChecklist } from '../hooks/useChecklist'
 import { useAuth } from '../context/AuthContext'
 import { ChecklistItemRow } from './ChecklistItemRow'
@@ -19,18 +19,36 @@ export function ChecklistDetail({ id, onBack, events }: { id: string; onBack: ()
   const [eventQuery, setEventQuery] = useState('')
   const [sharing, setSharing] = useState(false)
   const [confirmingReset, setConfirmingReset] = useState(false)
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<'all' | 'todo' | 'done'>('all')
   // Cancelled events aren't valid attach targets — hide them from the picker.
   const attachable = useMemo(() => (events ?? []).filter((e) => e.event_status !== 'cancelled'), [events])
   const eventMatches = useMemo(() => {
     const q = eventQuery.trim().toLowerCase()
     return (q ? attachable.filter((e) => e.title.toLowerCase().includes(q)) : attachable).slice(0, 30)
   }, [attachable, eventQuery])
+  // Search text + checked/unchecked filter applied to the rendered item list.
+  const visibleItems = useMemo(() => {
+    const source = checklist?.items ?? []
+    const q = query.trim().toLowerCase()
+    return source.filter((it) => {
+      const checked = it.checked_at != null
+      if (filter === 'todo' && checked) return false
+      if (filter === 'done' && !checked) return false
+      if (q && !it.text.toLowerCase().includes(q)) return false
+      return true
+    })
+  }, [checklist, query, filter])
   if (!checklist) return <div className="py-12 text-center text-gray-400">Loading…</div>
   const meId = user?.id ?? null
   const isOwner = checklist.created_by === meId
   const creator = isOwner ? 'you' : displayUserLabel(names[checklist.created_by] ?? { id: checklist.created_by })
   const items = checklist.items ?? []
-  const hasChecked = items.some((i) => i.checked_at != null)
+  const doneCount = items.filter((i) => i.checked_at != null).length
+  const todoCount = items.length - doneCount
+  const hasChecked = doneCount > 0
+  // Only surface search + filter once a list is long enough to be worth it.
+  const showControls = items.length >= 5
   const submit = async () => {
     const texts = draft.split('\n').map((t) => t.trim()).filter(Boolean)
     if (texts.length) { await addItems(texts); setDraft('') }
@@ -140,11 +158,47 @@ export function ChecklistDetail({ id, onBack, events }: { id: string; onBack: ()
           )}
         </div>
       </div>
+      {showControls && (
+        <div className="mb-3 space-y-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search items…"
+              aria-label="Search checklist items"
+              className="w-full pl-8 pr-3 py-2 min-h-[40px] text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+          <div className="flex items-center gap-1.5" role="group" aria-label="Filter items by status">
+            {([['all', 'All', items.length], ['todo', 'To do', todoCount], ['done', 'Done', doneCount]] as const).map(([key, label, count]) => {
+              const active = filter === key
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setFilter(key)}
+                  aria-pressed={active}
+                  className={`text-xs font-medium rounded-full px-3 py-1.5 border ${active ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                >
+                  {label} <span className={active ? 'text-indigo-400' : 'text-gray-400'}>{count}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
       <ul className="space-y-1">
-        {items.map((it) => (
+        {visibleItems.map((it) => (
           <ChecklistItemRow key={it.id} item={it} names={names} meId={meId} onToggle={toggle} onDelete={removeItem} onRename={renameItem} />
         ))}
       </ul>
+      {items.length > 0 && visibleItems.length === 0 && (
+        <p className="py-6 text-center text-sm text-gray-400">
+          No items match{query.trim() ? ` “${query.trim()}”` : ' this filter'}.
+        </p>
+      )}
       <div className="mt-4 flex gap-2">
         <input value={draft} onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') void submit() }}
