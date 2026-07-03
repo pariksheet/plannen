@@ -211,6 +211,24 @@ export async function deleteEvent(id: string): Promise<{ error: Error | null }> 
   }
 }
 
+/**
+ * Delete a whole recurring series: the recurrence master plus every session
+ * that hangs off it. `masterEventId` must be the master (recurrence parent) id —
+ * callers derive it as `event.parent_event_id ?? event.id` so this works whether
+ * the user acted on the parent or on one of its child sessions.
+ */
+export async function deleteEventSeries(masterEventId: string): Promise<{ error: Error | null }> {
+  try {
+    const { data: childIds, error } = await getChildSessionIds(masterEventId)
+    if (error) return { error }
+    for (const childId of childIds) await dbClient.events.delete(childId)
+    await dbClient.events.delete(masterEventId)
+    return { error: null }
+  } catch (e) {
+    return { error: e instanceof Error ? e : new Error('Delete series failed') }
+  }
+}
+
 export async function getEvent(id: string): Promise<{ data: Event | null; error: Error | null }> {
   try {
     const data = await dbClient.events.get(id) as unknown as Event

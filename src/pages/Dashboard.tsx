@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { Navigation } from '../components/Navigation'
@@ -17,20 +17,23 @@ import { useChecklists } from '../hooks/useChecklists'
 import { getUserEvents } from '../services/eventService'
 import type { Event } from '../types/event'
 import { isTierZero } from '../lib/tier'
+import { useAppRefresh } from '../lib/appRefresh'
 import { X } from 'lucide-react'
 
 const PRIVACY_NOTICE_DISMISSED_KEY = 'plannen_privacy_notice_dismissed'
 
 function ChecklistsView() {
-  const { checklists, create, remove } = useChecklists()
+  const { checklists, reload, create, remove } = useChecklists()
   const [openId, setOpenId] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [events, setEvents] = useState<Event[]>([])
-  useEffect(() => {
-    let cancelled = false
-    void getUserEvents('').then(({ data }) => { if (!cancelled && data) setEvents(data) })
-    return () => { cancelled = true }
+  const loadEvents = useCallback(() => {
+    void getUserEvents('').then(({ data }) => { if (data) setEvents(data) })
   }, [])
+  useEffect(() => { loadEvents() }, [loadEvents])
+  // Wire checklists (and their attached-event titles) into the header refresh
+  // button and tab/PWA focus — otherwise the list stays stale on refresh.
+  useAppRefresh(() => { void reload(); loadEvents() })
   const eventTitleById = useMemo(
     () => Object.fromEntries(events.map((e) => [e.id, e.title])),
     [events],

@@ -6,11 +6,12 @@ import type { ChecklistRow, ChecklistItemRow as ChecklistItem } from '../lib/dbC
 
 const reattach = vi.fn()
 const resetAll = vi.fn()
+const reload = vi.fn()
 let mockChecklist: ChecklistRow
 
 vi.mock('../hooks/useChecklist', () => ({
   useChecklist: () => ({
-    checklist: mockChecklist, names: {}, reload: vi.fn(), toggle: vi.fn(),
+    checklist: mockChecklist, names: {}, reload, toggle: vi.fn(),
     addItems: vi.fn(), removeItem: vi.fn(), renameItem: vi.fn(), rename: vi.fn(),
     reattach, resetAll,
   }),
@@ -151,6 +152,20 @@ describe('ChecklistDetail search & filter', () => {
     render(<ChecklistDetail id="c1" onBack={vi.fn()} />)
     await userEvent.type(screen.getByLabelText('Search checklist items'), 'zzz')
     expect(screen.getByText(/no items match/i)).toBeInTheDocument()
+  })
+})
+
+describe('ChecklistDetail refresh', () => {
+  beforeEach(() => {
+    reload.mockClear()
+    mockChecklist = { id: 'c1', title: 'Trip prep', event_id: null, created_by: 'u1', items: [], created_at: '', updated_at: '' }
+  })
+
+  it('reloads the checklist when the global refresh event fires', () => {
+    render(<ChecklistDetail id="c1" onBack={vi.fn()} />)
+    reload.mockClear()
+    window.dispatchEvent(new Event('plannen:refresh'))
+    expect(reload).toHaveBeenCalled()
   })
 })
 

@@ -12,8 +12,8 @@ import { CalendarGrid } from './CalendarGrid'
 import { ScheduleOverview } from './ScheduleOverview'
 import { EventForm } from './EventForm'
 import { ManageGroups } from './ManageGroups'
-import { Modal, ConfirmModal } from './Modal'
-import { deleteEvent } from '../services/eventService'
+import { Modal } from './Modal'
+import { DeleteEventModal } from './DeleteEventModal'
 import { ChevronUp, Settings, Star } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useChecklists } from '../hooks/useChecklists'
@@ -258,15 +258,9 @@ export function MyGroups() {
     setShowForm(true)
   }
   const handleDeleteClick = (eventId: string) => setDeleteTargetId(eventId)
-  const handleDeleteConfirm = async () => {
-    if (!deleteTargetId) return
-    const { error: delErr } = await deleteEvent(deleteTargetId)
-    if (delErr) {
-      setError(delErr.message)
-      return
-    }
+  const handleDeleted = () => {
     setDeleteTargetId(null)
-    await refresh()
+    void refresh()
   }
 
   return (
@@ -498,15 +492,11 @@ export function MyGroups() {
         </div>
       </Modal>
 
-      <ConfirmModal
-        isOpen={!!deleteTargetId}
+      <DeleteEventModal
+        event={events.find((e) => e.id === deleteTargetId) ?? null}
         onClose={() => setDeleteTargetId(null)}
-        title="Delete event?"
-        message="This event will be permanently deleted."
-        confirmText="Delete"
-        cancelText="Cancel"
-        variant="danger"
-        onConfirm={handleDeleteConfirm}
+        onDeleted={handleDeleted}
+        onError={(msg) => setError(msg)}
       />
     </div>
   )
