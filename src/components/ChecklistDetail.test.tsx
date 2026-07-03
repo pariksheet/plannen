@@ -25,6 +25,10 @@ function checkedItem(id: string): ChecklistItem {
   return { id, checklist_id: 'c1', text: id, checked_at: '2026-01-01T00:00:00Z', checked_by: 'u1', position: 0, created_at: '', created_by: 'u1' } as ChecklistItem
 }
 
+function item(id: string, text: string, checked = false): ChecklistItem {
+  return { id, checklist_id: 'c1', text, checked_at: checked ? '2026-01-01T00:00:00Z' : null, checked_by: checked ? 'u1' : null, position: 0, created_at: '', created_by: 'u1' } as ChecklistItem
+}
+
 function ev(id: string, title: string, extra: Partial<Event> = {}): Event {
   return { id, title, start_date: '2026-07-01T00:00:00', end_date: null, event_kind: 'event', ...extra } as Event
 }
@@ -90,6 +94,63 @@ describe('ChecklistDetail reset all', () => {
     mockChecklist = { ...mockChecklist, items: [] }
     render(<ChecklistDetail id="c1" onBack={vi.fn()} />)
     expect(screen.queryByRole('button', { name: /reset all/i })).toBeNull()
+  })
+})
+
+describe('ChecklistDetail search & filter', () => {
+  const many = () => [
+    item('i1', 'Buy milk'),
+    item('i2', 'Buy bread'),
+    item('i3', 'Call dentist', true),
+    item('i4', 'Book flights'),
+    item('i5', 'Pack bags', true),
+  ]
+
+  beforeEach(() => {
+    mockChecklist = { id: 'c1', title: 'Trip prep', event_id: null, created_by: 'u1', items: many(), created_at: '', updated_at: '' }
+  })
+
+  it('hides the search & filter controls for short lists', () => {
+    mockChecklist = { ...mockChecklist, items: [item('i1', 'Buy milk'), item('i2', 'Buy bread')] }
+    render(<ChecklistDetail id="c1" onBack={vi.fn()} />)
+    expect(screen.queryByLabelText('Search checklist items')).toBeNull()
+    expect(screen.queryByRole('button', { name: /^to do/i })).toBeNull()
+  })
+
+  it('shows the controls with per-state counts once the list is long enough', () => {
+    render(<ChecklistDetail id="c1" onBack={vi.fn()} />)
+    expect(screen.getByLabelText('Search checklist items')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /all 5/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /to do 3/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /done 2/i })).toBeInTheDocument()
+  })
+
+  it('filters items by search text, case-insensitively', async () => {
+    render(<ChecklistDetail id="c1" onBack={vi.fn()} />)
+    await userEvent.type(screen.getByLabelText('Search checklist items'), 'BUY')
+    expect(screen.getByText('Buy milk')).toBeInTheDocument()
+    expect(screen.getByText('Buy bread')).toBeInTheDocument()
+    expect(screen.queryByText('Call dentist')).toBeNull()
+    expect(screen.queryByText('Book flights')).toBeNull()
+  })
+
+  it('"To do" hides checked items and "Done" shows only checked items', async () => {
+    render(<ChecklistDetail id="c1" onBack={vi.fn()} />)
+    await userEvent.click(screen.getByRole('button', { name: /to do 3/i }))
+    expect(screen.getByText('Buy milk')).toBeInTheDocument()
+    expect(screen.queryByText('Call dentist')).toBeNull()
+    expect(screen.queryByText('Pack bags')).toBeNull()
+
+    await userEvent.click(screen.getByRole('button', { name: /done 2/i }))
+    expect(screen.getByText('Call dentist')).toBeInTheDocument()
+    expect(screen.getByText('Pack bags')).toBeInTheDocument()
+    expect(screen.queryByText('Buy milk')).toBeNull()
+  })
+
+  it('shows an empty state when nothing matches', async () => {
+    render(<ChecklistDetail id="c1" onBack={vi.fn()} />)
+    await userEvent.type(screen.getByLabelText('Search checklist items'), 'zzz')
+    expect(screen.getByText(/no items match/i)).toBeInTheDocument()
   })
 })
 
