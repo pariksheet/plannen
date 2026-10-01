@@ -1,11 +1,13 @@
-// RLS regression test for the family-as-group unification (PR #48).
+// RLS regression test for event sharing visibility.
 //
-// The migration that introduced group-based event sharing rewrote the RLS on
-// event_rsvps + event_memories to allow visibility via user_in_event_group /
-// user_in_event_shared_with_users, but forgot to add the equivalent SELECT
-// policies on the plannen.events table itself. As a result, a recipient
-// could see the share-junction rows but not the events they pointed to,
-// leaving the MyGroups + MyPeople feeds empty for non-creators.
+// Originally written for the family-as-group unification (PR #48), whose
+// migration forgot the SELECT policies on plannen.events itself, so recipients
+// could see the share-junction rows but not the events they pointed to.
+// Sharing has since been unified into plannen.event_shares (migration
+// 20260617150000; the legacy event_shared_with_* tables were dropped in
+// 20260617170000), and the events SELECT policy now delegates to
+// plannen.user_can_see_event(). This test pins that a 'group' share and a
+// 'user' share in event_shares both make the event visible to the recipient.
 //
 // The seed runs as the connection's default (superuser) role so we can stage
 // rows that cross RLS boundaries. The assertion query then SET LOCAL ROLE
@@ -67,8 +69,9 @@ beforeAll(async () => {
     )
     groupSharedEventId = e1.rows[0].id
     await c.query(
-      `INSERT INTO plannen.event_shared_with_groups (event_id, group_id) VALUES ($1, $2)`,
-      [groupSharedEventId, groupId],
+      `INSERT INTO plannen.event_shares (event_id, target_type, target_id, level, created_by)
+       VALUES ($1, 'group', $2, 'awareness', $3)`,
+      [groupSharedEventId, groupId, creatorId],
     )
 
     const e2 = await c.query(
@@ -78,8 +81,9 @@ beforeAll(async () => {
     )
     directSharedEventId = e2.rows[0].id
     await c.query(
-      `INSERT INTO plannen.event_shared_with_users (event_id, user_id) VALUES ($1, $2)`,
-      [directSharedEventId, recipientId],
+      `INSERT INTO plannen.event_shares (event_id, target_type, target_id, level, created_by)
+       VALUES ($1, 'user', $2, 'awareness', $3)`,
+      [directSharedEventId, recipientId, creatorId],
     )
   } finally {
     c.release()
@@ -91,8 +95,7 @@ afterAll(async () => {
   try {
     const eventIds = [groupSharedEventId, directSharedEventId].filter(Boolean)
     if (eventIds.length > 0) {
-      await c.query('DELETE FROM plannen.event_shared_with_users WHERE event_id = ANY($1::uuid[])', [eventIds])
-      await c.query('DELETE FROM plannen.event_shared_with_groups WHERE event_id = ANY($1::uuid[])', [eventIds])
+      await c.query('DELETE FROM plannen.event_shares WHERE event_id = ANY($1::uuid[])', [eventIds])
       await c.query('DELETE FROM plannen.events WHERE id = ANY($1::uuid[])', [eventIds])
     }
     if (groupId) {
@@ -107,12 +110,12 @@ afterAll(async () => {
 })
 
 describe('events RLS — recipients can see events shared with them', () => {
-  it('a group member can SELECT an event shared with their group', async () => {
+  it('a group member can SELECT an event shared with their group via a group-target event_shares row', async () => {
     const visible = await selectEventAsRecipient(groupSharedEventId)
     expect(visible).toBe(1)
   })
 
-  it('a directly-shared user can SELECT the event via event_shared_with_users', async () => {
+  it('a directly-shared user can SELECT the event via a user-target event_shares row', async () => {
     const visible = await selectEventAsRecipient(directSharedEventId)
     expect(visible).toBe(1)
   })
