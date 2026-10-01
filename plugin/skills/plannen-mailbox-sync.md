@@ -123,8 +123,8 @@ For creates:
 
 ```
 mcp__plugin_plannen_plannen__create_event({
-  title, start_date (UTC `Z`, computed from Brussels-local time),
-  end_date  (UTC `Z`, or omit),
+  title, start_date (Brussels wall-clock, NO `Z` — see timezone rule),
+  end_date  (same form, or omit),
   location, description (must start with `Gmail-ID: <thread.id>\n\n`),
   event_kind: "event" | "reminder" | "todo",   // see "Choosing event_kind" in Step B
   event_status: "going" | "interested" | "watching" | "cancelled",
@@ -132,7 +132,7 @@ mcp__plugin_plannen_plannen__create_event({
 })
 ```
 
-Timezone rule: always emit `Z`-suffixed UTC for `start_date`/`end_date`. Brussels in CEST = UTC+2; in CET = UTC+1.
+Timezone rule: emit `start_date`/`end_date` as **timezone-naive Brussels wall-clock time** (`YYYY-MM-DDTHH:MM:SS`, no `Z`, no offset). The server converts it using the profile timezone, so you never do the CEST/CET arithmetic yourself. An all-day todo/reminder due on 28 Sep is `2026-09-28T00:00:00`. **Never emit `T00:00:00Z`** — that is UTC midnight = 01:00/02:00 Brussels, and the item lands at a bogus early-morning slot in the month view. Only pass `Z`/offset values when the email itself states an explicit UTC instant (rare).
 
 After a successful `create_event`, immediately call:
 
