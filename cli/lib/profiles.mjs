@@ -13,6 +13,7 @@ import {
   readlinkSync,
 } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const VALID_MODES = ['local_pg', 'local_sb', 'cloud_sb'];
 const PORT_STEP = 100;
@@ -219,7 +220,7 @@ export function composeEnv(name, overrides = {}, baseEnv = process.env) {
  * Port set for a (mode, offset) pair. Used by `profile create` to seed the
  * env file and by callers that need to know "where will this profile listen?".
  */
-export function portsFor(mode, portOffset) {
+export function portsFor(mode, portOffset, { supabasePorts } = {}) {
   const o = Number(portOffset) || 0;
   if (mode === 'local_pg') {
     return {
@@ -229,15 +230,55 @@ export function portsFor(mode, portOffset) {
     };
   }
   if (mode === 'local_sb') {
+    // `supabase start` only honours supabase/config.toml — a profile offset
+    // cannot move the Supabase stack, so advertise the ports it really binds.
+    // Only the web dev port (which the profile does control) is offset.
+    const sb = supabasePorts ?? readSupabasePorts();
     return {
-      PLANNEN_SUPABASE_API_PORT: String(54321 + o),
-      PLANNEN_PG_PORT: String(54322 + o),
-      PLANNEN_SUPABASE_STUDIO_PORT: String(54324 + o),
+      PLANNEN_SUPABASE_API_PORT: String(sb.api),
+      PLANNEN_PG_PORT: String(sb.db),
+      PLANNEN_SUPABASE_STUDIO_PORT: String(sb.studio),
       PLANNEN_WEB_PORT: String(4321 + o),
     };
   }
   // cloud_sb — only the local web dev port matters.
   return { PLANNEN_WEB_PORT: String(4321 + o) };
+}
+
+/** Stock ports from a fresh `supabase init`. */
+export const SUPABASE_DEFAULT_PORTS = Object.freeze({ api: 54321, db: 54322, studio: 54323 });
+
+// Resolved lazily: under the web vitest (jsdom) import.meta.url is not a
+// file: URL, and this module is pulled in transitively by tests/scripts/*.
+function repoSupabaseConfig() {
+  try {
+    return fileURLToPath(new URL('../../supabase/config.toml', import.meta.url));
+  } catch {
+    return path.resolve(process.cwd(), 'supabase', 'config.toml');
+  }
+}
+
+/**
+ * Read the [api]/[db]/[studio] `port` values from a supabase/config.toml.
+ * Minimal section-aware scan (no TOML dependency): the file is ours and the
+ * keys are plain integers. Missing file or keys fall back to the stock ports.
+ */
+export function readSupabasePorts(configPath = repoSupabaseConfig()) {
+  let text;
+  try { text = readFileSync(configPath, 'utf8'); } catch { return { ...SUPABASE_DEFAULT_PORTS }; }
+  const ports = { ...SUPABASE_DEFAULT_PORTS };
+  let section = '';
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    const sec = line.match(/^\[([^\]]+)\]/);
+    if (sec) { section = sec[1]; continue; }
+    const m = line.match(/^port\s*=\s*(\d+)/);
+    if (!m) continue;
+    if (section === 'api') ports.api = Number(m[1]);
+    else if (section === 'db') ports.db = Number(m[1]);
+    else if (section === 'studio') ports.studio = Number(m[1]);
+  }
+  return ports;
 }
 
 export function modeToTier(mode) {

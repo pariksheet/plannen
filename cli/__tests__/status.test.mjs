@@ -16,7 +16,7 @@ describe('status', () => {
 
     const code = await invokeStatus(
       { json: false },
-      { env: { PLANNEN_TIER: '0' }, probe, out },
+      { env: { PLANNEN_TIER: '0' }, probe, owner: () => null, out },
     );
 
     const joined = lines.join('');
@@ -150,5 +150,44 @@ describe('status', () => {
     const obj = JSON.parse(lines.join(''));
     // Tier 0 has pg + backend + web; tier 1 doesn't have "backend".
     expect(obj.processes.some((p) => p.name === 'backend')).toBe(true);
+  });
+});
+
+describe('status — foreign listener detection (tier 0)', () => {
+  // A Docker/colima forward on 54322 answers TCP connects, so a bare port
+  // probe reported the embedded pg "up" while it was not running at all.
+  it('reports pg as held by a foreign process when the listener is not postgres', async () => {
+    const probe = vi.fn(async () => true);
+    const owner = vi.fn((port) => (port === 54322 ? { pid: 2504, command: 'com.docker.backend' } : { pid: 1, command: 'node' }));
+    const lines = [];
+    const out = { write: (s) => lines.push(s) };
+    await invokeStatus({ json: false }, { env: { PLANNEN_TIER: '0' }, probe, owner, out });
+    const joined = lines.join('');
+    expect(joined).toMatch(/pg\s+held/i);
+    expect(joined).toMatch(/com\.docker\.backend/);
+    expect(joined).not.toMatch(/pg\s+up/i);
+    expect(joined).toMatch(/backend\s+up/i);
+  });
+
+  it('--json carries the squatter on the affected process and marks it not up', async () => {
+    const probe = vi.fn(async () => true);
+    const owner = vi.fn((port) => (port === 54322 ? { pid: 2504, command: 'ssh' } : { pid: 1, command: 'node' }));
+    const lines = [];
+    const out = { write: (s) => lines.push(s) };
+    await invokeStatus({ json: true }, { env: { PLANNEN_TIER: '0' }, probe, owner, out });
+    const parsed = JSON.parse(lines.join(''));
+    const pg = parsed.processes.find((p) => p.name === 'pg');
+    expect(pg.up).toBe(false);
+    expect(pg.squatter).toEqual({ pid: 2504, command: 'ssh' });
+    expect(parsed.processes.find((p) => p.name === 'backend').squatter).toBeUndefined();
+  });
+
+  it('trusts the probe when the owner is unknown (lsof unavailable)', async () => {
+    const probe = vi.fn(async () => true);
+    const owner = vi.fn(() => null);
+    const lines = [];
+    const out = { write: (s) => lines.push(s) };
+    await invokeStatus({ json: false }, { env: { PLANNEN_TIER: '0' }, probe, owner, out });
+    expect(lines.join('')).toMatch(/pg\s+up/i);
   });
 });
