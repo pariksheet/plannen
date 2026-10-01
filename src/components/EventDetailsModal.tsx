@@ -16,6 +16,7 @@ import { dbClient } from '../lib/dbClient'
 import type { EventProvenanceRow, EventRow } from '../lib/dbClient/types'
 import { MuteSyncDialog, type MuteSyncConfirmSpec } from './MuteSyncDialog'
 import { SweepMatchesDialog } from './SweepMatchesDialog'
+import { mapsSearchUrl } from '../utils/mapsUrl'
 
 interface EventDetailsModalProps {
   event: Event
@@ -194,7 +195,7 @@ export function EventDetailsModal({
             <div className="flex items-start gap-2">
               <MapPin className="h-4 w-4 text-gray-500 flex-shrink-0 mt-0.5" />
               <a
-                href={`https://www.google.com/maps/search/?q=${encodeURIComponent(event.location)}`}
+                href={mapsSearchUrl(event.location)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-gray-700 hover:underline break-words"

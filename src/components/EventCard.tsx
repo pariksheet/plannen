@@ -20,6 +20,7 @@ import { getWhatsAppShareUrl } from '../utils/whatsappShare'
 import { isTierZero } from '../lib/tier'
 import { isShared } from '../services/shareService'
 import type { EventStatus } from '../types/event'
+import { mapsSearchUrl } from '../utils/mapsUrl'
 
 const STATUS_BADGE: Record<EventStatus, { label: string; className: string }> = {
   watching:   { label: 'Watching',   className: 'bg-sky-100 text-sky-800' },
@@ -958,7 +959,7 @@ export function EventCard({
             <div className="flex items-center text-xs sm:text-sm text-gray-600 min-w-0">
               <MapPin className="h-3.5 w-3.5 mr-1.5 flex-shrink-0" />
               <a
-                href={`https://www.google.com/maps/search/?q=${encodeURIComponent(event.location)}`}
+                href={mapsSearchUrl(event.location)}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={(e) => e.stopPropagation()}
