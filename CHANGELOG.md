@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-10-01
+
+### Maintenance
+
+- **Tier 0 bootstrap check is green again.** A backend test for shared-event visibility still staged its fixtures through two sharing tables that were retired in June, so the from-scratch bootstrap workflow had failed on every release since. The test now uses the unified sharing table. No app behaviour changes.
+
 ## [0.10.4] - 2026-10-01
 
 ### To-dos
