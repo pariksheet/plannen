@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.10.6] - 2026-10-01
+
+### CLI
+
+- **Tier 1 profiles report the ports Supabase actually uses.** A local Supabase (Tier 1) profile advertised offset ports that `supabase start` never honours, so `plannen status` said the stack was down while it was running on the stock ports, and the profile's Studio port pointed at the mail inbox. Profiles now read the API, database and Studio ports from `supabase/config.toml`; only the web dev port is offset per profile.
+- **`plannen status` no longer mistakes another process for Plannen.** On Tier 0, a Docker or colima port forward (or an unrelated Postgres) answering on 54322 made the embedded database look "up" when it was not running. Status now checks who owns an answering port and reports `held by <process>` instead of `up`.
+- **`plannen up` prints the right web URL** for profiles with a port offset instead of always `localhost:4321`.
+
 ## [0.10.5] - 2026-10-01
 
 ### Maintenance
