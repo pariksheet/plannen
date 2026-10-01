@@ -1,4 +1,5 @@
 import type { ToolDefinition, ToolHandler, ToolModule } from '../types.ts'
+import { assertUpdatableKeys } from './_shared.ts'
 
 // ── Tool definitions (verbatim from mcp/src/index.ts:2341-2421) ───────────────
 
@@ -167,7 +168,13 @@ const createPractice: ToolHandler = async (args, ctx) => {
   return rows[0]
 }
 
+export const UPDATE_PRACTICE_FIELDS = [
+  'name', 'category', 'recurrence_mode', 'recurrence_rule', 'dtstart', 'recurrence_until',
+  'flex_period', 'flex_target', 'preferred_time_of_day', 'precise_time', 'family_member_id', 'active',
+] as const
+
 const updatePractice: ToolHandler = async (args, ctx) => {
+  assertUpdatableKeys(args as Record<string, unknown>, UPDATE_PRACTICE_FIELDS)
   const a = args as Record<string, unknown>
   const userId = ctx.userId
   const sets: string[] = []
