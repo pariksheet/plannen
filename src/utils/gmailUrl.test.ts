@@ -10,7 +10,7 @@ describe('gmailMessageUrl', () => {
     expect(gmailMessageUrl('abc123', DESKTOP_UA)).toBe(`${GMAIL_WEB_BASE}abc123`)
   })
 
-  it('iOS: plain Gmail web URL (universal links hand off to the Gmail app)', () => {
+  it('iOS: plain Gmail web URL (Gmail iOS has no message deep link; app hand-off would lose the message)', () => {
     expect(gmailMessageUrl('abc123', IOS_UA)).toBe(`${GMAIL_WEB_BASE}abc123`)
   })
 
