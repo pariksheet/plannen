@@ -16,6 +16,8 @@ import { dbClient } from '../lib/dbClient'
 import type { EventProvenanceRow, EventRow } from '../lib/dbClient/types'
 import { MuteSyncDialog, type MuteSyncConfirmSpec } from './MuteSyncDialog'
 import { SweepMatchesDialog } from './SweepMatchesDialog'
+import { mapsSearchUrl } from '../utils/mapsUrl'
+import { gmailMessageUrl } from '../utils/gmailUrl'
 
 interface EventDetailsModalProps {
   event: Event
@@ -194,7 +196,7 @@ export function EventDetailsModal({
             <div className="flex items-start gap-2">
               <MapPin className="h-4 w-4 text-gray-500 flex-shrink-0 mt-0.5" />
               <a
-                href={`https://www.google.com/maps/search/?q=${encodeURIComponent(event.location)}`}
+                href={mapsSearchUrl(event.location)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-gray-700 hover:underline break-words"
@@ -272,7 +274,7 @@ export function EventDetailsModal({
                       ?? null
                     return messageId ? (
                       <a
-                        href={`https://mail.google.com/mail/u/0/#inbox/${messageId}`}
+                        href={gmailMessageUrl(messageId)}
                         target="_blank"
                         rel="noopener noreferrer"
                         title="Open original email in Gmail"

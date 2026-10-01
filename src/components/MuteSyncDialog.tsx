@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Modal } from './Modal'
 import type { EventProvenanceRow, IgnoreRuleKind } from '../lib/dbClient/types'
+import { gmailMessageUrl } from '../utils/gmailUrl'
 
 export interface MuteSyncConfirmSpec {
   kind: IgnoreRuleKind
@@ -111,7 +112,7 @@ export function MuteSyncDialog({ isOpen, onClose, onConfirm, eventId: _eventId, 
             <p className="text-sm text-gray-600">This event has no recorded source (created before per-event provenance was added). Type the sender's email below, or open the original Gmail thread to find it:</p>
             {legacyGmailId && (
               <a
-                href={`https://mail.google.com/mail/u/0/#inbox/${legacyGmailId}`}
+                href={gmailMessageUrl(legacyGmailId)}
                 target="_blank"
                 rel="noopener noreferrer"
                 title="Open original email in Gmail to copy the sender address"

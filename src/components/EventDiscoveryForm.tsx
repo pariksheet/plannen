@@ -5,6 +5,7 @@ import { useSettings } from '../context/SettingsContext'
 import { DiscoveryResult, ScrapeResponse } from '../types/agent'
 import { EventFormData } from '../types/event'
 import { Send, Loader, MapPin } from 'lucide-react'
+import { mapsSearchUrl } from '../utils/mapsUrl'
 
 export interface EventDiscoveryFormHandle {
   resetDiscovery: () => void
@@ -248,7 +249,7 @@ export const EventDiscoveryForm = forwardRef<EventDiscoveryFormHandle, EventDisc
                     <span className="font-medium">Location:</span>
                     <span>{result.location}</span>
                     <a
-                      href={`https://www.google.com/maps/search/?q=${encodeURIComponent(result.location)}`}
+                      href={mapsSearchUrl(result.location)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center text-indigo-600 hover:text-indigo-800"

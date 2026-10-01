@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-10-01
+
+### To-dos
+
+- **Overdue is reliable again.** Creating a to-do dated in the past no longer marks it "past" behind the scenes, and updates can't set that status on a to-do either — a to-do is done only when you tick it. Open to-dos from earlier dates now always show in the Overdue section.
+- **Ticking a done to-do keeps its original date.** Completing a to-do that was already complete (bulk sweeps, repeated taps, assistant retries) no longer overwrites when it was first done.
+- **The assistant can see what's done.** Listing events over MCP now includes each to-do's completion time and accepts a `completed` filter, so "what's overdue" is answered from the real state instead of guessed from status.
+- **Mailbox to-dos land on the right time.** All-day to-dos created from your mailbox could appear at 02:00 in the month view; the sync now writes local wall-clock times so they sit at midnight like app-created ones.
+
+### Links
+
+- **Location links open correctly in Google Maps.** Tapping an event's location opened the Maps app and then showed "invalid link" on some phones; the links now use the form the Maps app expects.
+- **Gmail links open the Gmail app on Android.** Tapping the Gmail icon on an event synced from your mailbox now opens the message in the Gmail app when it's installed, instead of an in-app browser tab. iOS keeps the web view because Gmail for iOS offers no message deep link.
+
+### Sharing
+
+- **Share dialog saves again.** Saving a share with no other changes failed with "Cannot coerce the result to a single JSON object" on Supabase-backed installs. It now saves and shares as expected.
+
 ## [0.10.3] - 2026-07-03
 
 ### Checklists

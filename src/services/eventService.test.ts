@@ -71,3 +71,20 @@ describe('updateEvent payload hygiene', () => {
     expect(patch).toHaveProperty('title', 'Edited todo')
   })
 })
+
+describe('updateEvent with share-only changes (fix batch 2026-10)', () => {
+  // The share dialog changes nothing on the events row itself. After the share
+  // fields are stripped the patch would be {} — PostgREST answers an empty PATCH
+  // with zero rows and .single() then fails with "Cannot coerce the result to a
+  // single JSON object". Always send a real column so the update returns the row.
+  it('never sends an empty patch to the DB', async () => {
+    await updateEvent('e1', {
+      shared_with_friends: 'selected',
+      shared_with_user_ids: ['u2'],
+      shared_with_group_ids: [],
+    })
+    const patch = update.mock.calls[0][1]
+    expect(Object.keys(patch).length).toBeGreaterThan(0)
+    expect(patch).toHaveProperty('updated_at', expect.any(String))
+  })
+})

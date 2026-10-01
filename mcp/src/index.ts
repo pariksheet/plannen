@@ -114,7 +114,7 @@ function truncateDescription(desc: unknown, maxLen = 200): string | null {
 
 // ── Tool implementations ──────────────────────────────────────────────────────
 
-async function listEvents(args: { status?: string; limit?: number; from_date?: string; to_date?: string; fields?: 'summary' | 'full'; group_id?: string }) {
+async function listEvents(args: { status?: string; limit?: number; from_date?: string; to_date?: string; fields?: 'summary' | 'full'; group_id?: string; completed?: boolean }) {
   const [id, tz] = await Promise.all([uid(), getUserTimezone()])
   return await withUserContext(id, async (c) => {
     const where: string[] = ['created_by = $1']
@@ -123,8 +123,10 @@ async function listEvents(args: { status?: string; limit?: number; from_date?: s
     if (args.from_date) { params.push(args.from_date); where.push(`start_date >= $${params.length}`) }
     if (args.to_date) { params.push(args.to_date + 'T24:00:00'); where.push(`start_date < $${params.length}`) }
     if (args.group_id) { params.push(args.group_id); where.push(`group_id = $${params.length}`) }
+    if (args.completed === false) where.push('completed_at IS NULL')
+    if (args.completed === true) where.push('completed_at IS NOT NULL')
     params.push(args.limit ?? 10)
-    const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, subject_kind, subject_id, owner_attends, group_id, list_label
+    const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, completed_at, subject_kind, subject_id, owner_attends, group_id, list_label
                  FROM plannen.events
                  WHERE ${where.join(' AND ')}
                  ORDER BY start_date ASC
@@ -248,15 +250,20 @@ async function createEvent(args: {
   // Naive timestamps mean wall-clock time in the user's tz — never the server tz.
   const startDate = parseInUserTz(args.start_date, tz)
   const endDate = args.end_date ? parseInUserTz(args.end_date, tz) : null
-  const event_status: EventStatus =
-    args.event_status && VALID_EVENT_STATUSES.includes(args.event_status as EventStatus)
-      ? (args.event_status as EventStatus)
-      : startDate < new Date() ? 'past' : 'going'
-
   const resolvedKind =
     args.event_kind === 'reminder' || args.event_kind === 'todo' || args.event_kind === 'container'
       ? args.event_kind
       : 'event'
+
+  // Todos are done iff completed_at is set — event_status never encodes it, so a
+  // todo dated in the past stays 'going' (a 'past' todo would be invisible to
+  // overdue views while still open).
+  const requested = args.event_status && VALID_EVENT_STATUSES.includes(args.event_status as EventStatus)
+    ? (args.event_status as EventStatus)
+    : null
+  const event_status: EventStatus = resolvedKind === 'todo'
+    ? (requested && requested !== 'past' && requested !== 'missed' ? requested : 'going')
+    : (requested ?? (startDate < new Date() ? 'past' : 'going'))
 
   return await withUserContext(id, async (c) => {
     const hashtags = (args.hashtags ?? []).slice(0, 5)
@@ -373,8 +380,17 @@ async function updateEvent(args: {
     if (rest.start_date) rest.start_date = parseInUserTz(rest.start_date, tz).toISOString()
     if (rest.end_date) rest.end_date = parseInUserTz(rest.end_date, tz).toISOString()
   }
-  const entries = Object.entries(rest).filter(([, v]) => v !== undefined)
   return await withUserContext(id, async (c) => {
+    // A todo is done iff completed_at is set; 'past'/'missed' would hide an open
+    // todo from overdue views, so refuse to write them onto a todo.
+    if (rest.event_status === 'past' || rest.event_status === 'missed') {
+      const { rows: kind } = await c.query(
+        `SELECT event_kind FROM plannen.events WHERE id = $1 AND created_by = $2`,
+        [args.id, id],
+      )
+      if (kind.length > 0 && kind[0].event_kind === 'todo') rest.event_status = 'going'
+    }
+    const entries = Object.entries(rest).filter(([, v]) => v !== undefined)
     if (rest.group_id != null) {
       const { rows: tgt } = await c.query(
         `SELECT event_kind FROM plannen.events WHERE id = $1 AND created_by = $2`,
@@ -418,7 +434,9 @@ async function completeTodo(args: { id: string; completed_at?: string }) {
   const ts = args.completed_at ?? new Date().toISOString()
   return await withUserContext(uId, async (c) => {
     const { rows } = await c.query(
-      `UPDATE plannen.events SET completed_at = $1, updated_at = now()
+      // COALESCE keeps an existing completion timestamp: re-completing an
+      // already-done todo (bulk sweeps, retries) must not rewrite history.
+      `UPDATE plannen.events SET completed_at = COALESCE(completed_at, $1), updated_at = now()
        WHERE id = $2 AND created_by = $3 AND event_kind = 'todo'
        RETURNING *`,
       [ts, args.id, uId],
@@ -2981,6 +2999,11 @@ const TOOLS: Tool[] = [
         to_date: { type: 'string', description: 'ISO date to filter events starting on or before this date, e.g. 2026-05-07' },
         fields: { type: 'string', enum: ['summary', 'full'], description: 'summary (default) truncates description to 200 chars; full returns the untruncated description.' },
         group_id: { type: 'string', description: 'Return only members of this container/trip (its child events + todos). Pass the container event id. Remember to also raise limit (default 10 truncates).' },
+        completed: {
+          type: 'boolean',
+          description:
+            'Todos only: false → open (completed_at IS NULL), true → done. Omit for all. A todo is done iff completed_at is set — event_status never encodes completion.',
+        },
       },
     },
   },
