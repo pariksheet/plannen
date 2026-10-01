@@ -97,3 +97,19 @@ describe('up', () => {
     await expect(invokeUp({ profile: 'ghost' }, { env: env(), runScript, log: () => {} })).rejects.toThrow(/does not exist/);
   });
 });
+
+describe('up — final banner uses the profile web port', () => {
+  it('prints the profile PLANNEN_WEB_PORT instead of a hardcoded 4321', async () => {
+    await withProfile('p0', 'local_pg');
+    await withProfile('p1', 'local_pg'); // second profile gets a port offset
+    const { readFileSync } = await import('node:fs');
+    const { getProfileEnvPath } = await import('../lib/profiles.mjs');
+    const webPort = readFileSync(getProfileEnvPath('p1', env()), 'utf8').match(/^PLANNEN_WEB_PORT=(\d+)/m)[1];
+    expect(webPort).not.toBe('4321');
+    const { runScript } = makeRunner();
+    const logs = [];
+    await invokeUp({ profile: 'p1' }, { env: env(), runScript, log: (s) => logs.push(s) });
+    expect(logs.join('\n')).toContain(`http://localhost:${webPort}`);
+    expect(logs.join('\n')).not.toContain('http://localhost:4321');
+  });
+});

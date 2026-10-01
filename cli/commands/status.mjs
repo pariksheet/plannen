@@ -1,6 +1,7 @@
 import { defineCommand } from 'citty';
 import { probeProc as defaultProbe } from '../lib/ports.mjs';
 import { composeEnv, profileExists, resolveActiveProfile } from '../lib/profiles.mjs';
+import { portOwner as defaultPortOwner } from '../../scripts/lib/port-owner.mjs';
 
 const LOCAL = { pg: 54322, backend: 54323, supabase: 54321, web: 4321 };
 
@@ -44,8 +45,11 @@ function procFromUrl(name, raw, fallbackScheme) {
   };
 }
 
-function localProc(name, port, scheme = 'http') {
-  return { name, host: '127.0.0.1', port, scheme, url: `${scheme}://localhost:${port}` };
+function localProc(name, port, scheme = 'http', expectOwner) {
+  // `expectOwner`: regex the listening process's command must match for the
+  // port to count as ours. A Docker/colima forward or an unrelated Postgres
+  // answers TCP connects too, so a bare probe would report us "up" (#14).
+  return { name, host: '127.0.0.1', port, scheme, url: `${scheme}://localhost:${port}`, expectOwner };
 }
 
 function unsetProc(name, hint) {
@@ -57,9 +61,9 @@ function processesFor(tier, env) {
   const port = (name, fallback) => Number(env[name] ?? fallback);
   if (tier === '0') {
     return [
-      localProc('pg', port('PLANNEN_PG_PORT', LOCAL.pg), 'postgresql'),
-      localProc('backend', port('PLANNEN_BACKEND_PORT', LOCAL.backend)),
-      localProc('web', port('PLANNEN_WEB_PORT', LOCAL.web)),
+      localProc('pg', port('PLANNEN_PG_PORT', LOCAL.pg), 'postgresql', /postgres/i),
+      localProc('backend', port('PLANNEN_BACKEND_PORT', LOCAL.backend), 'http', /node/i),
+      localProc('web', port('PLANNEN_WEB_PORT', LOCAL.web), 'http', /node/i),
     ];
   }
   if (tier === '1') {
@@ -108,6 +112,7 @@ function processesFor(tier, env) {
 export async function invokeStatus(rawArgs, ctx = {}) {
   const baseEnv = ctx.env ?? process.env;
   const probe = ctx.probe ?? defaultProbe;
+  const owner = ctx.owner ?? defaultPortOwner;
   const out = ctx.out ?? process.stdout;
   const profileName = rawArgs.profile ?? resolveActiveProfile(baseEnv);
   const env = profileName && profileExists(profileName, baseEnv)
@@ -119,7 +124,13 @@ export async function invokeStatus(rawArgs, ctx = {}) {
   const results = await Promise.all(
     procs.map(async (p) => {
       if (p.configured === false) return { ...p, up: false };
-      return { ...p, up: await probe(p, 1500) };
+      const { expectOwner, ...proc } = p;
+      const up = await probe(p, 1500);
+      if (!up || !expectOwner) return { ...proc, up };
+      // Port answers — but is it our process? Unknown owner (no lsof) → trust the probe.
+      const who = owner(p.port);
+      if (who && !expectOwner.test(who.command)) return { ...proc, up: false, squatter: who };
+      return { ...proc, up };
     }),
   );
 
@@ -129,8 +140,9 @@ export async function invokeStatus(rawArgs, ctx = {}) {
     out.write(`profile: ${profileName ?? '(none)'}\n`);
     out.write(`tier: ${tier} (${mode})\n\n`);
     for (const r of results) {
-      const state = r.configured === false ? 'n/a ' : r.up ? 'up  ' : 'down';
-      out.write(`${r.name.padEnd(NAME_PAD)} ${state} ${r.url}\n`);
+      const state = r.configured === false ? 'n/a ' : r.squatter ? 'held' : r.up ? 'up  ' : 'down';
+      const note = r.squatter ? ` (held by ${r.squatter.command} pid ${r.squatter.pid} — not Plannen)` : '';
+      out.write(`${r.name.padEnd(NAME_PAD)} ${state} ${r.url}${note}\n`);
     }
   }
   return 0;

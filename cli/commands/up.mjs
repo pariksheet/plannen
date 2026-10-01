@@ -51,7 +51,7 @@ export async function invokeUp(rawArgs, ctx = {}) {
     if (rDev !== 0) return rDev;
   }
 
-  log('✓ started. Web app: http://localhost:4321  (set --no-dev to skip)');
+  log(`✓ started. Web app: http://localhost:${composed.PLANNEN_WEB_PORT ?? 4321}  (set --no-dev to skip)`);
   return 0;
 }
 
