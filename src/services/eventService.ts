@@ -167,6 +167,12 @@ export async function updateEvent(
     payload.event_status = opts.newStatus
   }
 
+  // A share-only save strips every field above and would send `{}`. PostgREST
+  // answers an empty PATCH with zero rows, so the Tier 1/2 client's .single()
+  // fails with "Cannot coerce the result to a single JSON object". Touch
+  // updated_at so the update is real and returns the row.
+  if (Object.keys(payload).length === 0) payload.updated_at = new Date().toISOString()
+
   let event: Event
   try {
     event = await dbClient.events.update(id, payload) as unknown as Event
