@@ -1,4 +1,5 @@
 import type { ToolDefinition, ToolHandler, ToolModule } from '../types.ts'
+import { assertUpdatableKeys } from './_shared.ts'
 
 // ── Tool definitions (verbatim from mcp/src/index.ts:2774-2895) ───────────────
 
@@ -219,7 +220,13 @@ const createAttendance: ToolHandler = async (args, ctx) => {
   return rows[0]
 }
 
+export const UPDATE_ATTENDANCE_FIELDS = [
+  'family_member_id', 'name', 'location_id', 'recurrence_rule', 'dtstart', 'recurrence_until',
+  'time_of_day', 'start_time', 'end_time', 'priority', 'active',
+] as const
+
 const updateAttendance: ToolHandler = async (args, ctx) => {
+  assertUpdatableKeys(args as Record<string, unknown>, UPDATE_ATTENDANCE_FIELDS)
   const a = args as { id: string } & Partial<AttendanceInput> & { active?: boolean }
   const userId = ctx.userId
   const sets: string[] = []
@@ -309,7 +316,10 @@ const createObligation: ToolHandler = async (args, ctx) => {
   return rows[0]
 }
 
+export const UPDATE_OBLIGATION_FIELDS = ['role', 'anchor', 'offset_minutes', 'location_id', 'active'] as const
+
 const updateObligation: ToolHandler = async (args, ctx) => {
+  assertUpdatableKeys(args as Record<string, unknown>, UPDATE_OBLIGATION_FIELDS)
   const a = args as { id: string } & Partial<ObligationInput> & { active?: boolean }
   const userId = ctx.userId
   const sets: string[] = []

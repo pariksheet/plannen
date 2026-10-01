@@ -17,6 +17,13 @@ import {
   type FactSource,
 } from './profileFacts.js'
 import { generateSessionDates, parseInUserTz, type RecurrenceRule } from './recurrence.js'
+import {
+  assertUpdatableKeys,
+  UPDATE_EVENT_FIELDS,
+  UPDATE_PRACTICE_FIELDS,
+  UPDATE_ATTENDANCE_FIELDS,
+  UPDATE_OBLIGATION_FIELDS,
+} from './updatableFields.js'
 import { whisperAvailable, transcribeAudioBytes, extFromContentType } from './transcribe.js'
 import { parseSourceUrl, normaliseTags, validateName, validateSourceType } from './sources.js'
 import { weekBoundaryStart, isPracticeDueOn, remainingThisPeriod } from './practices.js'
@@ -372,6 +379,7 @@ async function updateEvent(args: {
   group_id?: string | null
   list_label?: string | null
 }) {
+  assertUpdatableKeys(args, UPDATE_EVENT_FIELDS)
   const id = await uid()
   const { id: _id, ...rest } = args
   // Naive timestamps mean wall-clock time in the user's tz — never the server tz.
@@ -2025,6 +2033,7 @@ async function createPractice(args: PracticeInput) {
 }
 
 async function updatePractice(args: { id: string } & Partial<PracticeInput> & { active?: boolean }) {
+  assertUpdatableKeys(args, UPDATE_PRACTICE_FIELDS)
   const userId = await uid()
   return await withUserContext(userId, async (c) => {
     const sets: string[] = []
@@ -2152,6 +2161,7 @@ async function createAttendance(args: AttendanceInput) {
 }
 
 async function updateAttendance(args: { id: string } & Partial<AttendanceInput> & { active?: boolean }) {
+  assertUpdatableKeys(args, UPDATE_ATTENDANCE_FIELDS)
   const userId = await uid()
   return await withUserContext(userId, async (c) => {
     const sets: string[] = []
@@ -2337,6 +2347,7 @@ async function createObligation(args: ObligationInput) {
 }
 
 async function updateObligation(args: { id: string } & Partial<ObligationInput> & { active?: boolean }) {
+  assertUpdatableKeys(args, UPDATE_OBLIGATION_FIELDS)
   const userId = await uid()
   return await withUserContext(userId, async (c) => {
     const sets: string[] = []

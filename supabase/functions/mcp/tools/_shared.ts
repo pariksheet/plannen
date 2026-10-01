@@ -130,6 +130,16 @@ export function truncateDescription(desc: unknown, maxLen = 200): string | null 
 export const VALID_EVENT_STATUSES = ['watching', 'planned', 'interested', 'going', 'cancelled', 'past', 'missed'] as const
 export type EventStatus = typeof VALID_EVENT_STATUSES[number]
 
+// Update handlers build `SET <column> = $n` from argument keys, so every key
+// must be a known caller-settable column. Throws on anything else, including
+// real columns that must never be set by a caller (created_by, user_id).
+export function assertUpdatableKeys(args: Record<string, unknown>, allowed: readonly string[]): void {
+  for (const k of Object.keys(args)) {
+    if (k === 'id') continue
+    if (!allowed.includes(k)) throw new Error(`unknown field: ${k.slice(0, 64)}`)
+  }
+}
+
 // ── DB-aware helpers ──────────────────────────────────────────────────────────
 
 export async function getUserTimezone(client: PoolClient, userId: string): Promise<string> {

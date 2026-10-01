@@ -7,6 +7,7 @@ import {
   getUserTimezone,
   SLIM_EVENT_COLUMNS,
   VALID_EVENT_STATUSES,
+  assertUpdatableKeys,
   type EventStatus,
 } from './_shared.ts'
 import { generateSessionDates, parseInUserTz, type RecurrenceRule } from '../../_shared/recurrence.ts'
@@ -429,7 +430,13 @@ const createEvent: ToolHandler = async (args, ctx) => {
   return { ...slimEvent(data), source }
 }
 
+export const UPDATE_EVENT_FIELDS = [
+  'title', 'description', 'start_date', 'end_date', 'location', 'event_status', 'enrollment_url',
+  'subject_kind', 'subject_id', 'owner_attends', 'group_id', 'list_label',
+] as const
+
 const updateEvent: ToolHandler = async (args, ctx) => {
+  assertUpdatableKeys(args as Record<string, unknown>, UPDATE_EVENT_FIELDS)
   const a = args as {
     id: string
     title?: string
