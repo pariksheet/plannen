@@ -138,3 +138,54 @@ describe('todo completion visibility (fix batch 2026-10)', () => {
     expect(upd.sql).toMatch(/COALESCE\(completed_at,\s*\$1\)/i)
   })
 })
+
+describe('todo status never encodes completion (fix batch 2026-10)', () => {
+  function insertCtx() {
+    const inserts: unknown[][] = []
+    const ctx = {
+      client: {
+        query: async (sql: string, params: unknown[] = []) => {
+          if (/INSERT INTO plannen\.events/i.test(sql)) {
+            inserts.push(params)
+            return { rows: [{ id: 'e1', title: 't', start_date: '2026-06-01T10:00:00Z', event_kind: 'todo', event_status: params[6] ?? null }], rowCount: 1 }
+          }
+          return { rows: [], rowCount: 0 }
+        },
+      } as any,
+      userId: 'u1',
+    }
+    return { ctx, inserts }
+  }
+
+  it('create_event: a todo with a start_date in the past is still "going", not "past"', async () => {
+    const { ctx, inserts } = insertCtx()
+    await eventsModule.dispatch.create_event({ title: 'Pay bill', start_date: '2020-01-01T10:00:00Z', event_kind: 'todo' }, ctx)
+    expect(inserts).toHaveLength(1)
+    expect(inserts[0]).not.toContain('past')
+    expect(inserts[0]).toContain('going')
+  })
+
+  it('create_event: a plain event with a start_date in the past still derives "past"', async () => {
+    const { ctx, inserts } = insertCtx()
+    await eventsModule.dispatch.create_event({ title: 'Old show', start_date: '2020-01-01T10:00:00Z' }, ctx)
+    expect(inserts[0]).toContain('past')
+  })
+
+  it('update_event: refuses to write "past" onto a todo (coerces to going)', async () => {
+    const updates: { sql: string; params: unknown[] }[] = []
+    const ctx = {
+      client: {
+        query: async (sql: string, params: unknown[] = []) => {
+          if (/SELECT event_kind FROM plannen\.events/i.test(sql)) return { rows: [{ event_kind: 'todo' }], rowCount: 1 }
+          if (/UPDATE plannen\.events/i.test(sql)) { updates.push({ sql, params }); return { rows: [{ id: 't1', event_kind: 'todo' }], rowCount: 1 } }
+          return { rows: [], rowCount: 0 }
+        },
+      } as any,
+      userId: 'u1',
+    }
+    await eventsModule.dispatch.update_event({ id: 't1', event_status: 'past' }, ctx)
+    expect(updates).toHaveLength(1)
+    expect(updates[0].params).not.toContain('past')
+    expect(updates[0].params).toContain('going')
+  })
+})

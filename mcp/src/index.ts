@@ -250,15 +250,20 @@ async function createEvent(args: {
   // Naive timestamps mean wall-clock time in the user's tz — never the server tz.
   const startDate = parseInUserTz(args.start_date, tz)
   const endDate = args.end_date ? parseInUserTz(args.end_date, tz) : null
-  const event_status: EventStatus =
-    args.event_status && VALID_EVENT_STATUSES.includes(args.event_status as EventStatus)
-      ? (args.event_status as EventStatus)
-      : startDate < new Date() ? 'past' : 'going'
-
   const resolvedKind =
     args.event_kind === 'reminder' || args.event_kind === 'todo' || args.event_kind === 'container'
       ? args.event_kind
       : 'event'
+
+  // Todos are done iff completed_at is set — event_status never encodes it, so a
+  // todo dated in the past stays 'going' (a 'past' todo would be invisible to
+  // overdue views while still open).
+  const requested = args.event_status && VALID_EVENT_STATUSES.includes(args.event_status as EventStatus)
+    ? (args.event_status as EventStatus)
+    : null
+  const event_status: EventStatus = resolvedKind === 'todo'
+    ? (requested && requested !== 'past' && requested !== 'missed' ? requested : 'going')
+    : (requested ?? (startDate < new Date() ? 'past' : 'going'))
 
   return await withUserContext(id, async (c) => {
     const hashtags = (args.hashtags ?? []).slice(0, 5)
@@ -375,8 +380,17 @@ async function updateEvent(args: {
     if (rest.start_date) rest.start_date = parseInUserTz(rest.start_date, tz).toISOString()
     if (rest.end_date) rest.end_date = parseInUserTz(rest.end_date, tz).toISOString()
   }
-  const entries = Object.entries(rest).filter(([, v]) => v !== undefined)
   return await withUserContext(id, async (c) => {
+    // A todo is done iff completed_at is set; 'past'/'missed' would hide an open
+    // todo from overdue views, so refuse to write them onto a todo.
+    if (rest.event_status === 'past' || rest.event_status === 'missed') {
+      const { rows: kind } = await c.query(
+        `SELECT event_kind FROM plannen.events WHERE id = $1 AND created_by = $2`,
+        [args.id, id],
+      )
+      if (kind.length > 0 && kind[0].event_kind === 'todo') rest.event_status = 'going'
+    }
+    const entries = Object.entries(rest).filter(([, v]) => v !== undefined)
     if (rest.group_id != null) {
       const { rows: tgt } = await c.query(
         `SELECT event_kind FROM plannen.events WHERE id = $1 AND created_by = $2`,

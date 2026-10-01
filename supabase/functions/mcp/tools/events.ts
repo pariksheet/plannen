@@ -323,15 +323,20 @@ const createEvent: ToolHandler = async (args, ctx) => {
   // Naive timestamps mean wall-clock time in the user's tz — never the server tz.
   const startDate = parseInUserTz(a.start_date, tz)
   const endDate = a.end_date ? parseInUserTz(a.end_date, tz) : null
-  const event_status: EventStatus =
-    a.event_status && VALID_EVENT_STATUSES.includes(a.event_status as EventStatus)
-      ? (a.event_status as EventStatus)
-      : startDate < new Date() ? 'past' : 'going'
-
   const resolvedKind =
     a.event_kind === 'reminder' || a.event_kind === 'todo' || a.event_kind === 'container'
       ? a.event_kind
       : 'event'
+
+  // Todos are done iff completed_at is set — event_status never encodes it, so a
+  // todo dated in the past stays 'going' (a 'past' todo would be invisible to
+  // overdue views while still open).
+  const requested = a.event_status && VALID_EVENT_STATUSES.includes(a.event_status as EventStatus)
+    ? (a.event_status as EventStatus)
+    : null
+  const event_status: EventStatus = resolvedKind === 'todo'
+    ? (requested && requested !== 'past' && requested !== 'missed' ? requested : 'going')
+    : (requested ?? (startDate < new Date() ? 'past' : 'going'))
 
   const hashtags = (a.hashtags ?? []).slice(0, 5)
 
@@ -441,6 +446,15 @@ const updateEvent: ToolHandler = async (args, ctx) => {
     list_label?: string | null
   }
   const { id: _id, ...rest } = a
+  // A todo is done iff completed_at is set; 'past'/'missed' would hide an open
+  // todo from overdue views, so refuse to write them onto a todo.
+  if (rest.event_status === 'past' || rest.event_status === 'missed') {
+    const { rows: kind } = await ctx.client.query(
+      `SELECT event_kind FROM plannen.events WHERE id = $1 AND created_by = $2`,
+      [a.id, ctx.userId],
+    )
+    if (kind.length > 0 && kind[0].event_kind === 'todo') rest.event_status = 'going'
+  }
   if (rest.group_id != null) {
     const { rows: tgt } = await ctx.client.query(
       `SELECT event_kind FROM plannen.events WHERE id = $1 AND created_by = $2`,
