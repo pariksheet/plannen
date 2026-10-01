@@ -114,7 +114,7 @@ function truncateDescription(desc: unknown, maxLen = 200): string | null {
 
 // ── Tool implementations ──────────────────────────────────────────────────────
 
-async function listEvents(args: { status?: string; limit?: number; from_date?: string; to_date?: string; fields?: 'summary' | 'full'; group_id?: string }) {
+async function listEvents(args: { status?: string; limit?: number; from_date?: string; to_date?: string; fields?: 'summary' | 'full'; group_id?: string; completed?: boolean }) {
   const [id, tz] = await Promise.all([uid(), getUserTimezone()])
   return await withUserContext(id, async (c) => {
     const where: string[] = ['created_by = $1']
@@ -123,8 +123,10 @@ async function listEvents(args: { status?: string; limit?: number; from_date?: s
     if (args.from_date) { params.push(args.from_date); where.push(`start_date >= $${params.length}`) }
     if (args.to_date) { params.push(args.to_date + 'T24:00:00'); where.push(`start_date < $${params.length}`) }
     if (args.group_id) { params.push(args.group_id); where.push(`group_id = $${params.length}`) }
+    if (args.completed === false) where.push('completed_at IS NULL')
+    if (args.completed === true) where.push('completed_at IS NOT NULL')
     params.push(args.limit ?? 10)
-    const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, subject_kind, subject_id, owner_attends, group_id, list_label
+    const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, completed_at, subject_kind, subject_id, owner_attends, group_id, list_label
                  FROM plannen.events
                  WHERE ${where.join(' AND ')}
                  ORDER BY start_date ASC
@@ -418,7 +420,9 @@ async function completeTodo(args: { id: string; completed_at?: string }) {
   const ts = args.completed_at ?? new Date().toISOString()
   return await withUserContext(uId, async (c) => {
     const { rows } = await c.query(
-      `UPDATE plannen.events SET completed_at = $1, updated_at = now()
+      // COALESCE keeps an existing completion timestamp: re-completing an
+      // already-done todo (bulk sweeps, retries) must not rewrite history.
+      `UPDATE plannen.events SET completed_at = COALESCE(completed_at, $1), updated_at = now()
        WHERE id = $2 AND created_by = $3 AND event_kind = 'todo'
        RETURNING *`,
       [ts, args.id, uId],
@@ -2981,6 +2985,11 @@ const TOOLS: Tool[] = [
         to_date: { type: 'string', description: 'ISO date to filter events starting on or before this date, e.g. 2026-05-07' },
         fields: { type: 'string', enum: ['summary', 'full'], description: 'summary (default) truncates description to 200 chars; full returns the untruncated description.' },
         group_id: { type: 'string', description: 'Return only members of this container/trip (its child events + todos). Pass the container event id. Remember to also raise limit (default 10 truncates).' },
+        completed: {
+          type: 'boolean',
+          description:
+            'Todos only: false → open (completed_at IS NULL), true → done. Omit for all. A todo is done iff completed_at is set — event_status never encodes completion.',
+        },
       },
     },
   },

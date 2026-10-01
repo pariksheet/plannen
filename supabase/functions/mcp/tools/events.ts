@@ -43,6 +43,11 @@ const definitions: ToolDefinition[] = [
             'summary (default) truncates description to 200 chars; full returns the untruncated description.',
         },
         group_id: { type: 'string', description: 'Return only members of this container/trip (its child events + todos). Pass the container event id. Remember to also raise limit (default 10 truncates).' },
+        completed: {
+          type: 'boolean',
+          description:
+            'Todos only: false → open (completed_at IS NULL), true → done. Omit for all. A todo is done iff completed_at is set — event_status never encodes completion.',
+        },
       },
     },
   },
@@ -213,6 +218,7 @@ const listEvents: ToolHandler = async (args, ctx) => {
     to_date?: string
     fields?: 'summary' | 'full'
     group_id?: string
+    completed?: boolean
   }
   const tz = await getUserTimezone(ctx.client, ctx.userId)
   const where: string[] = ['created_by = $1']
@@ -221,8 +227,10 @@ const listEvents: ToolHandler = async (args, ctx) => {
   if (a.from_date) { params.push(a.from_date); where.push(`start_date >= $${params.length}`) }
   if (a.to_date) { params.push(a.to_date + 'T24:00:00'); where.push(`start_date < $${params.length}`) }
   if (a.group_id) { params.push(a.group_id); where.push(`group_id = $${params.length}`) }
+  if (a.completed === false) where.push('completed_at IS NULL')
+  if (a.completed === true) where.push('completed_at IS NOT NULL')
   params.push(a.limit ?? 10)
-  const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, subject_kind, subject_id, owner_attends, group_id, list_label
+  const sql = `SELECT id, title, description, start_date, end_date, location, event_kind, event_status, hashtags, enrollment_url, enrollment_deadline, completed_at, subject_kind, subject_id, owner_attends, group_id, list_label
                FROM plannen.events
                WHERE ${where.join(' AND ')}
                ORDER BY start_date ASC
@@ -481,7 +489,9 @@ const completeTodo: ToolHandler = async (args, ctx) => {
   const a = args as { id: string; completed_at?: string }
   const ts = a.completed_at ?? new Date().toISOString()
   const { rows } = await ctx.client.query(
-    `UPDATE plannen.events SET completed_at = $1, updated_at = now()
+    // COALESCE keeps an existing completion timestamp: re-completing an
+    // already-done todo (bulk sweeps, retries) must not rewrite history.
+    `UPDATE plannen.events SET completed_at = COALESCE(completed_at, $1), updated_at = now()
      WHERE id = $2 AND created_by = $3 AND event_kind = 'todo'
      RETURNING *`,
     [ts, a.id, ctx.userId],

@@ -80,3 +80,61 @@ describe('events module', () => {
     expect(result.owner_attends).toBe(false)
   })
 })
+
+describe('todo completion visibility (fix batch 2026-10)', () => {
+  function recordingCtx(rowsFor: (sql: string) => unknown[] = () => []) {
+    const queries: { sql: string; params: unknown[] }[] = []
+    const ctx = {
+      client: {
+        query: async (sql: string, params: unknown[] = []) => {
+          queries.push({ sql, params })
+          return { rows: rowsFor(sql), rowCount: 0 }
+        },
+      } as any,
+      userId: 'u1',
+    }
+    return { ctx, queries }
+  }
+
+  it('list_events selects completed_at so callers can tell done from open', async () => {
+    const { ctx, queries } = recordingCtx()
+    await eventsModule.dispatch.list_events({}, ctx)
+    const list = queries.find((q) => /FROM plannen\.events/i.test(q.sql))!
+    expect(list.sql).toMatch(/completed_at/)
+  })
+
+  it('list_events completed:false filters to open todos (completed_at IS NULL)', async () => {
+    const { ctx, queries } = recordingCtx()
+    await eventsModule.dispatch.list_events({ completed: false }, ctx)
+    const list = queries.find((q) => /FROM plannen\.events/i.test(q.sql))!
+    expect(list.sql).toMatch(/completed_at IS NULL/i)
+  })
+
+  it('list_events completed:true filters to done todos (completed_at IS NOT NULL)', async () => {
+    const { ctx, queries } = recordingCtx()
+    await eventsModule.dispatch.list_events({ completed: true }, ctx)
+    const list = queries.find((q) => /FROM plannen\.events/i.test(q.sql))!
+    expect(list.sql).toMatch(/completed_at IS NOT NULL/i)
+  })
+
+  it('list_events without completed filter does not constrain completed_at', async () => {
+    const { ctx, queries } = recordingCtx()
+    await eventsModule.dispatch.list_events({}, ctx)
+    const list = queries.find((q) => /FROM plannen\.events/i.test(q.sql))!
+    expect(list.sql).not.toMatch(/completed_at IS/i)
+  })
+
+  it('list_events schema documents the completed filter', () => {
+    const def = eventsModule.definitions.find((d) => d.name === 'list_events')!
+    expect(def.inputSchema.properties).toHaveProperty('completed')
+  })
+
+  it('complete_todo preserves an existing completed_at instead of overwriting it', async () => {
+    const { ctx, queries } = recordingCtx((sql) =>
+      /UPDATE plannen\.events/i.test(sql) ? [{ id: 't1', event_kind: 'todo', completed_at: '2026-06-01T00:00:00Z' }] : [],
+    )
+    await eventsModule.dispatch.complete_todo({ id: 't1' }, ctx)
+    const upd = queries.find((q) => /UPDATE plannen\.events/i.test(q.sql))!
+    expect(upd.sql).toMatch(/COALESCE\(completed_at,\s*\$1\)/i)
+  })
+})
