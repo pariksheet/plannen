@@ -17,6 +17,7 @@ import type { EventProvenanceRow, EventRow } from '../lib/dbClient/types'
 import { MuteSyncDialog, type MuteSyncConfirmSpec } from './MuteSyncDialog'
 import { SweepMatchesDialog } from './SweepMatchesDialog'
 import { mapsSearchUrl } from '../utils/mapsUrl'
+import { gmailMessageUrl } from '../utils/gmailUrl'
 
 interface EventDetailsModalProps {
   event: Event
@@ -273,7 +274,7 @@ export function EventDetailsModal({
                       ?? null
                     return messageId ? (
                       <a
-                        href={`https://mail.google.com/mail/u/0/#inbox/${messageId}`}
+                        href={gmailMessageUrl(messageId)}
                         target="_blank"
                         rel="noopener noreferrer"
                         title="Open original email in Gmail"
